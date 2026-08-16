@@ -22,13 +22,10 @@ OptionsSubMiscellaneous::OptionsSubMiscellaneous(vgui2::Panel *parent) :
     PrepareColorSchemesList();
 
     server_browser_init_tab_ = new vgui2::ComboBox(this, "ServerBrowserInitTab", 5, false);
-    server_browser_init_tab_->AddItem("#ServerBrowser_InternetTab", KeyValues::AutoDelete(new KeyValues("", "tab", (int)ServerBrowserTab::Internet)));
-    server_browser_init_tab_->AddItem("#ServerBrowser_FavoritesTab", KeyValues::AutoDelete(new KeyValues("", "tab", (int)ServerBrowserTab::Favorites)));
-    //server_browser_init_tab_->AddItem("#ServerBrowser_UniqueTab", KeyValues::AutoDelete(new KeyValues("", "tab", (int)ServerBrowserTab::Unique)));
-    server_browser_init_tab_->AddItem("#ServerBrowser_HistoryTab", KeyValues::AutoDelete(new KeyValues("", "tab", (int)ServerBrowserTab::History)));
+    server_browser_init_tab_->AddItem("Online", KeyValues::AutoDelete(new KeyValues("", "tab", (int)ServerBrowserTab::Favorites)));
     server_browser_init_tab_->AddItem("#ServerBrowser_LanTab", KeyValues::AutoDelete(new KeyValues("", "tab", (int)ServerBrowserTab::LAN)));
 
-    int saved_tab = miscellaneous_settings_->GetInt(OptionsSubMiscellaneous::kServerBrowserInitialTabKey, (int)ServerBrowserTab::Internet);
+    int saved_tab = miscellaneous_settings_->GetInt(OptionsSubMiscellaneous::kServerBrowserInitialTabKey, (int)ServerBrowserTab::Favorites);
     ActivateServerBrowserTab((ServerBrowserTab)saved_tab);
 
     disable_auto_open_server_browser_ = new vgui2::CheckButton(this, "DisableAutoOpenServerBrowser", "#GameUI_DisableAutoOpenServerBrowser");
@@ -56,7 +53,7 @@ void OptionsSubMiscellaneous::OnApplyChanges()
     miscellaneous_settings_->SetBool(kDisableAutoOpenServerBrowserKey, disable_auto_open_server_browser_->IsSelected());
 
     KeyValues* tab_data = server_browser_init_tab_->GetActiveItemUserData();
-    miscellaneous_settings_->SetInt(kServerBrowserInitialTabKey, tab_data ? tab_data->GetInt("tab") : (int)ServerBrowserTab::Internet);
+    miscellaneous_settings_->SetInt(kServerBrowserInitialTabKey, tab_data ? tab_data->GetInt("tab") : (int)ServerBrowserTab::Favorites);
 
     bool color_scheme_apllied = ApplyColorScheme();
 
