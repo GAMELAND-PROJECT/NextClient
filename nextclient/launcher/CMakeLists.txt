@@ -26,37 +26,9 @@ else ()
 endif ()
 
 # options
-option(NEXT_LAUNCHER_ENABLE_GAMEANALYTICS "Enable GameAnalytics support" OFF)
-set(NEXT_LAUNCHER_GAMEANALYTICS_GAME_KEY "" CACHE STRING "GameAnalytics game key")
-set(NEXT_LAUNCHER_GAMEANALYTICS_SECRET_KEY "" CACHE STRING "GameAnalytics secret key")
-
-option(NEXT_LAUNCHER_ENABLE_SENTRY "Enable Sentry support" OFF)
-set(NEXT_LAUNCHER_SENTRY_PROJECT_NAME "" CACHE STRING "Sentry project name")
-set(NEXT_LAUNCHER_SENTRY_UPLOAD_URL "" CACHE STRING "Sentry upload url (DSN)")
-set(NEXT_LAUNCHER_SENTRY_ENV "" CACHE STRING "Sentry environment")
-
-option(NEXT_LAUNCHER_ENABLE_UPDATER "Enable auto updater support" OFF)
-set(NEXT_LAUNCHER_UPDATER_CIPHER_KEY "0" CACHE STRING "Auto updater AES cipher key")
-
 # cpr configuration
 set(CPR_ENABLE_SSL ON)
 set(CPR_USE_SYSTEM_CURL ON)
-
-# gameanalytics configuration
-if (NEXT_LAUNCHER_ENABLE_GAMEANALYTICS)
-    if (VCPKG_TARGET_TRIPLET STREQUAL "x86-windows-static")
-        set(PLATFORM "win32-vc141-mt-static")
-    else ()
-        set(PLATFORM "win32-vc141-static")
-    endif ()
-    set(NO_SQLITE_SRC "NO")
-
-    add_subdirectory(dep/gs-sdk/build/cmake/gameanalytics)
-    target_compile_options(GameAnalytics PRIVATE
-            /Zc:strictStrings-
-    )
-    add_subdirectory(dep/gs-sdk/build/cmake/sqlite)
-endif ()
 
 # launcher subprojects
 add_subdirectory(src)

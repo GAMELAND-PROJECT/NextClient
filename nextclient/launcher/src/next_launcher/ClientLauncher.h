@@ -21,9 +21,6 @@
 #include <next_engine_mini/engine_mini.h>
 #include <next_gameui/IGameUINext.h>
 #include <updater_gui_app/json_data/BranchEntry.h>
-#include <updater_gui_app/UpdaterDoneStatus.h>
-#include <updater_gui_app/UpdaterFlags.h>
-#include <updater_gui_app/UpdaterResult.h>
 
 class ClientLauncher
 {
@@ -87,15 +84,9 @@ public:
     const std::optional<NextProcess>& next_process() const { return next_process_; }
 
 private:
-#ifdef UPDATER_ENABLE
-    UpdaterResult RunUpdater(UpdaterFlags updater_flags);
-#endif
-    UpdaterDoneStatus RunStartupUpdater();
-
     void PrepareEngineCommandLine();
     EngineSessionResult RunEngine();
     NextProcess BuildRestartProcess();
-    NextProcess BuildNewGameProcess();
 
     void CreateConsoleWindowAndRedirectOutput();
 

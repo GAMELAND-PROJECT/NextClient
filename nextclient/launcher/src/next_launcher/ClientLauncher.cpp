@@ -5,17 +5,8 @@
 #include <filesystem>
 #include <format>
 #include <iostream>
-#include <magic_enum/magic_enum.hpp>
 #include <string>
 #include <thread>
-
-#ifdef SENTRY_ENABLE
-#include <sentry.h>
-#endif
-
-#ifdef UPDATER_ENABLE
-#include <updater_gui_app/updater_gui_app.h>
-#endif
 
 #include <engine_launcher_api.h>
 #include <nitroapi/NitroApiInterface.h>
@@ -104,25 +95,14 @@ void ClientLauncher::Run()
 
     analytics_->SendAnalyticsEvent("startup_init_post_mutex");
 
-    UpdaterDoneStatus updater_done = RunStartupUpdater();
-
-    if (updater_done == UpdaterDoneStatus::RunGame)
+    EngineSessionResult run_result = RunEngine();
+    if (run_result == EngineSessionResult::Restart)
     {
-        EngineSessionResult run_result = RunEngine();
-
-        if (run_result == EngineSessionResult::Restart)
-        {
-            next_process_ = BuildRestartProcess();
-        }
+        next_process_ = BuildRestartProcess();
     }
 
     UninitializeAnalytics();
     UninitializeSentry();
-
-    if (updater_done == UpdaterDoneStatus::RunNewGame)
-    {
-        next_process_ = BuildNewGameProcess();
-    }
 
     if (next_process_)
     {
@@ -130,47 +110,10 @@ void ClientLauncher::Run()
     }
 }
 
-UpdaterDoneStatus ClientLauncher::RunStartupUpdater()
-{
-#ifdef UPDATER_ENABLE
-    UpdaterFlags updater_flags{};
-    updater_flags |= cmd_line_->CheckParm("-noupdate") ? UpdaterFlags::None : UpdaterFlags::Updater;
-
-    auto [updater_done, available_branches] = RunUpdater(updater_flags);
-    available_branches_ = available_branches;
-
-    return updater_done;
-#else
-    return UpdaterDoneStatus::RunGame;
-#endif
-}
-
 ClientLauncher::NextProcess ClientLauncher::BuildRestartProcess()
 {
     std::string application = GetCurrentProcessPath().string();
     std::string command_line = cmd_line_->GetCmdLine();
-
-    if (!cmd_line_->CheckParm("-noupdate"))
-    {
-        command_line += " -noupdate";
-    }
-
-    return { application, command_line };
-}
-
-ClientLauncher::NextProcess ClientLauncher::BuildNewGameProcess()
-{
-    std::string application = GetCurrentProcessPath()
-        .filename()
-        .replace_extension("")
-        .string() + "_new.exe";
-
-    std::string command_line = cmd_line_->GetCmdLine();
-
-    if (!cmd_line_->CheckParm("-noupdate"))
-    {
-        command_line += " -noupdate";
-    }
 
     return { application, command_line };
 }
@@ -343,29 +286,6 @@ void ClientLauncher::PrepareEngineCommandLine()
     if (!cmd_line_->CheckParm("-num_edicts"))
         cmd_line_->AppendParm("-num_edicts", "4096");
 }
-
-#ifdef UPDATER_ENABLE
-UpdaterResult ClientLauncher::RunUpdater(UpdaterFlags updater_flags)
-{
-    LOG(INFO) << "Start the Updater GUI App";
-    analytics_->SendAnalyticsEvent("startup_run_updater");
-
-    UpdaterResult result = RunUpdaterGuiApp(
-        user_info_client_,
-        user_storage_,
-        analytics_,
-        updater_flags,
-        config_provider_->get_value_string("language", "english"),
-        [this](NextUpdaterEvent event) {
-            analytics_->SendAnalyticsLog(AnalyticsLogType::Error, std::format("updater error, state: {}, error: {}", magic_enum::enum_name(event.state), event.error_description).c_str());
-        },
-        backend_address_resolver_);
-
-    LOG(INFO) << "Updater GUI App result: " << magic_enum::enum_name(result.done_status);
-
-    return result;
-}
-#endif
 
 void ClientLauncher::CreateConsoleWindowAndRedirectOutput()
 {
