@@ -100,9 +100,7 @@ private:
 
     char m_szGameName[128];
     char m_szModDir[128];
-    int m_iLimitAppID;
 
-    bool m_bCurrentlyConnected;
     servernetadr_t m_CurrentConnection;
 };
 

@@ -3,8 +3,6 @@
 #include "ServerContextMenu.h"
 #include "ServerListCompare.h"
 #include "ServerBrowserDialog.h"
-#include "InternetGames.h"
-
 #include <KeyValues.h>
 #include <vgui/ISchemeNext.h>
 #include <vgui/IVGui.h>

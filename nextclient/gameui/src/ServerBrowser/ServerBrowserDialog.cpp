@@ -43,7 +43,9 @@ static CServerBrowserDialog *s_InternetDlg = NULL;
 
 CServerBrowserDialog &ServerBrowserDialog()
 {
-    return *CServerBrowserDialog::GetInstance();
+    CServerBrowserDialog* dialog = CServerBrowserDialog::GetInstance();
+    assert(dialog != nullptr);
+    return *dialog;
 }
 
 CServerBrowserDialog *CServerBrowserDialog::GetInstance()
@@ -51,15 +53,23 @@ CServerBrowserDialog *CServerBrowserDialog::GetInstance()
     return s_InternetDlg;
 }
 
-CServerBrowserDialog::CServerBrowserDialog(vgui2::Panel *parent) : Frame(parent, "CServerBrowserDialog")
+CServerBrowserDialog::CServerBrowserDialog(vgui2::Panel *parent) :
+    Frame(parent, "CServerBrowserDialog"),
+    m_pGameList(nullptr),
+    m_pStatusLabel(nullptr),
+    m_pTabPanel(nullptr),
+    m_pFavorites(nullptr),
+    m_pLanGames(nullptr),
+    m_pSavedData(nullptr),
+    m_pFilterData(nullptr),
+    m_pContextMenu(nullptr),
+    m_CurrentConnection()
 {
+    assert(s_InternetDlg == nullptr);
     s_InternetDlg = this;
 
     m_szGameName[0] = 0;
     m_szModDir[0] = 0;
-    m_pSavedData = nullptr;
-    m_pFilterData = nullptr;
-    m_pFavorites = nullptr;
     LoadUserData();
 
     m_pFavorites = new CFavoriteGames(this);
@@ -71,6 +81,7 @@ CServerBrowserDialog::CServerBrowserDialog(vgui2::Panel *parent) : Frame(parent,
 
     m_pGameList = m_pFavorites;
     m_pContextMenu = new CServerContextMenu(this);
+    m_pContextMenu->SetAutoDelete(false);
     m_pContextMenu->SetVisible(false);
 
     m_pTabPanel = new PropertySheet(this, "GameTabs");
@@ -95,12 +106,25 @@ CServerBrowserDialog::CServerBrowserDialog(vgui2::Panel *parent) : Frame(parent,
 
 CServerBrowserDialog::~CServerBrowserDialog()
 {
-    delete m_pContextMenu;
-
     SaveUserData();
 
+    delete m_pContextMenu;
+    m_pContextMenu = nullptr;
+
+    if (m_pFilterData)
+    {
+        m_pFilterData->deleteThis();
+        m_pFilterData = nullptr;
+    }
+
     if (m_pSavedData)
+    {
         m_pSavedData->deleteThis();
+        m_pSavedData = nullptr;
+    }
+
+    if (s_InternetDlg == this)
+        s_InternetDlg = nullptr;
 }
 
 void CServerBrowserDialog::OnKeyCodeTyped(vgui2::KeyCode code)
@@ -150,8 +174,17 @@ void CServerBrowserDialog::Open()
 
 void CServerBrowserDialog::LoadUserData()
 {
+    if (m_pFilterData)
+    {
+        m_pFilterData->deleteThis();
+        m_pFilterData = nullptr;
+    }
+
     if (m_pSavedData)
+    {
         m_pSavedData->deleteThis();
+        m_pSavedData = nullptr;
+    }
 
     m_pSavedData = new KeyValues("ServerBrowser");
     m_pSavedData->LoadFromFile(g_pFullFileSystem, kUserSaveDataPath, "PLATFORMCONFIG");
@@ -215,11 +248,11 @@ void CServerBrowserDialog::UpdateStatusText(const char *fmt, ...)
 
     if (fmt && strlen(fmt) > 0)
     {
-        char str[1024];
+        char str[1024]{};
         va_list argptr;
-            va_start(argptr, fmt);
-        _vsnprintf(str, sizeof(str), fmt, argptr);
-            va_end(argptr);
+        va_start(argptr, fmt);
+        Q_vsnprintf(str, sizeof(str), fmt, argptr);
+        va_end(argptr);
 
         m_pStatusLabel->SetText(str);
     }
@@ -429,7 +462,6 @@ void CServerBrowserDialog::OnConnectToGame(KeyValues *pMessageValues)
     vgui2::ivgui()->PostMessage(m_pFavorites->GetVPanel(), new KeyValues("ConnectedToGame", "ip", ip, "connectionport", connectionPort), NULL);
     vgui2::ivgui()->PostMessage(m_pLanGames->GetVPanel(), new KeyValues("ConnectedToGame", "ip", ip, "connectionport", connectionPort), NULL);
 
-    m_bCurrentlyConnected = true;
 }
 
 void CServerBrowserDialog::OnDisconnectFromGame()
@@ -437,6 +469,5 @@ void CServerBrowserDialog::OnDisconnectFromGame()
     vgui2::ivgui()->PostMessage(m_pFavorites->GetVPanel(),  new KeyValues("DisconnectedFromGame"), NULL);
     vgui2::ivgui()->PostMessage(m_pLanGames->GetVPanel(),  new KeyValues("DisconnectedFromGame"), NULL);
 
-    m_bCurrentlyConnected = false;
     m_CurrentConnection = servernetadr_t();
 }

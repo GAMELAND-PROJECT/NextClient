@@ -4,7 +4,6 @@
 #include "ServerListCompare.h"
 #include "ServerBrowserDialog.h"
 #include "DialogAddServer.h"
-#include "InternetGames.h"
 #include "FileSystem.h"
 #include "utlbuffer.h"
 

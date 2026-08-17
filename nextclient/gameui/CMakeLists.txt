@@ -30,6 +30,12 @@ file(GLOB_RECURSE GAMEUI_SOURCES
         "src/*.h"
 )
 
+# These legacy server-browser pages are intentionally not part of the client.
+# Online is backed by FavoriteGames, while LAN is backed by LanGames.
+list(FILTER GAMEUI_SOURCES EXCLUDE REGEX
+        "/ServerBrowser/(FriendsGames|HistoryGames|InternetGames|SpectateGames|UniqueGames)\\.(cpp|h)$"
+)
+
 add_library(${PROJECT_NAME} SHARED
         ${GAMEUI_SOURCES}
 )
