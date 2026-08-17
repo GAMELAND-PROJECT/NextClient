@@ -73,6 +73,7 @@ if (MSVC)
             /GR- # disable rtti to reduce the library size
             /WX  # treat all warnings as error
             /EHsc # NEVER catch SEH exceptions; c functions cannot throw exceptions
+            /Z7  # keep debug information in object files; avoids a shared compiler PDB under /MP
     )
 
 endif()

@@ -38,7 +38,10 @@ set(CPR_ENABLE_SSL ON)
 
 # common compiler and linker options
 if (MSVC)
-    add_compile_options($<$<COMPILE_LANGUAGE:C,CXX>:/MP>)
+    add_compile_options(
+            $<$<COMPILE_LANGUAGE:C,CXX>:/MP>
+            $<$<COMPILE_LANGUAGE:C,CXX>:/FS> # serialize access to compiler PDB files during parallel builds
+    )
     
     string(APPEND CMAKE_C_FLAGS_RELEASE
             " /Zi"  # enables PDB generation
