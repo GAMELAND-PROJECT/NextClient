@@ -371,7 +371,6 @@ CBasePanel::CBasePanel(void) : vgui2::Panel(NULL, "BaseGameUIPanel")
     CreateBackGround();
     CreateToolbar();
     CreateMainMenuBrowser();
-
     SetMenuAlpha(0);
 
     m_pFocusParent = NULL;
@@ -725,8 +724,6 @@ void CBasePanel::CreateMainMenuBrowser() {
 
     if(m_pMainMenuBrowser->IsVisible())
         m_pGameMenu->SetParent(m_pMainMenuBrowser);
-
-    // m_pMainMenuBrowser->OpenURL("file://C:/Users/Vladislav/Desktop/test.html");
 }
 
 void CBasePanel::UpdateGameMenus(void)

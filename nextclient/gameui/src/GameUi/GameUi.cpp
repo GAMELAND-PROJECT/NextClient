@@ -220,6 +220,7 @@ void CGameUI::Start(cl_enginefuncs_s *engineFuncs, int interfaceVersion, void *s
     LoadAcceptedDomainsForJsApiFromDisk("platform/accepted_domains.txt");
 
     browserExtensionGameUiApi = new ContainerExtensionGameUiApi();
+
 }
 
 void CGameUI::Shutdown(void)
@@ -244,6 +245,7 @@ void CGameUI::Shutdown(void)
     DisconnectTier2Libraries();
 
     delete browserExtensionGameUiApi;
+
 }
 
 int CGameUI::ActivateGameUI(void)
@@ -326,6 +328,8 @@ void CGameUI::DisconnectFromServer(void)
 
 void CGameUI::HideGameUI()
 {
+    browserExtensionGameUiApi->OnHideGameUI();
+
     if (!IsInLevel())
         return;
 
@@ -346,7 +350,6 @@ void CGameUI::HideGameUI()
         g_hLoadingDialog = NULL;
     }
 
-    browserExtensionGameUiApi->OnHideGameUI();
 }
 
 bool CGameUI::IsGameUIActive(void)

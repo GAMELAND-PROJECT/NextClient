@@ -205,7 +205,6 @@ private:
     CUtlVector<CompletionItem>     m_CompletionList;
     CUtlVector<CHistoryItem>       m_CommandHistory;
 
-    class ContainerExtensionConsoleApi* browserExtensionConsoleApi;
 
     static int SortCompletionItems(void* context, const void *a, const void *b) 
     {

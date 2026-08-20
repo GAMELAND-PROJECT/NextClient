@@ -34,7 +34,6 @@ file(GLOB_RECURSE GAMEUI_SOURCES
 list(FILTER GAMEUI_SOURCES EXCLUDE REGEX
         "ServerBrowser/(InternetGames|HistoryGames|FriendsGames|SpectateGames|UniqueGames)\\.cpp$"
 )
-
 add_library(${PROJECT_NAME} SHARED
         ${GAMEUI_SOURCES}
 )

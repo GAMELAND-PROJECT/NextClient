@@ -13,7 +13,6 @@
 #include "OptionsDialog.h"
 #include "KeyValues.h"
 #include "utlvector.h"
-
 #include "Browser/MainMenuBrowser.h"
 
 class CGameMenu;
@@ -245,7 +244,6 @@ private:
     int m_iToolBarSize;
     CToolBar *m_pToolBar;
     CMainMenuBrowser* m_pMainMenuBrowser;
-
 private:
     CPanelAnimationVar(float, m_flBackgroundFillAlpha, "m_flBackgroundFillAlpha", "0");
 

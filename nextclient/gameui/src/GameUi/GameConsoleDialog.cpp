@@ -28,7 +28,6 @@
 #include "FileSystem.h"
 #include "LoadingDialog.h"
 #include <Windows.h>
-#include "Browser/ExtensionConsoleApi.h"
 #undef PostMessage
 
 // memdbgon must be the last include file in a .cpp file!!!
@@ -232,7 +231,6 @@ CGameConsoleDialog::CGameConsoleDialog() : BaseClass(NULL, "GameConsole", false)
     m_bAutoCompleteMode = false;
     m_szPartialText[0] = 0;
 
-    browserExtensionConsoleApi = new ContainerExtensionConsoleApi(); 
 }
 
 //-----------------------------------------------------------------------------
@@ -240,7 +238,6 @@ CGameConsoleDialog::CGameConsoleDialog() : BaseClass(NULL, "GameConsole", false)
 //-----------------------------------------------------------------------------
 CGameConsoleDialog::~CGameConsoleDialog()
 {
-    delete browserExtensionConsoleApi;
 }
 
 //-----------------------------------------------------------------------------
@@ -283,29 +280,20 @@ void CGameConsoleDialog::Print(const wchar_t *begin, const wchar_t *end)
 
 void CGameConsoleDialog::ColorPrint(Color color, const char *msg)
 {
-    if (!browserExtensionConsoleApi->HandlePrint(color, std::string(msg)))
-    {
-        m_pHistory->InsertColorChange(color);
-        m_pHistory->InsertString(msg);
-    }
+    m_pHistory->InsertColorChange(color);
+    m_pHistory->InsertString(msg);
 }
 
 void CGameConsoleDialog::ColorPrint(Color color, const char *begin, const char *end)
 {
-    if (!browserExtensionConsoleApi->HandlePrint(color, std::string(begin, end)))
-    {
-        m_pHistory->InsertColorChange(color);
-        m_pHistory->InsertString(begin, end);
-    }
+    m_pHistory->InsertColorChange(color);
+    m_pHistory->InsertString(begin, end);
 }
 
 void CGameConsoleDialog::ColorPrint(Color color, const wchar_t *begin, const wchar_t *end)
 {
-    if (!browserExtensionConsoleApi->HandlePrint(color, std::wstring(begin, end)))
-    {
-        m_pHistory->InsertColorChange(color);
-        m_pHistory->InsertString(begin, end);
-    }
+    m_pHistory->InsertColorChange(color);
+    m_pHistory->InsertString(begin, end);
 }
 
 void CGameConsoleDialog::ColorPrintWithoutJsEvent(Color color, const char* msg)

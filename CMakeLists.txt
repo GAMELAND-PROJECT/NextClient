@@ -133,7 +133,15 @@ if (NOT NEXTCLIENT_BUILD_TESTS)
                 COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:vgui2> ${NEXTCLIENT_INSTALL_DIR}/vgui2.dll
                 COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_CURRENT_SOURCE_DIR}/dep/optic/bin/OptickCore.dll ${NEXTCLIENT_INSTALL_DIR}/OptickCore.dll
                 COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_SOURCE_DIR}/assets ${NEXTCLIENT_INSTALL_DIR}
-                COMMAND ${CMAKE_COMMAND} -E copy ${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/tools/sentry-native/crashpad_handler.exe ${NEXTCLIENT_INSTALL_DIR}/crashpad_handler.exe
+                COMMAND ${CMAKE_COMMAND} -E rm -f ${NEXTCLIENT_INSTALL_DIR}/crashpad_handler.exe
+                COMMAND ${CMAKE_COMMAND} -E rm -f ${NEXTCLIENT_INSTALL_DIR}/platform/defaults/MasterServer.vdf
+                COMMAND ${CMAKE_COMMAND} -E rm -f ${NEXTCLIENT_INSTALL_DIR}/platform/defaults/backend.json
         )
+
+        if (NEXT_LAUNCHER_ENABLE_SENTRY)
+            add_custom_command(TARGET BUILD_ALL POST_BUILD
+                    COMMAND ${CMAKE_COMMAND} -E copy ${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/tools/sentry-native/crashpad_handler.exe ${NEXTCLIENT_INSTALL_DIR}/crashpad_handler.exe
+            )
+        endif ()
     endif ()
 endif ()
