@@ -461,8 +461,8 @@ void CGameUI::ActivateServerBrowser(void)
 
             auto misc_settings = KeyValues::AutoDelete(OptionsSubMiscellaneous::GetSettings());
 
-            int tab = misc_settings->GetInt(OptionsSubMiscellaneous::kServerBrowserInitialTabKey, (int)ServerBrowserTab::Internet);
-            tab = std::clamp(tab, (int)ServerBrowserTab::Internet, (int)ServerBrowserTab::LAN);
+            int tab = misc_settings->GetInt(OptionsSubMiscellaneous::kServerBrowserInitialTabKey, (int)ServerBrowserTab::Favorites);
+            tab = tab == (int)ServerBrowserTab::LAN ? tab : (int)ServerBrowserTab::Favorites;
 
             g_pServerBrowser->Activate((ServerBrowserTab)tab);
         }
@@ -497,10 +497,10 @@ void CGameUI::OpenServerBrowserIfNeeded()
         return;
 
     auto misc_settings = KeyValues::AutoDelete(OptionsSubMiscellaneous::GetSettings());
-    if (!misc_settings->GetBool(OptionsSubMiscellaneous::kDisableAutoOpenServerBrowserKey))
+    if (!misc_settings->GetBool(OptionsSubMiscellaneous::kDisableAutoOpenServerBrowserKey, true))
     {
-        int tab = misc_settings->GetInt(OptionsSubMiscellaneous::kServerBrowserInitialTabKey, (int)ServerBrowserTab::Internet);
-        tab = std::clamp(tab, (int)ServerBrowserTab::Internet, (int)ServerBrowserTab::LAN);
+        int tab = misc_settings->GetInt(OptionsSubMiscellaneous::kServerBrowserInitialTabKey, (int)ServerBrowserTab::Favorites);
+        tab = tab == (int)ServerBrowserTab::LAN ? tab : (int)ServerBrowserTab::Favorites;
 
         g_pServerBrowser->Activate((ServerBrowserTab)tab);
     }

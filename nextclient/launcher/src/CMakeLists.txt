@@ -24,6 +24,8 @@ add_compile_options(
 )
 
 add_subdirectory(utils)
-add_subdirectory(gui_app_core)
-add_subdirectory(updater_gui_app)
+if (NEXT_LAUNCHER_ENABLE_UPDATER)
+    add_subdirectory(gui_app_core)
+    add_subdirectory(updater_gui_app)
+endif ()
 add_subdirectory(next_launcher)

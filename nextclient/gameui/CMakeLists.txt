@@ -30,6 +30,11 @@ file(GLOB_RECURSE GAMEUI_SOURCES
         "src/*.h"
 )
 
+# Clean client: only the native Favorites and LAN pages are shipped.
+list(FILTER GAMEUI_SOURCES EXCLUDE REGEX
+        "ServerBrowser/(InternetGames|HistoryGames|FriendsGames|SpectateGames|UniqueGames)\\.cpp$"
+)
+
 add_library(${PROJECT_NAME} SHARED
         ${GAMEUI_SOURCES}
 )

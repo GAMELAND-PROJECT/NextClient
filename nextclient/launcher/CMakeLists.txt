@@ -26,16 +26,16 @@ else ()
 endif ()
 
 # options
-option(NEXT_LAUNCHER_ENABLE_GAMEANALYTICS "Enable GameAnalytics support" OFF)
+set(NEXT_LAUNCHER_ENABLE_GAMEANALYTICS OFF CACHE BOOL "Enable GameAnalytics support" FORCE)
 set(NEXT_LAUNCHER_GAMEANALYTICS_GAME_KEY "" CACHE STRING "GameAnalytics game key")
 set(NEXT_LAUNCHER_GAMEANALYTICS_SECRET_KEY "" CACHE STRING "GameAnalytics secret key")
 
-option(NEXT_LAUNCHER_ENABLE_SENTRY "Enable Sentry support" OFF)
+set(NEXT_LAUNCHER_ENABLE_SENTRY OFF CACHE BOOL "Enable Sentry support" FORCE)
 set(NEXT_LAUNCHER_SENTRY_PROJECT_NAME "" CACHE STRING "Sentry project name")
 set(NEXT_LAUNCHER_SENTRY_UPLOAD_URL "" CACHE STRING "Sentry upload url (DSN)")
 set(NEXT_LAUNCHER_SENTRY_ENV "" CACHE STRING "Sentry environment")
 
-option(NEXT_LAUNCHER_ENABLE_UPDATER "Enable auto updater support" OFF)
+set(NEXT_LAUNCHER_ENABLE_UPDATER OFF CACHE BOOL "Enable auto updater support" FORCE)
 set(NEXT_LAUNCHER_UPDATER_CIPHER_KEY "0" CACHE STRING "Auto updater AES cipher key")
 
 # cpr configuration

@@ -8,6 +8,8 @@
 #include <magic_enum/magic_enum.hpp>
 #include <string>
 #include <thread>
+#include <avrt.h>
+#include <mmsystem.h>
 
 #ifdef SENTRY_ENABLE
 #include <sentry.h>
@@ -34,6 +36,47 @@
 
 static const char* NITRO_API_LOG_TAG = "launcher";
 
+namespace
+{
+class EnginePerformanceScope
+{
+public:
+    EnginePerformanceScope()
+    {
+        timer_period_enabled_ = timeBeginPeriod(1) == TIMERR_NOERROR;
+
+        old_process_priority_ = GetPriorityClass(GetCurrentProcess());
+        if (old_process_priority_ != 0)
+            SetPriorityClass(GetCurrentProcess(), ABOVE_NORMAL_PRIORITY_CLASS);
+
+        mmcss_handle_ = AvSetMmThreadCharacteristicsW(L"Games", &mmcss_task_index_);
+        if (mmcss_handle_)
+            AvSetMmThreadPriority(mmcss_handle_, AVRT_PRIORITY_HIGH);
+    }
+
+    ~EnginePerformanceScope()
+    {
+        if (mmcss_handle_)
+            AvRevertMmThreadCharacteristics(mmcss_handle_);
+
+        if (old_process_priority_ != 0)
+            SetPriorityClass(GetCurrentProcess(), old_process_priority_);
+
+        if (timer_period_enabled_)
+            timeEndPeriod(1);
+    }
+
+    EnginePerformanceScope(const EnginePerformanceScope&) = delete;
+    EnginePerformanceScope& operator=(const EnginePerformanceScope&) = delete;
+
+private:
+    HANDLE mmcss_handle_ = nullptr;
+    DWORD mmcss_task_index_ = 0;
+    DWORD old_process_priority_ = 0;
+    bool timer_period_enabled_ = false;
+};
+}
+
 
 ClientLauncher::ClientLauncher(HINSTANCE module_instance, const char* cmd_line) :
     module_instance_(module_instance)
@@ -49,7 +92,9 @@ ClientLauncher::ClientLauncher(HINSTANCE module_instance, const char* cmd_line) 
     user_storage_ = std::make_shared<RegistryUserStorage>(kNextClientRegistry);
     user_info_ = std::make_shared<DefaultUserInfo>(user_storage_);
     user_info_client_ = std::make_shared<next_launcher::UserInfoClient>(user_info_.get());
+#if defined(UPDATER_ENABLE) || defined(GAMEANALYTICS_ENABLE) || defined(SENTRY_ENABLE)
     backend_address_resolver_ = std::make_shared<BackendAddressResolver>(user_info_client_);
+#endif
     analytics_ = std::make_shared<Analytics>(user_info_client_, backend_address_resolver_);
     config_provider_ = std::make_shared<nitro_utils::FileConfigProvider>("user_game_config.ini");
 
@@ -276,6 +321,7 @@ ClientLauncher::EngineSessionResult ClientLauncher::RunEngine()
     LOG(INFO) << "IEngineAPI::Run";
     analytics_->AddBreadcrumb("Info", "IEngineAPI::Run");
 
+    EnginePerformanceScope performance_scope;
     EngineRunResult engine_run_result = engine->Run(
         module_instance_,
         "",

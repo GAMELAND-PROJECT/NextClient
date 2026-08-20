@@ -15,6 +15,14 @@ file(GLOB_RECURSE LAUNCHER_SOURCES
         "app.manifest"
 )
 
+# The clean client has no backend consumers (updater, telemetry, or crash upload),
+# so do not compile the resolver that probes backend addresses at startup.
+if (NOT NEXT_LAUNCHER_ENABLE_UPDATER AND
+    NOT NEXT_LAUNCHER_ENABLE_GAMEANALYTICS AND
+    NOT NEXT_LAUNCHER_ENABLE_SENTRY)
+    list(FILTER LAUNCHER_SOURCES EXCLUDE REGEX "BackendAddressResolver\\.cpp$")
+endif ()
+
 add_executable(${TARGET_NAME} WIN32
         ${LAUNCHER_SOURCES}
 )
@@ -39,6 +47,8 @@ target_link_libraries(${TARGET_NAME} PRIVATE
         CURL::libcurl
         ZLIB::ZLIB
         Dbghelp.lib
+        Avrt.lib
+        Winmm.lib
 )
 
 target_compile_definitions(${TARGET_NAME} PRIVATE

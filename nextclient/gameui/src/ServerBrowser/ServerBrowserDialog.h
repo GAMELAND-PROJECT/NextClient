@@ -15,21 +15,15 @@
 #include "utlvector.h"
 #include "IGameList.h"
 #include "serveritem.h"
-#include "UniqueGames.h"
 #include <next_gameui/IGameUiNext.h>
 #include "../IServerBrowserEx.h"
 
 #include <steam/steam_api.h>
 
-#include "FriendsGames.h"
-
 class CServerContextMenu;
 
 class CFavoriteGames;
-class CInternetGames;
-class CSpectateGames;
 class CLanGames;
-class CHistoryGames;
 class CDialogGameInfo;
 class CBaseGamesPage;
 
@@ -97,12 +91,7 @@ private:
 
     vgui2::PropertySheet *m_pTabPanel;
     CFavoriteGames *m_pFavorites;
-    CHistoryGames *m_pHistory;
-    CInternetGames *m_pInternetGames;
-    //CUniqueGames* m_pUniqueGames;
-    //CSpectateGames *m_pSpectateGames;
     CLanGames *m_pLanGames;
-    CFriendsGames *m_pFriendsGames;
 
     KeyValues *m_pSavedData;
     KeyValues *m_pFilterData;
