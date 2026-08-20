@@ -44,8 +44,6 @@ void CMainMenuBrowser::OpenURL(const char *URL) {
 
 void CMainMenuBrowser::OnThink() {
 	BaseClass::OnThink();
-
-	SetBgColor(transparent);
 }
 
 void CMainMenuBrowser::OnScreenSizeChanged(int oldWide, int oldTall) {

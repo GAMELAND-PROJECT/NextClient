@@ -290,14 +290,20 @@ int CGameUI::HasExclusiveInput(void)
 
 void CGameUI::RunFrame(void)
 {
-    int wide, tall;
-    vgui2::surface()->GetScreenSize(wide, tall);
-    BasePanel()->SetSize(wide, tall);
-
     if (BasePanel()->IsVisible())
-        BasePanel()->RunFrame();
+    {
+        int wide, tall;
+        vgui2::surface()->GetScreenSize(wide, tall);
 
-    browserExtensionGameUiApi->RunFrame();
+        int current_wide, current_tall;
+        BasePanel()->GetSize(current_wide, current_tall);
+        if (current_wide != wide || current_tall != tall)
+            BasePanel()->SetSize(wide, tall);
+
+        BasePanel()->RunFrame();
+        browserExtensionGameUiApi->RunFrame();
+    }
+
     task_run_impl_->OnUpdate();
 }
 
@@ -328,8 +334,6 @@ void CGameUI::DisconnectFromServer(void)
 
 void CGameUI::HideGameUI()
 {
-    browserExtensionGameUiApi->OnHideGameUI();
-
     if (!IsInLevel())
         return;
 
@@ -338,6 +342,8 @@ void CGameUI::HideGameUI()
 
     if (!IsGameUIActive())
         return;
+
+    browserExtensionGameUiApi->OnHideGameUI();
 
     BasePanel()->SetVisible(false);
 

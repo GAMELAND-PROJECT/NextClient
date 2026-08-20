@@ -33,7 +33,7 @@ struct quake_mode_t
 void gl_texturemode_hook_callback(cvar_t* cvar);
 
 cvar_t gl_ansio = {"gl_ansio", const_cast<char*>("16"), FCVAR_ARCHIVE};
-cvar_t gl_palette_tex = {"gl_palette_tex", const_cast<char*>("1"), FCVAR_ARCHIVE};
+cvar_t gl_palette_tex = {"gl_palette_tex", const_cast<char*>("0"), FCVAR_ARCHIVE};
 cvar_t gl_texturemode = {"gl_texturemode", const_cast<char*>("GL_LINEAR_MIPMAP_LINEAR"), FCVAR_ARCHIVE};
 cvar_t gl_picmip = {"gl_picmip", const_cast<char*>("0"), FCVAR_ARCHIVE};
 cvar_t gl_max_size = {"gl_max_size", const_cast<char*>("1024"), FCVAR_ARCHIVE};
