@@ -79,6 +79,15 @@ void S_StartDynamicSoundHook(
 {
     OPTICK_EVENT();
 
+    // Network voice owns dedicated channels and must never enter weapon/item
+    // replacement logic. Keeping this path transparent avoids interference
+    // with the engine's streaming voice cache and decoder lifecycle.
+    if (entchannel >= CHAN_NETWORKVOICE_BASE && entchannel <= CHAN_NETWORKVOICE_END)
+    {
+        next->Invoke(entnum, entchannel, sfx, origin, fvol, attenuation, flags, pitch);
+        return;
+    }
+
     sfx_t* replacement_sfx = GetReplacementSfx(entnum, entchannel, sfx);
     if (replacement_sfx)
     {

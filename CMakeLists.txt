@@ -2,6 +2,7 @@ cmake_minimum_required(VERSION 3.21)
 project(NextClient VERSION 2.5.3)
 
 set(NEXTCLIENT_ROOT ${CMAKE_CURRENT_SOURCE_DIR})
+set(USE_PROFILER OFF CACHE BOOL "Build with Optick profiler instrumentation" FORCE)
 
 # TODO do fetch curl and zlib via vcpkg, make a custom port if necessary
 set(CMAKE_MODULE_PATH
@@ -123,6 +124,7 @@ if (NOT NEXTCLIENT_BUILD_TESTS)
     if (NEXTCLIENT_INSTALL_DIR)
         add_custom_command(TARGET BUILD_ALL POST_BUILD
                 COMMENT "Installing libraries and assets to ${NEXTCLIENT_INSTALL_DIR}..."
+                COMMAND ${CMAKE_COMMAND} -E make_directory ${NEXTCLIENT_INSTALL_DIR}/cstrike/cl_dlls
                 COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:next_launcher> ${NEXTCLIENT_INSTALL_DIR}/cstrike.exe
                 COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:engine_mini> ${NEXTCLIENT_INSTALL_DIR}/next_engine_mini.dll
                 COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:filesystem_proxy> ${NEXTCLIENT_INSTALL_DIR}/FileSystem_Proxy.dll
@@ -131,12 +133,18 @@ if (NOT NEXTCLIENT_BUILD_TESTS)
                 COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:steam_api_proxy> ${NEXTCLIENT_INSTALL_DIR}/steam_api.dll
                 COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:nitro_api> ${NEXTCLIENT_INSTALL_DIR}/nitro_api2.dll
                 COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:vgui2> ${NEXTCLIENT_INSTALL_DIR}/vgui2.dll
-                COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_CURRENT_SOURCE_DIR}/dep/optic/bin/OptickCore.dll ${NEXTCLIENT_INSTALL_DIR}/OptickCore.dll
                 COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_SOURCE_DIR}/assets ${NEXTCLIENT_INSTALL_DIR}
+                COMMAND ${CMAKE_COMMAND} -E rm -f ${NEXTCLIENT_INSTALL_DIR}/OptickCore.dll
                 COMMAND ${CMAKE_COMMAND} -E rm -f ${NEXTCLIENT_INSTALL_DIR}/crashpad_handler.exe
                 COMMAND ${CMAKE_COMMAND} -E rm -f ${NEXTCLIENT_INSTALL_DIR}/platform/defaults/MasterServer.vdf
                 COMMAND ${CMAKE_COMMAND} -E rm -f ${NEXTCLIENT_INSTALL_DIR}/platform/defaults/backend.json
         )
+
+        if (USE_PROFILER)
+            add_custom_command(TARGET BUILD_ALL POST_BUILD
+                    COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_CURRENT_SOURCE_DIR}/dep/optic/bin/OptickCore.dll ${NEXTCLIENT_INSTALL_DIR}/OptickCore.dll
+            )
+        endif ()
 
         if (NEXT_LAUNCHER_ENABLE_SENTRY)
             add_custom_command(TARGET BUILD_ALL POST_BUILD
