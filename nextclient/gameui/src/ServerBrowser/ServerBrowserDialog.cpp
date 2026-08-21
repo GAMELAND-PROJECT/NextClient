@@ -77,7 +77,7 @@ CServerBrowserDialog::CServerBrowserDialog(vgui2::Panel *parent) : Frame(parent,
     m_pTabPanel = new PropertySheet(this, "GameTabs");
     m_pTabPanel->SetTabWidth(72);
 
-    m_pTabPanel->AddPage(m_pFavorites, "#ServerBrowser_FavoritesTab");
+    m_pTabPanel->AddPage(m_pFavorites, "Online");
     m_pTabPanel->AddPage(m_pLanGames, "#ServerBrowser_LanTab");
     m_pTabPanel->AddActionSignalTarget(this);
 

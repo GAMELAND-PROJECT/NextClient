@@ -22,7 +22,7 @@ OptionsSubMiscellaneous::OptionsSubMiscellaneous(vgui2::Panel *parent) :
     PrepareColorSchemesList();
 
     server_browser_init_tab_ = new vgui2::ComboBox(this, "ServerBrowserInitTab", 5, false);
-    server_browser_init_tab_->AddItem("#ServerBrowser_FavoritesTab", KeyValues::AutoDelete(new KeyValues("", "tab", (int)ServerBrowserTab::Favorites)));
+    server_browser_init_tab_->AddItem("Online", KeyValues::AutoDelete(new KeyValues("", "tab", (int)ServerBrowserTab::Favorites)));
     server_browser_init_tab_->AddItem("#ServerBrowser_LanTab", KeyValues::AutoDelete(new KeyValues("", "tab", (int)ServerBrowserTab::LAN)));
 
     int saved_tab = miscellaneous_settings_->GetInt(OptionsSubMiscellaneous::kServerBrowserInitialTabKey, (int)ServerBrowserTab::Favorites);
