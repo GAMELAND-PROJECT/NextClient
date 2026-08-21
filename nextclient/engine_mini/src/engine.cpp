@@ -148,6 +148,7 @@ cvar_t* r_drawentities;
 cvar_t* r_norefresh;
 cvar_t* r_speeds;
 cvar_t* viewmodel_fov;
+cvar_t* cl_smoke_fps_fix;
 
 bool g_bIsDedicatedServer;
 r_studio_interface_t* pStudioAPI;
@@ -653,6 +654,10 @@ static void OnGameInitialized()
     CreateInterfaceFn vgui2_factory = Sys_GetFactory("vgui2.dll");
     g_pLocalize = v.Validate((vgui2::ILocalize*)InitializeInterface(VGUI_LOCALIZE_INTERFACE_VERSION, &vgui2_factory, 1), GET_VARIABLE_NAME(localize));
     g_pLocalize->AddFile(g_pFileSystem, "resource/nextclient_%language%.txt");
+    // Language-neutral compact scoreboard symbol. Register it directly so no
+    // UTF-16 localization file or per-language duplicate is required.
+    static wchar_t kDefuseKitSymbol[] = L"\u25C6";
+    g_pLocalize->AddString("Cstrike_DEFUSE_KIT", kDefuseKitSymbol, "NextClient");
 
     KV_InitKeyValuesSystem2(vgui2_factory);
 
@@ -691,6 +696,7 @@ static void OnGameInitialized()
     }
 
     viewmodel_fov = gEngfuncs.pfnRegisterVariable("viewmodel_fov", std::to_string(90.f).c_str(), FCVAR_ARCHIVE);
+    cl_smoke_fps_fix = gEngfuncs.pfnRegisterVariable("cl_smoke_fps_fix", "1", FCVAR_ARCHIVE);
 
     CL_CreateHttpDownloadManager(g_pGameUi, g_pLocalize, g_SettingGuard);
     CL_CvarsSandboxInit();

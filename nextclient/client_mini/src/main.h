@@ -9,6 +9,7 @@ using UserMsg_SetFOVNext = nitroapi::NextHandlerInterface<int, const char*, int,
 using HUD_ProcessPlayerStateNext = nitroapi::NextHandlerInterface<void, entity_state_s*, const entity_state_s*>*;
 using HUD_ResetNext = nitroapi::NextHandlerInterface<void>*;
 using HUD_VidInitNext = nitroapi::NextHandlerInterface<int>*;
+using HUD_RedrawNext = nitroapi::NextHandlerInterface<int, float, int>*;
 using UserMsg_TextMsgNext = nitroapi::NextHandlerInterface<int, const char*, int, void*>*;
 using CL_CreateMoveNext = nitroapi::NextHandlerInterface<void, float, usercmd_s*, int>*;
 

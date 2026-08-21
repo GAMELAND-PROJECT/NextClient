@@ -3,7 +3,6 @@
 #include <ranges>
 #include <next_client_mini/client_mini.h>
 #include <parsemsg.h>
-#include <in_buttons.h>
 
 #include "camera.h"
 #include "studiorenderer.h"
@@ -39,7 +38,6 @@ std::unique_ptr<GameHud> g_GameHud;
 static std::vector<std::shared_ptr<nitroapi::Unsubscriber>> g_Unsub;
 
 cvar_t* hud_draw;
-static bool g_ScoreboardVisible;
 
 nitroapi::EngineData* eng()
 {
@@ -96,13 +94,27 @@ static void HUD_InitPost()
     ColorChatInConsolePatch();
 }
 
-static void HUD_RedrawPost(float flTime, int iIntermission, int result)
+static int HUD_RedrawHandler(float flTime, int iIntermission, HUD_RedrawNext next)
 {
-    // The custom HUD is completely occluded by these overlays. Avoid drawing
-    // it underneath them, which otherwise adds redundant work every frame.
     const bool console_visible = g_GameConsole && g_GameConsole->IsConsoleVisible();
-    if (hud_draw->value != 0.0 && !g_ScoreboardVisible && !console_visible)
+    const bool overlay_visible = console_visible;
+    const float hud_draw_value = hud_draw->value;
+
+    // Suppress both HUD layers only underneath the console. Restore the cvar
+    // immediately afterwards so user configuration remains untouched. The
+    // scoreboard intentionally keeps the complete HUD visible.
+    if (overlay_visible)
+        hud_draw->value = 0.0f;
+
+    const int result = next->Invoke(flTime, iIntermission);
+
+    if (overlay_visible)
+        hud_draw->value = hud_draw_value;
+
+    if (hud_draw_value != 0.0f && !overlay_visible)
         g_GameHud->Draw(flTime);
+
+    return result;
 }
 
 static void HUD_ResetHandler(HUD_ResetNext next)
@@ -216,8 +228,6 @@ static void CL_CreateMoveHandler(float frametime, usercmd_t* cmd, int active, CL
 
     next->Invoke(frametime, cmd, active);
 
-    g_ScoreboardVisible = active != 0 && cmd != nullptr && (cmd->buttons & IN_SCORE) != 0;
-
     CL_CreateMove_InvertMousePost(frametime, cmd, active);
 }
 
@@ -248,7 +258,7 @@ public:
         g_Unsub.emplace_back(client_data->HUD_VidInit |= HUD_VidInitHandler);
         g_Unsub.emplace_back(client_data->HUD_Reset |= HUD_ResetHandler);
         g_Unsub.emplace_back(client_data->HUD_Init += HUD_InitPost);
-        g_Unsub.emplace_back(client_data->HUD_Redraw += HUD_RedrawPost);
+        g_Unsub.emplace_back(client_data->HUD_Redraw |= HUD_RedrawHandler);
         g_Unsub.emplace_back(client_data->HUD_UpdateClientData += HUD_UpdateClientDataPost);
         g_Unsub.emplace_back(client_data->V_CalcRefdef |= Hook_V_CalcRefdef);
         g_Unsub.emplace_back(client_data->HUD_PostRunCmd += HUD_PostRunCmdPost);

@@ -104,6 +104,7 @@ extern cvar_t* r_drawentities;
 extern cvar_t* r_norefresh;
 extern cvar_t* r_speeds;
 extern cvar_t* viewmodel_fov;
+extern cvar_t* cl_smoke_fps_fix;
 
 extern bool g_bIsDedicatedServer;
 

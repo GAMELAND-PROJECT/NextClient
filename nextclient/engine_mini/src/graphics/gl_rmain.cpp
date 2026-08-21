@@ -1,5 +1,6 @@
 #include "engine.h"
 
+#include <cstring>
 #include <optick.h>
 #include <common/mem.h>
 
@@ -10,6 +11,31 @@
 #include "common/sys_dll.h"
 #include "common/cvar.h"
 #include "client/cl_main.h"
+
+namespace
+{
+constexpr float kAdaptiveSmokeDistanceSq = 256.0f * 256.0f;
+constexpr int kFullQualityNearbySmokeLayers = 6;
+
+bool ShouldSkipAdaptiveSmokeLayer(const cl_entity_t* ent, int& nearby_smoke_layers)
+{
+    if (!cl_smoke_fps_fix || cl_smoke_fps_fix->value == 0.0f || !ent || !ent->model)
+        return false;
+
+    if (std::strstr(ent->model->name, "gas_puff_01.spr") == nullptr)
+        return false;
+
+    const float dx = ent->origin[0] - r_refdef->vieworg[0];
+    const float dy = ent->origin[1] - r_refdef->vieworg[1];
+    const float dz = ent->origin[2] - r_refdef->vieworg[2];
+    if (dx * dx + dy * dy + dz * dz > kAdaptiveSmokeDistanceSq)
+        return false;
+
+    ++nearby_smoke_layers;
+    return nearby_smoke_layers > kFullQualityNearbySmokeLayers &&
+           ((nearby_smoke_layers - kFullQualityNearbySmokeLayers) & 1) != 0;
+}
+}
 
 ViewmodelFrustumCalculator g_ViewmodelFrustumCalculator;
 
@@ -288,6 +314,8 @@ void R_DrawTEntitiesOnList(qboolean clientOnly)
 {
     OPTICK_EVENT();
 
+    int nearby_smoke_layers = 0;
+
     if (r_drawentities->value == 0.0)
         return;
 
@@ -311,6 +339,9 @@ void R_DrawTEntitiesOnList(qboolean clientOnly)
                 switch (ent->model->type)
                 {
                     case mod_sprite:
+                        if (ShouldSkipAdaptiveSmokeLayer(ent, nearby_smoke_layers))
+                            break;
+
                         R_SetupAttachmentPoint(ent);
 
                         if (ent->curstate.rendermode == kRenderGlow)
