@@ -16,10 +16,13 @@ MatchmakingSteamComp::MatchmakingSteamComp()
 
 MatchmakingSteamComp::~MatchmakingSteamComp()
 {
-    for (auto& [request_id, request] : server_requests_)
-    {
-        MatchmakingSteamComp::CancelQuery(request_id);
-    }
+    std::vector<HServerListRequest> request_ids;
+    request_ids.reserve(server_requests_.size());
+    for (const auto& [request_id, request] : server_requests_)
+        request_ids.push_back(request_id);
+
+    for (const auto request_id : request_ids)
+        ReleaseRequest(request_id);
 }
 
 void MatchmakingSteamComp::CancelAllQueries()
@@ -150,6 +153,7 @@ void MatchmakingSteamComp::ReleaseRequest(HServerListRequest request_id)
     {
         auto& request_data = std::get<SteamServersListRequestData>(request);
 
+        SteamMatchmakingServers()->CancelQuery(request_data.steam_request_id);
         SteamMatchmakingServers()->ReleaseRequest(request_data.steam_request_id);
         delete request_data.steam_response_callback;
     }
@@ -178,6 +182,9 @@ gameserveritem_t* MatchmakingSteamComp::GetServerDetails(HServerListRequest requ
     }
 
     auto& request_data = std::get<ServerListRequestData>(request);
+    if (server_id < 0 || static_cast<size_t>(server_id) >= request_data.servers.size())
+        return nullptr;
+
     return &request_data.servers[server_id];
 }
 
@@ -240,7 +247,11 @@ void MatchmakingSteamComp::RefreshQuery(HServerListRequest request_id)
     {
         ct->ThrowIfCancelled();
 
-        auto& request_data = std::get<ServerListRequestData>(server_requests_[request_id]);
+        const auto request_it = server_requests_.find(request_id);
+        if (request_it == server_requests_.end() || !std::holds_alternative<ServerListRequestData>(request_it->second))
+            co_return;
+
+        const auto& request_data = std::get<ServerListRequestData>(request_it->second);
         co_await RefreshServerList(request_id, request_data.servers, request_data.response_callback, ct);
     });
 }
@@ -299,13 +310,23 @@ void MatchmakingSteamComp::RefreshServer(HServerListRequest request_id, int serv
         return;
     }
 
-    auto& request_data = std::get<ServerListRequestData>(server_requests_[request_id]);
+    auto& request_data = std::get<ServerListRequestData>(request);
+    if (server_id < 0 || static_cast<size_t>(server_id) >= request_data.servers.size())
+        return;
 
     TaskCoro::RunInMainThread([this](HServerListRequest request_id, int server_id, std::shared_ptr<CancellationToken> ct) -> result<void>
     {
         ct->ThrowIfCancelled();
 
-        servernetadr_t net_addr = std::get<ServerListRequestData>(server_requests_[request_id]).servers[server_id].m_NetAdr;
+        const auto request_it = server_requests_.find(request_id);
+        if (request_it == server_requests_.end() || !std::holds_alternative<ServerListRequestData>(request_it->second))
+            co_return;
+
+        auto& initial_request = std::get<ServerListRequestData>(request_it->second);
+        if (server_id < 0 || static_cast<size_t>(server_id) >= initial_request.servers.size())
+            co_return;
+
+        servernetadr_t net_addr = initial_request.servers[server_id].m_NetAdr;
 
         gameserveritem_t gameserver = co_await matchmaking_service_->RefreshServer(net_addr.GetIP(), net_addr.GetQueryPort());
         ct->ThrowIfCancelled();
@@ -316,6 +337,8 @@ void MatchmakingSteamComp::RefreshServer(HServerListRequest request_id, int serv
         }
 
         auto& request_data = std::get<ServerListRequestData>(server_requests_[request_id]);
+        if (static_cast<size_t>(server_id) >= request_data.servers.size())
+            co_return;
 
         if (gameserver.m_bHadSuccessfulResponse)
         {
@@ -362,10 +385,19 @@ result<void> MatchmakingSteamComp::RequestServerList(
 {
     co_await matchmaking_service_->RequestServerList(
         server_list_source,
-        [this, request_id, response_callback] (const MatchmakingService::ServerInfo& server_info)
+        [this, request_id, response_callback, ct] (const MatchmakingService::ServerInfo& server_info)
         {
+            if (ct->IsCanceled())
+                return;
             ServerAnsweredHandler(request_id, response_callback, server_info);
         }, ct);
+
+    ct->ThrowIfCancelled();
+    const auto request_it = server_requests_.find(request_id);
+    if (request_it == server_requests_.end() || !std::holds_alternative<ServerListRequestData>(request_it->second))
+        co_return;
+
+    std::get<ServerListRequestData>(request_it->second).in_progress = false;
 
     // server_requests_ and the response callback are main-thread confined
     assert(TaskCoro::IsMainThread());
@@ -376,17 +408,26 @@ result<void> MatchmakingSteamComp::RequestServerList(
 
 result<void> MatchmakingSteamComp::RefreshServerList(
     HServerListRequest request_id,
-    const std::vector<gameserveritem_t>& gameservers,
+    std::vector<gameserveritem_t> gameservers,
     ISteamMatchmakingServerListResponse* response_callback,
     std::shared_ptr<CancellationToken> ct
 )
 {
     co_await matchmaking_service_->RefreshServerList(
         gameservers,
-        [this, request_id, response_callback] (const MatchmakingService::ServerInfo& server_info)
+        [this, request_id, response_callback, ct] (const MatchmakingService::ServerInfo& server_info)
         {
+            if (ct->IsCanceled())
+                return;
             ServerAnsweredHandler(request_id, response_callback, server_info);
         }, ct);
+
+    ct->ThrowIfCancelled();
+    const auto request_it = server_requests_.find(request_id);
+    if (request_it == server_requests_.end() || !std::holds_alternative<ServerListRequestData>(request_it->second))
+        co_return;
+
+    std::get<ServerListRequestData>(request_it->second).in_progress = false;
 
     assert(TaskCoro::IsMainThread());
 
@@ -401,7 +442,11 @@ void MatchmakingSteamComp::ServerAnsweredHandler(
 {
     OPTICK_EVENT("MatchmakingSteamComp::ServerAnsweredHandler")
 
-    auto& request = server_requests_[request_id];
+    const auto request_it = server_requests_.find(request_id);
+    if (request_it == server_requests_.end())
+        return;
+
+    auto& request = request_it->second;
 
     if (std::holds_alternative<ServerListRequestData>(request))
     {

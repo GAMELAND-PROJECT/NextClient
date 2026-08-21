@@ -90,8 +90,6 @@ void CFavoriteGames::GetNewServerList()
 
 void CFavoriteGames::StopRefresh(CancelQueryReason reason)
 {
-    m_Servers.StopRefresh(reason);
-
     CBaseGamesPage::StopRefresh(reason);
 }
 
@@ -160,10 +158,20 @@ void CFavoriteGames::OnRemoveFromFavorites()
     while (m_pGameList->GetSelectedItemsCount() > 0)
     {
         int itemID = m_pGameList->GetSelectedItem(0);
-        unsigned int serverID = m_pGameList->GetItemData(itemID)->userData;
+        const auto* itemData = m_pGameList->GetItemData(itemID);
+        if (!itemData)
+        {
+            m_pGameList->RemoveItem(itemID);
+            continue;
+        }
+
+        unsigned int serverID = itemData->userData;
 
         if (serverID >= m_Servers.ServerCount())
+        {
+            m_pGameList->RemoveItem(itemID);
             continue;
+        }
 
         serveritem_t &server = m_Servers.GetServer(serverID);
 

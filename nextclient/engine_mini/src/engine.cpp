@@ -468,7 +468,13 @@ static void OnGameInitializing(void* mainwindow, HDC* pmaindc, HGLRC* pbaseRC, c
     g_Unsubs.emplace_back(eng()->CL_ReadPackets              |= [](const auto& next)                                                   { CL_ReadPackets(); });
     g_Unsubs.emplace_back(eng()->CL_RequestMissingResources  |= [](const auto& next)                                                   { return CL_RequestMissingResources(); });
     g_Unsubs.emplace_back(eng()->CL_Disconnect               |= [](const auto& next)                                                   { return CL_Disconnect(); });
-    g_Unsubs.emplace_back(eng()->Host_Map_f                  |= [](const auto& next)                                                   { Host_Map_f(); });
+    g_Unsubs.emplace_back(eng()->Host_Map_f |= [](const auto& next) {
+        // New Game turns this process into a listen server. Browser discovery
+        // must not keep UDP queries or callbacks alive during map startup.
+        if (g_pMatchmakingServers)
+            g_pMatchmakingServers->CancelAllQueries();
+        Host_Map_f();
+    });
     g_Unsubs.emplace_back(eng()->Host_FilterTime             |= [](float delay, const auto& next)                                      { return Host_FilterTime(delay); });
     g_Unsubs.emplace_back(eng()->Mod_ClearAll                |= [](const auto& next)                                                   { Mod_ClearAll(); });
     g_Unsubs.emplace_back(eng()->Mod_FindName                |= [](qboolean trackCRC, const char* name, const auto& next)              { return Mod_FindName(trackCRC, name); });

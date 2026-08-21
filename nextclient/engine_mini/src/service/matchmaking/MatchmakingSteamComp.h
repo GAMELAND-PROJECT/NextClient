@@ -52,7 +52,7 @@ namespace service::matchmaking
         );
         concurrencpp::result<void> RefreshServerList(
             HServerListRequest request_id,
-            const std::vector<gameserveritem_t>& gameservers,
+            std::vector<gameserveritem_t> gameservers,
             ISteamMatchmakingServerListResponse* response_callback,
             std::shared_ptr<taskcoro::CancellationToken> ct
         );
