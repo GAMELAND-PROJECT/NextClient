@@ -29,80 +29,20 @@ void CGameConsoleNext::Initialize(CGameConsoleDialog *console_dialog)
     });
 }
 
-void CGameConsoleNext::ColorPrintf(uint8_t r, uint8_t g, uint8_t b, const char *format, ...)
+void CGameConsoleNext::ColorPrintf(uint8_t, uint8_t, uint8_t, const char *, ...)
 {
-    char msg[4096];
-
-    va_list params;
-    va_start(params, format);
-    Q_vsnprintf(msg, sizeof(msg), format, params);
-    msg[sizeof(msg) - 1] = '\0';
-    va_end(params);
-
-    Color color(r, g, b, 255);
-
-    if (initialized_)
-    {
-        console_dialog_->ColorPrint(color, msg);
-    }
-    else
-    {
-        temp_console_buffer_.emplace_back(color, Utf8ToWstring(msg));
-    }
 }
 
-void CGameConsoleNext::ColorPrintfWide(uint8_t r, uint8_t g, uint8_t b, const wchar_t *format, ...)
+void CGameConsoleNext::ColorPrintfWide(uint8_t, uint8_t, uint8_t, const wchar_t *, ...)
 {
-    wchar_t msg[4096];
-
-    va_list params;
-    va_start(params, format);
-    int symbols_written = V_vsnwprintf(msg, sizeof(msg), format, params);
-    msg[sizeof(msg) / sizeof(wchar_t) - 1] = '\0';
-    va_end(params);
-
-    Color color(r, g, b, 255);
-
-    if (initialized_)
-    {
-        console_dialog_->ColorPrint(color, msg, msg + symbols_written);
-    }
-    else
-    {
-        temp_console_buffer_.emplace_back(color, std::wstring(msg, msg + symbols_written));
-    }
 }
 
-void CGameConsoleNext::PrintfEx(const char *format, ...)
+void CGameConsoleNext::PrintfEx(const char *, ...)
 {
-    if (!initialized_)
-        return;
-
-    char msg[4096];
-
-    va_list params;
-    va_start(params, format);
-    V_vsnprintf(msg, sizeof(msg), format, params);
-    msg[sizeof(msg) - 1] = '\0';
-    va_end(params);
-
-    Printf(msg);
 }
 
-void CGameConsoleNext::PrintfExWide(const wchar_t *format, ...)
+void CGameConsoleNext::PrintfExWide(const wchar_t *, ...)
 {
-    if (!initialized_)
-        return;
-
-    wchar_t msg[4096];
-
-    va_list params;
-    va_start(params, format);
-    V_vsnwprintf(msg, sizeof(msg) / sizeof(wchar_t), format, params);
-    msg[sizeof(msg) / sizeof(wchar_t) - 1] = '\0';
-    va_end(params);
-
-    Printf(msg);
 }
 
 void CGameConsoleNext::ExecuteTempConsoleBuffer()

@@ -2,6 +2,13 @@
 
 #include <array>
 #include <cstdlib>
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <Windows.h>
 #include <IGameConsole.h>
 #include <Registry.h>
 #include <easylogging++.h>
@@ -171,8 +178,6 @@ constexpr auto kLockedClientProfile = std::to_array<LockedCvar>({
     {"cl_lc", "1"},
     {"cl_lw", "1"},
     {"ex_interp", "0.01"},
-    {"fastsprites", "2"},
-    {"max_smokepuffs", "32"},
     {"_snd_mixahead", "0.05"},
 });
 
@@ -300,6 +305,11 @@ static void EngineMiniUninitialize()
 static void EngineMiniInitialize(nitroapi::NitroApiInterface* nitro_api, NextClientVersion next_client_version, AnalyticsInterface* analytics)
 {
     ConfigureEngineElppLogger();
+
+    // Give the game priority over ordinary desktop workloads without using
+    // REALTIME_PRIORITY_CLASS, which can starve audio, input and network threads.
+    if (!SetPriorityClass(GetCurrentProcess(), HIGH_PRIORITY_CLASS))
+        LOG(WARNING) << "Unable to set the game process priority to High (error " << GetLastError() << ")";
 
     g_pTaskCoroImpl = std::make_shared<taskcoro::TaskCoroImpl>(std::this_thread::get_id());
     taskcoro::TaskCoro::Initialize(g_pTaskCoroImpl);

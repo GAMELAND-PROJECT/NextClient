@@ -226,11 +226,14 @@ CGameConsoleDialog::CGameConsoleDialog() : BaseClass(NULL, "GameConsole", false)
     m_pEntry->SetTabPosition(1);
 
     m_pHistory = new CNoKeyboardInputRichText(this, "ConsoleHistory", m_pEntry);
-    m_pHistory->SetVerticalScrollbar(true);
+    // Keep command input available, but do not paint or lay out the live engine
+    // log over the 3D scene. RichText repainting is disproportionately costly.
+    m_pHistory->SetVisible(false);
+    m_pHistory->SetVerticalScrollbar(false);
     // An unlimited RichText history becomes progressively expensive to lay
     // out and repaint over the live 3D scene. Keep enough text for debugging
     // while bounding console-open CPU/GPU work during long sessions.
-    m_pHistory->SetMaximumCharCount(8192);
+    m_pHistory->SetMaximumCharCount(1);
 
     m_bAutoCompleteMode = false;
     m_szPartialText[0] = 0;
@@ -253,7 +256,6 @@ void CGameConsoleDialog::Activate()
     m_pEntry->RequestFocus();
     m_pEntry->IgnoreNextTextInput( false );
     m_pEntry->InvalidateLayout( false, true );
-    m_pHistory->InvalidateLayout( false, true );
 }
 
 //-----------------------------------------------------------------------------
@@ -282,43 +284,31 @@ void CGameConsoleDialog::Print(const wchar_t *begin, const wchar_t *end)
     ColorPrint(m_PrintColor, begin, end);
 }
 
-void CGameConsoleDialog::ColorPrint(Color color, const char *msg)
+void CGameConsoleDialog::ColorPrint(Color, const char *)
 {
-    m_pHistory->InsertColorChange(color);
-    m_pHistory->InsertString(msg);
 }
 
-void CGameConsoleDialog::ColorPrint(Color color, const char *begin, const char *end)
+void CGameConsoleDialog::ColorPrint(Color, const char *, const char *)
 {
-    m_pHistory->InsertColorChange(color);
-    m_pHistory->InsertString(begin, end);
 }
 
-void CGameConsoleDialog::ColorPrint(Color color, const wchar_t *begin, const wchar_t *end)
+void CGameConsoleDialog::ColorPrint(Color, const wchar_t *, const wchar_t *)
 {
-    m_pHistory->InsertColorChange(color);
-    m_pHistory->InsertString(begin, end);
 }
 
-void CGameConsoleDialog::ColorPrintWithoutJsEvent(Color color, const char* msg)
+void CGameConsoleDialog::ColorPrintWithoutJsEvent(Color, const char*)
 {
-    m_pHistory->InsertColorChange(color);
-    m_pHistory->InsertString(msg);
 }
 
-void CGameConsoleDialog::ColorPrintWithoutJsEvent(Color color, const wchar_t* msg)
+void CGameConsoleDialog::ColorPrintWithoutJsEvent(Color, const wchar_t*)
 {
-    m_pHistory->InsertColorChange(color);
-    m_pHistory->InsertString(msg);
 }
 
 //-----------------------------------------------------------------------------
 // Purpose: debug text print
 //-----------------------------------------------------------------------------
-void CGameConsoleDialog::DPrint(const char *msg)
+void CGameConsoleDialog::DPrint(const char *)
 {
-    m_pHistory->InsertColorChange(m_DPrintColor);
-    m_pHistory->InsertString(msg);
 }
 
 //-----------------------------------------------------------------------------

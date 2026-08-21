@@ -131,48 +131,16 @@ void CGameConsole::Clear()
 //-----------------------------------------------------------------------------
 // Purpose: prints a message to the console
 //-----------------------------------------------------------------------------
-void CGameConsole::Printf(const char *format, ...)
+void CGameConsole::Printf(const char *, ...)
 {
-    va_list argptr;
-    char msg[4096];
-
-        va_start(argptr, format);
-    Q_vsnprintf(msg, sizeof(msg), format, argptr);
-    msg[sizeof(msg) - 1] = 0;
-        va_end(argptr);
-
-    if (!m_bInitialized)
-    {
-        m_TempConsoleBuffer.emplace_back(msg, false);
-    }
-    else
-    {
-        m_pConsole->Print(msg);
-    }
 }
 
-void CGameConsole::PrintfWithoutJsEvent(Color color, const std::wstring& msg)
+void CGameConsole::PrintfWithoutJsEvent(Color, const std::wstring&)
 {
-    if (!m_bInitialized)
-    {
-        // I'm lazy
-    }
-    else
-    {
-        m_pConsole->ColorPrintWithoutJsEvent(color, msg.c_str());
-    }
 }
 
-void CGameConsole::PrintfWithoutJsEvent(Color color, const std::string& msg)
+void CGameConsole::PrintfWithoutJsEvent(Color, const std::string&)
 {
-    if (!m_bInitialized)
-    {
-        m_TempConsoleBuffer.emplace_back(msg, false);
-    }
-    else
-    {
-        m_pConsole->ColorPrintWithoutJsEvent(color, msg.c_str());
-    }
 }
 
 void CGameConsole::ExecuteTempConsoleBuffer()
@@ -196,25 +164,8 @@ void CGameConsole::ExecuteTempConsoleBuffer()
 //-----------------------------------------------------------------------------
 // Purpose: printes a debug message to the console
 //-----------------------------------------------------------------------------
-void CGameConsole::DPrintf(const char *format, ...)
+void CGameConsole::DPrintf(const char *, ...)
 {
-    va_list argptr;
-    char msg[4096];
-
-        va_start(argptr, format);
-    Q_vsnprintf(msg, sizeof(msg), format, argptr);
-    msg[sizeof(msg) - 1] = 0;
-        va_end(argptr);
-
-
-    if (!m_bInitialized)
-    {
-        m_TempConsoleBuffer.emplace_back(msg, true);
-    }
-    else
-    {
-        m_pConsole->DPrint(msg);
-    }
 }
 
 //-----------------------------------------------------------------------------
