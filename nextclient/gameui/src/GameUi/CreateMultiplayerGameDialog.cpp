@@ -156,7 +156,11 @@ CCreateMultiplayerGameDialog::~CCreateMultiplayerGameDialog()
 
 void CCreateMultiplayerGameDialog::OnKeyCodeTyped(vgui2::KeyCode code)
 {
-    if (!GameUI().IsInLevel() && code == vgui2::KEY_ESCAPE)
+    if (code == vgui2::KEY_ENTER || code == vgui2::KEY_PAD_ENTER)
+    {
+        OnOK(false);
+    }
+    else if (!GameUI().IsInLevel() && code == vgui2::KEY_ESCAPE)
     {
         Close();
     }
@@ -316,6 +320,10 @@ bool CCreateMultiplayerGameDialog::OnOK(bool applyOnly)
     }
 
     GameUI().NeedApplyMultiplayerGameSettings();
+
+    // The launch command is queued; hide the dialog immediately so it cannot
+    // remain over the loading/game screen or accidentally start another map.
+    Close();
 
     return true;
 }

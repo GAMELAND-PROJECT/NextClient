@@ -88,7 +88,16 @@ void CGameConsole::Activate()
         return;
 
     vgui2::surface()->RestrictPaintToSinglePanel(NULL);
+
+    // Avoid an alpha-fade repaint over every 3D frame while opening the
+    // in-game console; show it immediately and keep input responsive.
+    if (GameUI().IsInLevel())
+        m_pConsole->SetFadeEffectDisableOverride(true);
+
     m_pConsole->Activate();
+
+    if (GameUI().IsInLevel())
+        m_pConsole->SetFadeEffectDisableOverride(false);
 }
 
 //-----------------------------------------------------------------------------

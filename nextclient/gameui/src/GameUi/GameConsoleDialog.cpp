@@ -227,6 +227,10 @@ CGameConsoleDialog::CGameConsoleDialog() : BaseClass(NULL, "GameConsole", false)
 
     m_pHistory = new CNoKeyboardInputRichText(this, "ConsoleHistory", m_pEntry);
     m_pHistory->SetVerticalScrollbar(true);
+    // An unlimited RichText history becomes progressively expensive to lay
+    // out and repaint over the live 3D scene. Keep enough text for debugging
+    // while bounding console-open CPU/GPU work during long sessions.
+    m_pHistory->SetMaximumCharCount(8192);
 
     m_bAutoCompleteMode = false;
     m_szPartialText[0] = 0;

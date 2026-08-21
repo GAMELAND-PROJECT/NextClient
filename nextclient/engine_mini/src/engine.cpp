@@ -171,6 +171,8 @@ constexpr auto kLockedClientProfile = std::to_array<LockedCvar>({
     {"cl_lc", "1"},
     {"cl_lw", "1"},
     {"ex_interp", "0.01"},
+    {"fastsprites", "2"},
+    {"max_smokepuffs", "32"},
     {"_snd_mixahead", "0.05"},
 });
 

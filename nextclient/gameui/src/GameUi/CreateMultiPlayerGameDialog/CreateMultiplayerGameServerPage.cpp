@@ -6,6 +6,7 @@
 //=============================================================================
 
 #include "CreateMultiplayerGameServerPage.h"
+#include "../CreateMultiplayerGameDialog.h"
 
 #include <KeyValues.h>
 #include <vgui_controls/ComboBox.h>
@@ -21,6 +22,38 @@
 #include <tier0/memdbgon.h>
 
 #define RANDOM_MAP "< Random Map >"
+
+namespace
+{
+class CMapComboBox final : public vgui2::ComboBox
+{
+    DECLARE_CLASS_SIMPLE(CMapComboBox, vgui2::ComboBox);
+
+public:
+    CMapComboBox(vgui2::Panel* parent, vgui2::Panel* startTarget) :
+        BaseClass(parent, "MapList", 12, false),
+        startTarget_(startTarget)
+    {
+    }
+
+    void OnKeyCodeTyped(vgui2::KeyCode code) override
+    {
+        if (code == vgui2::KEY_ENTER || code == vgui2::KEY_PAD_ENTER)
+        {
+            // Let ComboBox commit its highlighted map first, then execute the
+            // dialog's normal Start Game path (validation, settings and map).
+            BaseClass::OnKeyCodeTyped(vgui2::KEY_ENTER);
+            startTarget_->OnKeyCodeTyped(vgui2::KEY_ENTER);
+            return;
+        }
+
+        BaseClass::OnKeyCodeTyped(code);
+    }
+
+private:
+    vgui2::Panel* startTarget_;
+};
+}
 
 bool CaselessStringLessThan( const CUtlSymbol &lhs, const CUtlSymbol &rhs )
 {
@@ -44,7 +77,7 @@ CCreateMultiplayerGameServerPage::CCreateMultiplayerGameServerPage(vgui2::Panel 
 //	szHostName[sizeof( szHostName ) - 1] = '\0';
 
     // we can use this if we decide we want to put "listen server" at the end of the game name
-    m_pMapList = new vgui2::ComboBox(this, "MapList", 12, false);
+    m_pMapList = new CMapComboBox(this, parent);
 
     m_pBotQuotaCombo = new vgui2::TextEntry( this, "BotQuotaCombo" );
     m_pEnableTutorCheck = new CCvarToggleCheckButton( this, "CheckButtonTutor", "#CStrike_Tutor_Enabled", "tutor_enable" );
