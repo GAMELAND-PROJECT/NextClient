@@ -96,8 +96,6 @@ protected:
     virtual void OnLoadFilter(KeyValues *filter);
     //void OnPageShow() override;
     //void OnPageHide() override;
-    void OnTick() override;
-
 protected:
     MESSAGE_FUNC(OnItemSelected, "ItemSelected");
     MESSAGE_FUNC(OnBeginConnect, "ConnectToServer");

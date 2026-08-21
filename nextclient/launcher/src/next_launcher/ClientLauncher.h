@@ -10,7 +10,9 @@
 #include "Registry.h"
 #include "CommandLine.h"
 #include "Analytics.h"
+#if defined(UPDATER_ENABLE) || defined(GAMEANALYTICS_ENABLE) || defined(SENTRY_ENABLE)
 #include "BackendAddressResolver.h"
+#endif
 
 #include <next_launcher/IUserInfo.h>
 #include <next_launcher/IUserStorage.h>
@@ -65,7 +67,9 @@ private:
     std::shared_ptr<next_launcher::UserInfoClient> user_info_client_;
     std::shared_ptr<Analytics> analytics_;
     std::shared_ptr<nitro_utils::FileConfigProvider> config_provider_;
+#if defined(UPDATER_ENABLE) || defined(GAMEANALYTICS_ENABLE) || defined(SENTRY_ENABLE)
     std::shared_ptr<BackendAddressResolver> backend_address_resolver_;
+#endif
 
     std::shared_ptr<CRegistry> hl_registry_;
     std::shared_ptr<CCommandLine> cmd_line_;
@@ -125,7 +129,8 @@ private:
     std::tuple<T*, CSysModule*> LoadModule(const char* module_name, const char* interface_version)
     {
         auto raise_error = [this](const std::string& error) {
-            analytics_->SendCrashMonitoringEvent("LoadModule Error", error.c_str(), true);
+            if (analytics_)
+                analytics_->SendCrashMonitoringEvent("LoadModule Error", error.c_str(), true);
             MessageBoxA(NULL, error.c_str(), kErrorTitle, MB_OK | MB_ICONERROR | MB_DEFAULT_DESKTOP_ONLY);
         };
 

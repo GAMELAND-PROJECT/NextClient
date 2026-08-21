@@ -177,9 +177,11 @@ void FilterLightParams()
         Cvar_DirectSet(texgamma_cvar, "2.0");
     }
 
-    if (Host_GetMaxClients() > 1 && brightness_cvar->value > 2.0)
+    // Allow a modest visibility boost from the Video settings while keeping a
+    // hard multiplayer ceiling that avoids washed-out lighting and bad ramps.
+    if (Host_GetMaxClients() > 1 && brightness_cvar->value > 3.0)
     {
-        Cvar_DirectSet(brightness_cvar, "2.0");
+        Cvar_DirectSet(brightness_cvar, "3.0");
     }
 
     if (gamma_cvar->value < 1.8)
@@ -213,9 +215,9 @@ void FilterLightParams()
     {
         Cvar_DirectSet(brightness_cvar, "0.0");
     }
-    else if (brightness_cvar->value > 100.0)
+    else if (brightness_cvar->value > 3.0)
     {
-        Cvar_DirectSet(brightness_cvar, "100.0");
+        Cvar_DirectSet(brightness_cvar, "3.0");
     }
 }
 

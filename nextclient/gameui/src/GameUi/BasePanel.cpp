@@ -370,7 +370,6 @@ CBasePanel::CBasePanel(void) : vgui2::Panel(NULL, "BaseGameUIPanel")
     // CreateGameLogo();
     CreateBackGround();
     CreateToolbar();
-    CreateMainMenuBrowser();
     SetMenuAlpha(0);
 
     m_pFocusParent = NULL;
@@ -716,14 +715,6 @@ void CBasePanel::CreateToolbar(void)
     m_pToolBar->SetZPos(-20);
     m_pToolBar->SetVisible(false);
     m_pToolBar->SetBounds(0, stall - m_iToolBarSize, swide, m_iToolBarSize);
-}
-
-void CBasePanel::CreateMainMenuBrowser() {
-    m_pMainMenuBrowser = new CMainMenuBrowser(this);
-    m_pMainMenuBrowser->SetFullscreen(true);
-
-    if(m_pMainMenuBrowser->IsVisible())
-        m_pGameMenu->SetParent(m_pMainMenuBrowser);
 }
 
 void CBasePanel::UpdateGameMenus(void)

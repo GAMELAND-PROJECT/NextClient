@@ -30,6 +30,9 @@ file(GLOB_RECURSE ENGINE_MINI_SOURCES
         "src/*.hpp"
         "src/*.h")
 
+# HTML/CEF JavaScript bridges are not part of the native clean client.
+list(FILTER ENGINE_MINI_SOURCES EXCLUDE REGEX "binding/jsapi/.*\\.(cpp|hpp|h)$")
+
 add_library(${PROJECT_NAME} ${LIBRARY_BUILD_TYPE}
         ${ENGINE_MINI_SOURCES}
 )

@@ -1,8 +1,6 @@
 set(TARGET_NAME "next_launcher")
 set(OUTPUT_NAME "cstrike")
 
-find_package(ZLIB REQUIRED)
-find_package(CURL REQUIRED)
 find_package(OpenGL REQUIRED)
 find_package(magic_enum CONFIG REQUIRED)
 
@@ -43,9 +41,6 @@ target_link_libraries(${TARGET_NAME} PRIVATE
         magic_enum::magic_enum
         easyloggingpp::easyloggingpp
         TaskCoro::TaskCoro
-        cpr::cpr
-        CURL::libcurl
-        ZLIB::ZLIB
         Dbghelp.lib
         Winmm.lib
 )
@@ -62,6 +57,9 @@ set_target_properties(${TARGET_NAME} PROPERTIES
 )
 
 if (NEXT_LAUNCHER_ENABLE_UPDATER)
+    find_package(ZLIB REQUIRED)
+    find_package(CURL REQUIRED)
+
     target_compile_definitions(${TARGET_NAME} PRIVATE
             UPDATER_ENABLE
     )
@@ -71,6 +69,7 @@ if (NEXT_LAUNCHER_ENABLE_UPDATER)
             next_launcher::updater
             CURL::libcurl
             cpr::cpr
+            ZLIB::ZLIB
     )
 endif ()
 

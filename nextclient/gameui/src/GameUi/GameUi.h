@@ -74,8 +74,6 @@ private:
 
     std::shared_ptr<TaskCoroImpl> task_run_impl_;
 
-    class ContainerExtensionGameUiApi* browserExtensionGameUiApi;
-
 };
 
 extern CGameUI& GameUI();

@@ -34,6 +34,9 @@ file(GLOB_RECURSE GAMEUI_SOURCES
 list(FILTER GAMEUI_SOURCES EXCLUDE REGEX
         "ServerBrowser/(InternetGames|HistoryGames|FriendsGames|SpectateGames|UniqueGames)\\.cpp$"
 )
+# Anchor the directory name: an unanchored "Browser/" also matches
+# "ServerBrowser/" and removes the native browser implementation.
+list(FILTER GAMEUI_SOURCES EXCLUDE REGEX "(^|/)Browser/.*\\.(cpp|h)$")
 add_library(${PROJECT_NAME} SHARED
         ${GAMEUI_SOURCES}
 )

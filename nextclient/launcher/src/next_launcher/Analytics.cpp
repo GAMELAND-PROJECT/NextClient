@@ -22,12 +22,15 @@ Analytics::Analytics(
     user_info_client_(std::move(user_info_client)),
     backend_address_resolver_(std::move(backend_address_resolver))
 {
+#if defined(GAMEANALYTICS_ENABLE)
     ct_ = CancellationToken::Create();
+#endif
 }
 
 Analytics::~Analytics()
 {
-    ct_->SetCanceled();
+    if (ct_)
+        ct_->SetCanceled();
 }
 
 #ifdef GAMEANALYTICS_ENABLE

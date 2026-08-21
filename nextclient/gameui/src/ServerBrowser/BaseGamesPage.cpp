@@ -150,8 +150,6 @@ CBaseGamesPage::CBaseGamesPage(vgui2::Panel *parent, const char *name, const cha
         i++;
     }
 
-    ivgui()->AddTickSignal(GetVPanel());
-
     CreateFilters();
     LoadFilterSettings();
 }
@@ -220,11 +218,6 @@ bool CBaseGamesPage::IsActivated()
         return false;
 
     return true;
-}
-
-void CBaseGamesPage::OnTick()
-{
-    BaseClass::OnTick();
 }
 
 void CBaseGamesPage::ApplySchemeSettings(IScheme *pScheme)

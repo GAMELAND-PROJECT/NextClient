@@ -31,12 +31,6 @@
 #include "OptionsSubMiscellaneous.h"
 #include "IClientVGUI.h"
 
-#include "Browser/AcceptedDomains.h"
-#include "Browser/ExtensionCommon.h"
-#include "Browser/ExtensionMatchmaking.h"
-#include "Browser/ExtensionMatchmakingListings.h"
-#include "Browser/ExtensionGameUiApi.h"
-
 #include <utils/TaskRun.h>
 #include <utils/TaskRunImpl.h>
 
@@ -198,7 +192,8 @@ void CGameUI::Initialize(CreateInterfaceFn *factories, int count)
     if (g_pServerBrowser)
         g_pServerBrowser->SetParent(base_panel->GetVPanel());
 
-    vgui2::surface()->SetAllowHTMLJavaScript(true);
+    // The clean client uses the native menu/server browser only.
+    vgui2::surface()->SetAllowHTMLJavaScript(false);
 }
 
 void CGameUI::Start(cl_enginefuncs_s *engineFuncs, int interfaceVersion, void *system)
@@ -213,13 +208,6 @@ void CGameUI::Start(cl_enginefuncs_s *engineFuncs, int interfaceVersion, void *s
         g_pServerBrowser->ActiveGameName(ModInfo().GetGameDescription(), engine->pfnGetGameDirectory());
         g_pServerBrowser->Reactivate();
     }
-
-    RegisterCommonJsApi(engineFuncs);
-    RegisterMatchmakingJsApi();
-    RegisterMatchmakingListingsJsApi();
-    LoadAcceptedDomainsForJsApiFromDisk("platform/accepted_domains.txt");
-
-    browserExtensionGameUiApi = new ContainerExtensionGameUiApi();
 
 }
 
@@ -244,8 +232,6 @@ void CGameUI::Shutdown(void)
     DisconnectTier1Libraries();
     DisconnectTier2Libraries();
 
-    delete browserExtensionGameUiApi;
-
 }
 
 int CGameUI::ActivateGameUI(void)
@@ -255,9 +241,6 @@ int CGameUI::ActivateGameUI(void)
         g_hLoadingDialog->Close();
         g_hLoadingDialog = NULL;
     }
-
-    if(!IsGameUIActive())
-        browserExtensionGameUiApi->OnActivateGameUI();
 
     BasePanel()->OnGameUIActivated();
     BasePanel()->SetVisible(true);
@@ -301,7 +284,6 @@ void CGameUI::RunFrame(void)
             BasePanel()->SetSize(wide, tall);
 
         BasePanel()->RunFrame();
-        browserExtensionGameUiApi->RunFrame();
     }
 
     task_run_impl_->OnUpdate();
@@ -342,8 +324,6 @@ void CGameUI::HideGameUI()
 
     if (!IsGameUIActive())
         return;
-
-    browserExtensionGameUiApi->OnHideGameUI();
 
     BasePanel()->SetVisible(false);
 

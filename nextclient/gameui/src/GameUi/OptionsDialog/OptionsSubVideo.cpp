@@ -38,7 +38,7 @@ COptionsSubVideo::COptionsSubVideo(vgui2::Panel *parent) : PropertyPage(parent, 
     memset( &m_CurrentSettings, 0, sizeof( m_CurrentSettings ) );
 
     m_pBrightnessSlider = new CCvarSlider( this, "Brightness", "#GameUI_Brightness",
-                                           0.0f, 2.0f, "brightness" );
+                                           0.0f, 3.0f, "brightness" );
 
     m_pGammaSlider = new CCvarSlider( this, "Gamma", "#GameUI_Gamma",
                                       1.0f, 3.0f, "gamma" );

@@ -34,7 +34,6 @@
 #include "client/cl_parsefn.h"
 #include "client/cl_game.h"
 #include "client/cl_string_registry.h"
-#include "binding/jsapi/jsapi.h"
 #include "common/cvar.h"
 #include "console/console.h"
 #include "console/protector.h"
@@ -160,7 +159,6 @@ static void EngineMiniUninitialize()
     CL_DeleteHttpDownloadManager();
     KV_UninitializeKeyValuesSystem();
 
-    JSAPI_Shutdown();
 
     taskcoro::TaskCoro::UnInitialize();
     g_pTaskCoroImpl = nullptr;
@@ -607,7 +605,6 @@ static void OnGameInitialized()
     viewmodel_fov = gEngfuncs.pfnRegisterVariable("viewmodel_fov", std::to_string(90.f).c_str(), FCVAR_ARCHIVE);
 
     CL_CreateHttpDownloadManager(g_pGameUi, g_pLocalize, g_SettingGuard);
-    JSAPI_Init();
     CL_CvarsSandboxInit();
     CL_StringRegistryInit();
     CL_NclEntitySyncInit();
@@ -617,8 +614,8 @@ static void OnGameInitialized()
     PROTECTOR_Init(g_SettingGuard);
 
     // Conservative low-latency defaults. Keep the engine's 100 FPS limit to
-    // preserve GoldSrc movement/physics behavior, and avoid thread priorities
-    // that can starve audio or networking.
+    // preserve GoldSrc movement/physics behavior, and leave VSync under user
+    // control so the Video settings can select latency or tear-free output.
     auto set_cvar = [](const char* name, const char* value) {
         if (gEngfuncs.pfnGetCvarPointer(name) != nullptr)
             gEngfuncs.Cvar_Set(name, value);
@@ -627,7 +624,8 @@ static void OnGameInitialized()
     set_cvar("m_rawinput", "1");
     set_cvar("m_filter", "0");
     set_cvar("joystick", "0");
-    set_cvar("gl_vsync", "0");
+    set_cvar("fps_override", "0");
+    set_cvar("fps_max", "100.5");
 
     if (cvar_t* mixahead = gEngfuncs.pfnGetCvarPointer("_snd_mixahead");
         mixahead != nullptr && mixahead->value > 0.05f)

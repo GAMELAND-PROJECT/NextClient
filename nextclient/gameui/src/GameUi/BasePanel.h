@@ -13,7 +13,6 @@
 #include "OptionsDialog.h"
 #include "KeyValues.h"
 #include "utlvector.h"
-#include "Browser/MainMenuBrowser.h"
 
 class CGameMenu;
 class CBackgroundMenuButton;
@@ -194,7 +193,6 @@ private:
     void CreateGameLogo(void);
     void CreateBackGround(void);
     void CreateToolbar(void);
-    void CreateMainMenuBrowser(void);
     void UpdateGameMenus(void);
     CGameMenu *RecursiveLoadGameMenu(vgui2::Panel *parent, KeyValues *datafile);
     void DrawBackgroundImage(void);
@@ -243,7 +241,6 @@ private:
     vgui2::VPANEL m_pFocusParent;
     int m_iToolBarSize;
     CToolBar *m_pToolBar;
-    CMainMenuBrowser* m_pMainMenuBrowser;
 private:
     CPanelAnimationVar(float, m_flBackgroundFillAlpha, "m_flBackgroundFillAlpha", "0");
 

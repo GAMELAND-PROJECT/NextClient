@@ -73,8 +73,8 @@ ClientLauncher::ClientLauncher(HINSTANCE module_instance, const char* cmd_line) 
     user_info_client_ = std::make_shared<next_launcher::UserInfoClient>(user_info_.get());
 #if defined(UPDATER_ENABLE) || defined(GAMEANALYTICS_ENABLE) || defined(SENTRY_ENABLE)
     backend_address_resolver_ = std::make_shared<BackendAddressResolver>(user_info_client_);
-#endif
     analytics_ = std::make_shared<Analytics>(user_info_client_, backend_address_resolver_);
+#endif
     config_provider_ = std::make_shared<nitro_utils::FileConfigProvider>("user_game_config.ini");
 
     hl_registry_ = std::make_shared<CRegistry>(kHlRegistry);
@@ -110,7 +110,8 @@ void ClientLauncher::Run()
     InitializeAnalytics();
     FixScreenResolution();
 
-    analytics_->SendAnalyticsEvent("startup_init");
+    if (analytics_)
+        analytics_->SendAnalyticsEvent("startup_init");
 
     if (!GlobalMutexCheck())
     {
@@ -126,7 +127,8 @@ void ClientLauncher::Run()
         return;
     }
 
-    analytics_->SendAnalyticsEvent("startup_init_post_mutex");
+    if (analytics_)
+        analytics_->SendAnalyticsEvent("startup_init_post_mutex");
 
     UpdaterDoneStatus updater_done = RunStartupUpdater();
 
@@ -201,7 +203,8 @@ ClientLauncher::NextProcess ClientLauncher::BuildNewGameProcess()
 
 ClientLauncher::EngineSessionResult ClientLauncher::RunEngine()
 {
-    analytics_->SendAnalyticsEvent("startup_run_engine");
+    if (analytics_)
+        analytics_->SendAnalyticsEvent("startup_run_engine");
 
     if (!is_relaunch_)
     {
@@ -239,7 +242,8 @@ ClientLauncher::EngineSessionResult ClientLauncher::RunEngine()
     {
         std::string error = "Module steam_api.dll not found";
 
-        analytics_->SendCrashMonitoringEvent("LoadModule Error", error.c_str(), true);
+        if (analytics_)
+            analytics_->SendCrashMonitoringEvent("LoadModule Error", error.c_str(), true);
         MessageBoxA(NULL, error.c_str(), kErrorTitle, MB_OK | MB_ICONERROR | MB_DEFAULT_DESKTOP_ONLY);
         return EngineSessionResult::Exit;
     }
@@ -250,7 +254,8 @@ ClientLauncher::EngineSessionResult ClientLauncher::RunEngine()
         std::string error = "NextSteamProxy_SetSEH not found in steam_api.dll.\n"
                             "Make sure you use the steam_api.dll from NextClient and not the original steam_api.dll";
 
-        analytics_->SendCrashMonitoringEvent("LoadModule Error", error.c_str(), true);
+        if (analytics_)
+            analytics_->SendCrashMonitoringEvent("LoadModule Error", error.c_str(), true);
         MessageBoxA(NULL, error.c_str(), kErrorTitle, MB_OK | MB_ICONERROR | MB_DEFAULT_DESKTOP_ONLY);
         return EngineSessionResult::Exit;
     }
@@ -298,7 +303,8 @@ ClientLauncher::EngineSessionResult ClientLauncher::RunEngine()
     LOG(INFO) << "Engine command line: '" << cmd_line_->GetCmdLine() << "'";
 
     LOG(INFO) << "IEngineAPI::Run";
-    analytics_->AddBreadcrumb("Info", "IEngineAPI::Run");
+    if (analytics_)
+        analytics_->AddBreadcrumb("Info", "IEngineAPI::Run");
 
     TimerResolutionScope timer_resolution;
     EngineRunResult engine_run_result = engine->Run(
@@ -312,7 +318,8 @@ ClientLauncher::EngineSessionResult ClientLauncher::RunEngine()
     EngineCommons::Reset();
 
     LOG(INFO) << "IEngineAPI::Run done";
-    analytics_->AddBreadcrumb("Info", std::format("IEngineAPI::Run done, result: {}", (int)engine_run_result).c_str());
+    if (analytics_)
+        analytics_->AddBreadcrumb("Info", std::format("IEngineAPI::Run done, result: {}", (int)engine_run_result).c_str());
 
     client_mini->Uninitialize();
     Sys_UnloadModule(client_mini_module);
@@ -526,7 +533,8 @@ void ClientLauncher::UninitializeSentry() { }
 
 void ClientLauncher::HUD_InitHandler()
 {
-    analytics_->SendAnalyticsEvent("startup_hud_init_post");
+    if (analytics_)
+        analytics_->SendAnalyticsEvent("startup_hud_init_post");
 }
 
 void ClientLauncher::InitializeCmdLine(const char* cmd_line)
@@ -622,7 +630,8 @@ void ClientLauncher::CheckVideoModeCrash()
 
 void ClientLauncher::Sys_ErrorHandler(const char* error)
 {
-    analytics_->SendCrashMonitoringEvent("Sys_Error", error, true);
+    if (analytics_)
+        analytics_->SendCrashMonitoringEvent("Sys_Error", error, true);
 
     // Sys_Error exits from inside IEngineAPI::Run, so the teardown after it never happens.
     EngineCommons::Reset();
