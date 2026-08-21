@@ -188,9 +188,9 @@ void FilterLightParams()
     {
         Cvar_DirectSet(gamma_cvar, "1.8");
     }
-    else if (gamma_cvar->value > 3.0)
+    else if (gamma_cvar->value > 4.0)
     {
-        Cvar_DirectSet(gamma_cvar, "3.0");
+        Cvar_DirectSet(gamma_cvar, "4.0");
     }
 
     if (texgamma_cvar->value < 1.8)

@@ -626,6 +626,7 @@ static void OnGameInitializing(void* mainwindow, HDC* pmaindc, HGLRC* pbaseRC, c
     });
 
     g_Unsubs.emplace_back(eng()->S_StartDynamicSound |= S_StartDynamicSoundHook);
+    g_Unsubs.emplace_back(eng()->S_StartStaticSound  |= S_StartStaticSoundHook);
     
     GL_SetMode_Subscriber(mainwindow, pmaindc, pbaseRC, pszDriver, pszCmdLine, result);
 }

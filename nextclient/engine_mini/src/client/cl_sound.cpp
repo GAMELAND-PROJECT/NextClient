@@ -12,6 +12,32 @@
 
 namespace
 {
+    bool HasSoundPrefix(const char* name, const char* prefix)
+    {
+        return name != nullptr && Q_strnicmp(name, prefix, Q_strlen(prefix)) == 0;
+    }
+
+    bool IsMutedGameSound(const sfx_t* sfx)
+    {
+        if (sfx == nullptr)
+        {
+            return false;
+        }
+
+        const char* name = sfx->name;
+        if (HasSoundPrefix(name, "sound/"))
+        {
+            name += Q_strlen("sound/");
+        }
+
+        return HasSoundPrefix(name, "ambience/") ||
+               HasSoundPrefix(name, "ambient/") ||
+               HasSoundPrefix(name, "radio/") ||
+               HasSoundPrefix(name, "hostage/") ||
+               HasSoundPrefix(name, "vox/") ||
+               Q_stristr(name, "MRAD_") != nullptr;
+    }
+
     sfx_t* GetReplacementSfx(int entnum, int entchannel, sfx_t* sfx)
     {
         if (entchannel != CHAN_WEAPON && entchannel != CHAN_ITEM)
@@ -88,10 +114,40 @@ void S_StartDynamicSoundHook(
         return;
     }
 
+    if (IsMutedGameSound(sfx))
+    {
+        return;
+    }
+
     sfx_t* replacement_sfx = GetReplacementSfx(entnum, entchannel, sfx);
     if (replacement_sfx)
     {
         next->Invoke(entnum, entchannel, replacement_sfx, origin, fvol, attenuation, flags, pitch);
+        return;
+    }
+
+    next->Invoke(entnum, entchannel, sfx, origin, fvol, attenuation, flags, pitch);
+}
+
+void S_StartStaticSoundHook(
+    int entnum,
+    int entchannel,
+    sfx_t* sfx,
+    vec_t* origin,
+    float fvol,
+    float attenuation,
+    int flags,
+    int pitch,
+    S_StartStaticSoundChain* next
+)
+{
+    OPTICK_EVENT();
+
+    // Static channels are map ambience (loops, machinery and environmental
+    // emitters). Suppress them at creation instead of continuously stopping
+    // channels, which keeps the mixer and network voice paths untouched.
+    if (IsMutedGameSound(sfx) || entchannel == CHAN_STATIC)
+    {
         return;
     }
 

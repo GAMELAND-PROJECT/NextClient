@@ -41,7 +41,7 @@ COptionsSubVideo::COptionsSubVideo(vgui2::Panel *parent) : PropertyPage(parent, 
                                            0.0f, 4.0f, "brightness" );
 
     m_pGammaSlider = new CCvarSlider( this, "Gamma", "#GameUI_Gamma",
-                                      1.0f, 3.0f, "gamma" );
+                                      1.0f, 4.0f, "gamma" );
 
     GetVidSettings();
 
@@ -102,7 +102,7 @@ COptionsSubVideo::COptionsSubVideo(vgui2::Panel *parent) : PropertyPage(parent, 
     m_pAddonsFolder->SetVisible(false);
 
     m_pLowVideoDetail = new vgui2::CheckButton( this, "LowVideoDetail", "#GameUI_LowVideoDetail" );
-    m_pLowVideoDetail->SetSelected(m_CurrentSettings.vid_level == 0);
+    m_pLowVideoDetail->SetSelected(m_CurrentSettings.vid_level != 0);
     m_pLowVideoDetail->SetVisible(true);
 
     m_pDisableMultitexture = new vgui2::CheckButton( this, "DisableMultitexture", "#GameUI_DisableMultitexture" );
@@ -241,7 +241,7 @@ void COptionsSubVideo::OnResetData()
     m_pWindowed->SetSelected(m_CurrentSettings.windowed);
     m_pHDModels->SetSelected(m_CurrentSettings.hdmodels);
     m_pAddonsFolder->SetSelected(m_CurrentSettings.addons_folder);
-    m_pLowVideoDetail->SetSelected(m_CurrentSettings.vid_level == 0);
+    m_pLowVideoDetail->SetSelected(m_CurrentSettings.vid_level != 0);
     m_pDisableMultitexture->SetSelected(m_CurrentSettings.disable_multitexture);
     m_pStretchAspect->SetSelected(m_CurrentSettings.stretch_aspect);
     m_pDetailTextures->Reset();
@@ -382,8 +382,7 @@ void COptionsSubVideo::ApplyVidSettings(bool bForceRefresh)
     if ( m_pLowVideoDetail )
     {
         bool checked = m_pLowVideoDetail->IsSelected();
-        // GoldSrc stores 0 for low-detail mode and 1 for high-detail mode.
-        m_CurrentSettings.vid_level = checked ? 0 : 1;
+        m_CurrentSettings.vid_level = checked ? 1 : 0;
     }
 
     if ( m_pDisableMultitexture )
@@ -398,7 +397,20 @@ void COptionsSubVideo::ApplyVidSettings(bool bForceRefresh)
         m_CurrentSettings.stretch_aspect = checked ? 1 : 0;
     }
 
-    if ( memcmp( &m_OrigSettings, &m_CurrentSettings, sizeof( CVidSettings ) ) == 0 && !bForceRefresh)
+    const bool vidLevelChanged = m_OrigSettings.vid_level != m_CurrentSettings.vid_level;
+    const bool restartRequired =
+        m_OrigSettings.w != m_CurrentSettings.w ||
+        m_OrigSettings.h != m_CurrentSettings.h ||
+        m_OrigSettings.bpp != m_CurrentSettings.bpp ||
+        m_OrigSettings.windowed != m_CurrentSettings.windowed ||
+        m_OrigSettings.hdmodels != m_CurrentSettings.hdmodels ||
+        m_OrigSettings.addons_folder != m_CurrentSettings.addons_folder ||
+        vidLevelChanged ||
+        m_OrigSettings.disable_multitexture != m_CurrentSettings.disable_multitexture ||
+        m_OrigSettings.stretch_aspect != m_CurrentSettings.stretch_aspect ||
+        strcmp(m_OrigSettings.renderer, m_CurrentSettings.renderer) != 0;
+
+    if (!vidLevelChanged && !restartRequired && !bForceRefresh)
     {
         return;
     }
@@ -406,6 +418,7 @@ void COptionsSubVideo::ApplyVidSettings(bool bForceRefresh)
     CVidSettings *p = &m_CurrentSettings;
 
     char szCmd[ 256 ];
+
     // Set mode
     sprintf( szCmd, "_setvideomode %i %i %i\n", p->w, p->h, p->bpp );
     engine->pfnClientCmd( szCmd );
@@ -419,7 +432,6 @@ void COptionsSubVideo::ApplyVidSettings(bool bForceRefresh)
     engine->pfnClientCmd(szCmd);
     sprintf( szCmd, "_set_vid_level %d\n", p->vid_level );
     engine->pfnClientCmd(szCmd);
-
     m_pUserConfig->set_value("", "disable_multitexture", std::to_string(p->disable_multitexture), true);
     m_pUserConfig->set_value("", "stretch_aspect", std::to_string(p->stretch_aspect), true);
 
@@ -462,7 +474,8 @@ void COptionsSubVideo::OnButtonChecked(KeyValues *data)
 
     if (pPanel == m_pLowVideoDetail)
     {
-        if (state != m_CurrentSettings.vid_level)
+        const int requestedVidLevel = state ? 1 : 0;
+        if (requestedVidLevel != m_CurrentSettings.vid_level)
         {
             OnDataChanged();
         }
