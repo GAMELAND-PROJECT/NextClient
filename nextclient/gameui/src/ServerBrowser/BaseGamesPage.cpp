@@ -134,7 +134,7 @@ CBaseGamesPage::CBaseGamesPage(vgui2::Panel *parent, const char *name, const cha
             m_pGameList->SetColumnHeaderTooltip(i, "#ServerBrowser_SecureColumn_Tooltip");
             break;
         case GameListColumnType::ServerName:
-            m_pGameList->AddColumnHeader(i, "Name", "#ServerBrowser_Servers", 50, ListPanel::COLUMN_RESIZEWITHWINDOW | ListPanel::COLUMN_UNHIDABLE);
+            m_pGameList->AddColumnHeader(i, "Name", "#ServerBrowser_Servers", 120, ListPanel::COLUMN_RESIZEWITHWINDOW | ListPanel::COLUMN_UNHIDABLE);
             m_pGameList->SetPinnedSortFunc(i, ServerNameCompare);
             break;
         case GameListColumnType::ServerDesc:
@@ -145,16 +145,18 @@ CBaseGamesPage::CBaseGamesPage(vgui2::Panel *parent, const char *name, const cha
             m_pGameList->SetPinnedSortFunc(i, GameCompare);
             break;
         case GameListColumnType::Players:
-            m_pGameList->AddColumnHeader(i, "Players", "#ServerBrowser_Players", 55, 55, 300);
+            m_pGameList->AddColumnHeader(i, "Players", "#ServerBrowser_Players", 62, 62, 90);
             m_pGameList->SetPinnedSortFunc(i, PlayersCompare);
+            m_pGameList->SetColumnTextAlignment(i, Label::a_center);
             break;
         case GameListColumnType::Map:
-            m_pGameList->AddColumnHeader(i, "Map", "#ServerBrowser_Map", 90, 90, 10000);
+            m_pGameList->AddColumnHeader(i, "Map", "#ServerBrowser_Map", 100, 85, 160);
             m_pGameList->SetPinnedSortFunc(i, MapCompare);
             break;
         case GameListColumnType::Ping:
-            m_pGameList->AddColumnHeader(i, "Ping", "#ServerBrowser_Latency", 55, 55, 10000);
+            m_pGameList->AddColumnHeader(i, "Ping", "#ServerBrowser_Latency", 52, 52, 72);
             m_pGameList->SetPinnedSortFunc(i, PingCompare);
+            m_pGameList->SetColumnTextAlignment(i, Label::a_center);
             break;
         case GameListColumnType::Ip:
             m_pGameList->AddColumnHeader(i, "Address", "#ServerBrowser_IPAddress", 95, 95, 10000, ListPanel::COLUMN_HIDDEN);
@@ -260,7 +262,7 @@ void CBaseGamesPage::ApplySchemeSettings(IScheme *pScheme)
     int secure_column = imageList->AddImage(scheme()->GetImage("servers/icon_robotron_column", false));
 
     m_pGameList->SetImageList(imageList, true);
-    m_hFont = pScheme->GetFont("ListSmall", IsProportional());
+    m_hFont = pScheme->GetFont("Default", IsProportional());
 
     if (!m_hFont)
         m_hFont = pScheme->GetFont("DefaultSmall", IsProportional());
@@ -400,7 +402,7 @@ void CBaseGamesPage::ServerResponded(serveritem_t &server)
         kv = m_pGameList->GetItem(server.listEntryID);
 
     const bool isPinned = EngineMini()->IsPinnedServer(server.gs.m_NetAdr.GetIP(), server.gs.m_NetAdr.GetConnectionPort());
-    const auto displayName = isPinned ? std::format("[PIN] {}", server.gs.GetName()) : server.gs.GetName();
+    const auto displayName = isPinned ? std::format("[PINNED]  {}", server.gs.GetName()) : server.gs.GetName();
     kv->SetString("name", displayName.c_str());
     kv->SetInt("_pinned", isPinned ? 1 : 0);
     kv->SetString("map", server.gs.m_szMap);
@@ -545,7 +547,7 @@ void CBaseGamesPage::ApplyGameFilters()
             {
                 auto *kv = new KeyValues("Server");
                 const bool isPinned = EngineMini()->IsPinnedServer(server.gs.m_NetAdr.GetIP(), server.gs.m_NetAdr.GetConnectionPort());
-                const auto displayName = isPinned ? std::format("[PIN] {}", server.gs.GetName()) : server.gs.GetName();
+                const auto displayName = isPinned ? std::format("[PINNED]  {}", server.gs.GetName()) : server.gs.GetName();
                 kv->SetString("name", displayName.c_str());
                 kv->SetInt("_pinned", isPinned ? 1 : 0);
                 kv->SetString("map", server.gs.m_szMap);
