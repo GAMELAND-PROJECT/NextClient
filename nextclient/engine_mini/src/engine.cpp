@@ -1,5 +1,6 @@
 #include "engine.h"
 
+#include <array>
 #include <IGameConsole.h>
 #include <Registry.h>
 #include <easylogging++.h>
@@ -146,6 +147,39 @@ static std::unique_ptr<service::matchmaking::MatchmakingSteamComp> g_pMatchmakin
 
 static std::shared_ptr<taskcoro::TaskCoroImpl> g_pTaskCoroImpl;
 static std::vector<std::shared_ptr<nitroapi::Unsubscriber>> g_Unsubs;
+
+namespace
+{
+struct LockedCvar
+{
+    const char* name;
+    const char* value;
+};
+
+constexpr auto kLockedClientProfile = std::to_array<LockedCvar>({
+    {"fps_override", "0"},
+    {"fps_max", "100.5"},
+    {"rate", "100000"},
+    {"cl_cmdrate", "101"},
+    {"cl_updaterate", "101"},
+    {"cl_cmdbackup", "2"},
+    {"cl_lc", "1"},
+    {"cl_lw", "1"},
+    {"ex_interp", "0.01"},
+    {"_snd_mixahead", "0.05"},
+});
+
+const char* GetLockedClientCvarValue(const char* name)
+{
+    for (const auto& locked : kLockedClientProfile)
+    {
+        if (!Q_stricmp(name, locked.name))
+            return locked.value;
+    }
+
+    return nullptr;
+}
+}
 
 nitroapi::NitroApiInterface* napi() { return g_NitroApi; }
 nitroapi::EngineData* eng() { return g_NitroApi->GetEngineData(); }
@@ -501,6 +535,15 @@ static void OnGameInitializing(void* mainwindow, HDC* pmaindc, HGLRC* pbaseRC, c
         g_bIsDedicatedServer = bIsDedicated;
     });
 
+    // Enforce the clean-client profile at the mutation point. This covers
+    // console commands, configs and server stuffcmds without per-frame polling.
+    g_Unsubs.emplace_back(eng()->Cvar_Set |= [](const char* name, const char* value, const auto& next) {
+        if (const char* locked_value = GetLockedClientCvarValue(name))
+            next->Invoke(name, locked_value);
+        else
+            next->Invoke(name, value);
+    });
+
     g_Unsubs.emplace_back(eng()->Cvar_Command |= [](const auto& next) -> qboolean {
         const auto cvar_name = g_engfuncs.pfnCmd_Argv(0);
         const auto cvar = g_engfuncs.pfnCVarGetPointer(cvar_name);
@@ -616,21 +659,10 @@ static void OnGameInitialized()
     // Conservative low-latency defaults. Keep the engine's 100 FPS limit to
     // preserve GoldSrc movement/physics behavior, and leave VSync under user
     // control so the Video settings can select latency or tear-free output.
-    auto set_cvar = [](const char* name, const char* value) {
-        if (gEngfuncs.pfnGetCvarPointer(name) != nullptr)
-            gEngfuncs.Cvar_Set(name, value);
-    };
-
-    set_cvar("m_rawinput", "1");
-    set_cvar("m_filter", "0");
-    set_cvar("joystick", "0");
-    set_cvar("fps_override", "0");
-    set_cvar("fps_max", "100.5");
-
-    if (cvar_t* mixahead = gEngfuncs.pfnGetCvarPointer("_snd_mixahead");
-        mixahead != nullptr && mixahead->value > 0.05f)
+    for (const auto& locked : kLockedClientProfile)
     {
-        gEngfuncs.Cvar_Set("_snd_mixahead", "0.05");
+        if (gEngfuncs.pfnGetCvarPointer(locked.name) != nullptr)
+            gEngfuncs.Cvar_Set(locked.name, locked.value);
     }
 }
 

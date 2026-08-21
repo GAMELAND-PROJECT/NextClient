@@ -1,3 +1,4 @@
+#include <cmath>
 #include <cstring>
 
 #include "main.h"
@@ -39,6 +40,8 @@ static cvar_t *cl_rollspeed;
 static cvar_t *viewmodel_lag_style;
 static cvar_t *viewmodel_lag_scale;
 static cvar_t *viewmodel_lag_speed;
+static cvar_t *viewmodel_smooth_kick;
+static cvar_t *viewmodel_smooth_kick_speed;
 
 static cvar_t *spec_pip;
 
@@ -70,6 +73,8 @@ void ViewInit()
     viewmodel_lag_style = gEngfuncs.pfnRegisterVariable("viewmodel_lag_style", "0", FCVAR_ARCHIVE);
     viewmodel_lag_scale = gEngfuncs.pfnRegisterVariable("viewmodel_lag_scale", "1.0", FCVAR_ARCHIVE);
     viewmodel_lag_speed = gEngfuncs.pfnRegisterVariable("viewmodel_lag_speed", "8.0", FCVAR_ARCHIVE);
+    viewmodel_smooth_kick = gEngfuncs.pfnRegisterVariable("viewmodel_smooth_kick", "1", FCVAR_ARCHIVE);
+    viewmodel_smooth_kick_speed = gEngfuncs.pfnRegisterVariable("viewmodel_smooth_kick_speed", "28", FCVAR_ARCHIVE);
 
     spec_pip = gEngfuncs.pfnGetCvarPointer("spec_pip");
 
@@ -306,12 +311,47 @@ static void V_OffsetViewmodel(cl_entity_t *vm, vec3_t front, vec3_t side, vec3_t
     VectorMA_2(up, z, vm->origin);
 }
 
+static void V_SmoothViewmodelKick(ref_params_t *pparams, cl_entity_t *vm)
+{
+    static vec3_t smoothed_offset{};
+    static bool initialized{};
+
+    vec3_t target_offset;
+    for (int i = 0; i < 3; ++i)
+        target_offset[i] = AngleNormalize(vm->angles[i] - pparams->viewangles[i]);
+
+    if (!viewmodel_smooth_kick->value || pparams->frametime <= 0.0f || pparams->frametime > 0.1f)
+    {
+        VectorCopy(target_offset, smoothed_offset);
+        initialized = true;
+        return;
+    }
+
+    if (!initialized)
+    {
+        VectorCopy(target_offset, smoothed_offset);
+        initialized = true;
+    }
+    else
+    {
+        const float speed = std::clamp(viewmodel_smooth_kick_speed->value, 1.0f, 60.0f);
+        const float blend = 1.0f - std::exp(-speed * pparams->frametime);
+
+        for (int i = 0; i < 3; ++i)
+            smoothed_offset[i] += AngleNormalize(target_offset[i] - smoothed_offset[i]) * blend;
+    }
+
+    for (int i = 0; i < 3; ++i)
+        vm->angles[i] = pparams->viewangles[i] + smoothed_offset[i];
+}
+
 static void CalcCustomRefdef(ref_params_t *pparams)
 {
     cl_entity_t *vm;
     Vector front, side, up;
 
     vm = gEngfuncs.GetViewModel();
+    V_SmoothViewmodelKick(pparams, vm);
     AngleVectors(QAngle(vm->angles), &front, &side, &up);
 
     /* fix the slight difference between view and vm origin */
