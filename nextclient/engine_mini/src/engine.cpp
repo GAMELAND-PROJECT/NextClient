@@ -498,7 +498,11 @@ static void OnGameInitializing(void* mainwindow, HDC* pmaindc, HGLRC* pbaseRC, c
     g_Unsubs.emplace_back(eng()->GL_Init                     |= [](const auto& next)                                                   { GL_Init(); next->Invoke(); });
     g_Unsubs.emplace_back(eng()->GL_Config                   |= [](const auto& next)                                                   { GL_Config(); });
     g_Unsubs.emplace_back(eng()->GL_SelectTexture            |= [](GLenum target, const auto& next)                                    { GL_SelectTexture(target); });
-    g_Unsubs.emplace_back(eng()->CL_ConnectClient            |= [](const auto& next)                                                   { CL_ConnectClient(); });
+    g_Unsubs.emplace_back(eng()->CL_ConnectClient |= [](const auto& next) {
+        if (g_pMatchmakingServers)
+            g_pMatchmakingServers->CancelAllQueries();
+        CL_ConnectClient();
+    });
     g_Unsubs.emplace_back(eng()->CL_ClearClientState         |= [](const auto& next)                                                   { CL_ClearClientState(); });
     g_Unsubs.emplace_back(eng()->GL_LoadTexture              |= [](const char* identifier, int textureType, int width, int height, uint8_t* data, int mipmap, int iType, uint8_t* pPal, const auto& next)  { return GL_LoadTexture(identifier, (GL_TEXTURETYPE)textureType, width, height, data, mipmap, iType, pPal); });
     g_Unsubs.emplace_back(eng()->GL_LoadTexture2             |= [](const char* identifier, int textureType, int width, int height, uint8_t* data, int mipmap, int iType, uint8_t* pPal, int filter, const auto& next)  { return GL_LoadTexture2(identifier, (GL_TEXTURETYPE)textureType, width, height, data, mipmap, iType, pPal, filter); });
@@ -545,6 +549,14 @@ static void OnGameInitializing(void* mainwindow, HDC* pmaindc, HGLRC* pbaseRC, c
     });
 
     g_Unsubs.emplace_back(eng()->Cbuf_AddText += [](const char *text, sizebuf_t *buf, char* result) {
+        // A selected server no longer needs browser discovery traffic. Cancel
+        // it before the connection handshake to avoid short UDP/CPU overlap.
+        if (g_pMatchmakingServers &&
+            (!Q_strnicmp(text, "connect ", 8) || !Q_strnicmp(text, "retry", 5)))
+        {
+            g_pMatchmakingServers->CancelAllQueries();
+        }
+
         // for cases when client downloading files through dlfile
         // give him a chance to use http download again
         if (std::strncmp(text, "disconnect", 10) == 0)

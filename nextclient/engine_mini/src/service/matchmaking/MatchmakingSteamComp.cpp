@@ -22,6 +22,18 @@ MatchmakingSteamComp::~MatchmakingSteamComp()
     }
 }
 
+void MatchmakingSteamComp::CancelAllQueries()
+{
+    // Callbacks may mutate request state, so iterate over a stable snapshot.
+    std::vector<HServerListRequest> request_ids;
+    request_ids.reserve(server_requests_.size());
+    for (const auto& [request_id, request] : server_requests_)
+        request_ids.push_back(request_id);
+
+    for (const auto request_id : request_ids)
+        CancelQuery(request_id);
+}
+
 HServerListRequest MatchmakingSteamComp::RequestInternetServerList(
     AppId_t iApp,
     MatchMakingKeyValuePair_t** ppchFilters,

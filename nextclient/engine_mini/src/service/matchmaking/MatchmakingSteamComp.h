@@ -40,6 +40,9 @@ namespace service::matchmaking
         HServerQuery ServerRules(uint32 unIP, uint16 usPort, ISteamMatchmakingRulesResponse* response_callback) override;
         void CancelServerQuery(HServerQuery hServerQuery) override;
 
+        // Stop browser traffic before entering a game session.
+        void CancelAllQueries();
+
     private:
         concurrencpp::result<void> RequestServerList(
             HServerListRequest request_id,
