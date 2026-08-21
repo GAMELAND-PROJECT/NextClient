@@ -49,11 +49,19 @@ void ConfigureEngineElppLogger()
     el::Configurations config;
     config.setToDefault();
 
+#ifdef NDEBUG
+    // Release clients should not spend frame time formatting and dispatching
+    // diagnostic messages that are not consumed by the clean console.
+    config.set(el::Level::Global, el::ConfigurationType::Enabled, "false");
+#else
     config.set(el::Level::Global, el::ConfigurationType::Enabled, "true");
+#endif
     config.set(el::Level::Global, el::ConfigurationType::ToStandardOutput, "false");
     config.set(el::Level::Global, el::ConfigurationType::ToFile, "false");
 
     el::Loggers::reconfigureLogger(ELPP_DEFAULT_LOGGER, config);
 
+#ifndef NDEBUG
     el::Helpers::installLogDispatchCallback<EngineLogAppender>("EngineLogAppender");
+#endif
 }

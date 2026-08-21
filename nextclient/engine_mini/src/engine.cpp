@@ -179,6 +179,9 @@ constexpr auto kLockedClientProfile = std::to_array<LockedCvar>({
     {"cl_lw", "1"},
     {"ex_interp", "0.01"},
     {"_snd_mixahead", "0.05"},
+    {"scoreboard_showavatars", "0"},
+    {"developer", "0"},
+    {"r_speeds", "0"},
 });
 
 const char* GetLockedClientCvarValue(const char* name)

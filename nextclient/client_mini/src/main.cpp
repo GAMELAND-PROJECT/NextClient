@@ -3,6 +3,7 @@
 #include <ranges>
 #include <next_client_mini/client_mini.h>
 #include <parsemsg.h>
+#include <in_buttons.h>
 
 #include "camera.h"
 #include "studiorenderer.h"
@@ -38,6 +39,7 @@ std::unique_ptr<GameHud> g_GameHud;
 static std::vector<std::shared_ptr<nitroapi::Unsubscriber>> g_Unsub;
 
 cvar_t* hud_draw;
+static bool g_ScoreboardVisible;
 
 nitroapi::EngineData* eng()
 {
@@ -96,7 +98,10 @@ static void HUD_InitPost()
 
 static void HUD_RedrawPost(float flTime, int iIntermission, int result)
 {
-    if (hud_draw->value != 0.0)
+    // The custom HUD is completely occluded by these overlays. Avoid drawing
+    // it underneath them, which otherwise adds redundant work every frame.
+    const bool console_visible = g_GameConsole && g_GameConsole->IsConsoleVisible();
+    if (hud_draw->value != 0.0 && !g_ScoreboardVisible && !console_visible)
         g_GameHud->Draw(flTime);
 }
 
@@ -210,6 +215,8 @@ static void CL_CreateMoveHandler(float frametime, usercmd_t* cmd, int active, CL
     CL_CreateMove_InvertMousePre(frametime, cmd, active);
 
     next->Invoke(frametime, cmd, active);
+
+    g_ScoreboardVisible = active != 0 && cmd != nullptr && (cmd->buttons & IN_SCORE) != 0;
 
     CL_CreateMove_InvertMousePost(frametime, cmd, active);
 }
