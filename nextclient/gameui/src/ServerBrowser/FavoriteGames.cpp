@@ -35,6 +35,9 @@ void CFavoriteGames::OnPageShow()
     if (!ServerBrowserDialog().IsVisible())
         return;
 
+    if (m_ColumnsMap.contains(GameListColumnType::Players))
+        m_pGameList->SetSortColumnEx(m_ColumnsMap[GameListColumnType::Players], -1, true);
+
     GetNewServerList();
 }
 

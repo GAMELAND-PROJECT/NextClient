@@ -76,6 +76,15 @@ void CGameListPanel::SetSortColumn(int column)
         BaseClass::SetSortFunc(column, sortFunction->second);
 }
 
+void CGameListPanel::SetSortColumnEx(int primaryColumn, int secondaryColumn, bool ascending)
+{
+    BaseClass::SetSortColumnEx(primaryColumn, secondaryColumn, ascending);
+
+    const auto sortFunction = m_SortFunctions.find(primaryColumn);
+    if (sortFunction != m_SortFunctions.end())
+        BaseClass::SetSortFunc(primaryColumn, sortFunction->second);
+}
+
 CBaseGamesPage::CBaseGamesPage(vgui2::Panel *parent, const char *name, const char *pCustomResFilename, const std::vector<GameListColumnType>& columns) :
     PropertyPage(parent, name),
     m_pCustomResFilename(pCustomResFilename),

@@ -44,6 +44,7 @@ public:
     [[nodiscard]] CBaseGamesPage* GetOuterGamesPage() const;
     void SetPinnedSortFunc(int column, vgui2::SortFunc* sortFunc);
     void SetSortColumn(int column) override;
+    void SetSortColumnEx(int primaryColumn, int secondaryColumn, bool ascending) override;
 
     // Panel
     void OnKeyCodeTyped(vgui2::KeyCode code) override;
