@@ -170,6 +170,8 @@ struct LockedCvar
 };
 
 constexpr auto kLockedClientProfile = std::to_array<LockedCvar>({
+    {"cl_allowdownload", "1"},
+    {"cl_download_ingame", "1"},
     {"fps_override", "0"},
     {"fps_max", "100.0"},
     {"rate", "100000"},

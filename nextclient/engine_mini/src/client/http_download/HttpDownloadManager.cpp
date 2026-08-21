@@ -45,6 +45,11 @@ void HttpDownloadManager::SetUrl(const std::string &url)
     base_url_ = FixUrl(url);
 }
 
+bool HttpDownloadManager::CanUseHttpDownload() const
+{
+    return !base_url_.empty() && !failed_base_urls_.contains(base_url_);
+}
+
 void HttpDownloadManager::Queue(const ResourceDescriptor& file_resource)
 {
     if (!IsSafeFileToDownload(file_resource.get_download_path()))
@@ -86,6 +91,8 @@ void HttpDownloadManager::Stop()
     total_bytes_to_download_ = 0;
     completed_requests_bytes_downloaded_ = 0;
     is_slow_speed_ = false;
+    last_progress_bytes_ = 0;
+    last_progress_time_ = {};
 }
 
 uint32_t HttpDownloadManager::GetDownloadQueueSize()
@@ -96,8 +103,20 @@ uint32_t HttpDownloadManager::GetDownloadQueueSize()
 void HttpDownloadManager::Update()
 {
     PruneCompletedRequests();
+    if (fallback_requested_)
+    {
+        FallbackToGameDownload();
+        return;
+    }
+
     StartNewDownloads();
     UpdateDownloadSpeed();
+    if (fallback_requested_)
+    {
+        FallbackToGameDownload();
+        return;
+    }
+
     UpdateUi();
     CheckAllDownloadsCompleted();
 }
@@ -160,6 +179,7 @@ void HttpDownloadManager::PruneCompletedRequests()
             {
                 Con_Printf("[HTTP] Can't save file: %s\n", resource_descriptor.get_save_path().c_str());
                 download_logger_->AddLogFileError(resource_descriptor.get_download_path().c_str(), LogFileTypeError::FileSaveError, 0, 0);
+                fallback_requested_ = true;
             }
 
             completed_requests_bytes_downloaded_ += response_result.downloaded_bytes;
@@ -167,7 +187,7 @@ void HttpDownloadManager::PruneCompletedRequests()
         }
         else
         {
-            if (request.get_retry() <= GetMaxRequestsRetries())
+            if (response_result.status_code != 404 && request.get_retry() < GetMaxRequestsRetries())
             {
                 files_to_download_.emplace(resource_descriptor, request.get_retry() + 1);
             }
@@ -179,6 +199,7 @@ void HttpDownloadManager::PruneCompletedRequests()
 
                 auto log_file_type = response_result.status_code == 404 ? LogFileTypeError::FileMissingHTTP : LogFileTypeError::FileErrorHTTP;
                 download_logger_->AddLogFileError(resource_descriptor.get_download_path().c_str(), log_file_type, (int)response_result.error.code, response_result.status_code);
+                fallback_requested_ = true;
             }
         }
 
@@ -203,6 +224,7 @@ void HttpDownloadManager::StartNewDownloads()
             cpr::Url(file_url),
             cpr::UserAgent("Valve/Steam HTTP Client 1.0 (10)"),
             cpr::ConnectTimeout(std::chrono::duration_cast<std::chrono::milliseconds>(connection_timeout_)),
+            cpr::LowSpeed(1, 15),
             cpr::ProgressCallback(
                 [shared_data]
                     (size_t downloadTotal, size_t downloadNow, size_t uploadTotal, size_t uploadNow, intptr_t userdata)
@@ -249,25 +271,40 @@ void HttpDownloadManager::UpdateDownloadSpeed()
 void HttpDownloadManager::SlowSpeedDetection()
 {
     auto current_time = system_clock::now();
+    const uint32_t downloaded_bytes = GetDownloadedBytes();
 
-    if (download_statistics_.get_speed() >= slow_speed_threshold_)
+    if (downloaded_bytes > last_progress_bytes_)
     {
-        is_slow_speed_ = false;
+        last_progress_bytes_ = downloaded_bytes;
+        last_progress_time_ = current_time;
+        is_slow_speed_ = download_statistics_.get_speed() < slow_speed_threshold_;
         return;
     }
 
-    if (!is_slow_speed_)
+    if (last_progress_time_ == time_point{})
     {
-        is_slow_speed_ = true;
-        slow_speed_start_time_ = current_time;
+        last_progress_time_ = current_time;
+        return;
     }
 
-    if (slow_speed_start_time_ + slow_speed_fallback_timeout_ <= current_time)
+    is_slow_speed_ = true;
+    slow_speed_start_time_ = last_progress_time_;
+    if (last_progress_time_ + stalled_download_timeout_ <= current_time)
     {
         download_logger_->AddLogDownloadAborted(DownloadAbortedReason::HttpSlowSpeed);
-        Stop();
-        gEngfuncs.pfnClientCmd("retry");
+        fallback_requested_ = true;
     }
+}
+
+void HttpDownloadManager::FallbackToGameDownload()
+{
+    if (!base_url_.empty())
+        failed_base_urls_.emplace(base_url_);
+
+    Con_Printf("[HTTP] FastDL failed; retrying with the game server download channel.\n");
+    fallback_requested_ = false;
+    Stop();
+    gEngfuncs.pfnClientCmd("retry");
 }
 
 void HttpDownloadManager::UpdateUi()
@@ -278,7 +315,7 @@ void HttpDownloadManager::UpdateUi()
         std::string status_str;
         if (is_slow_speed_)
         {
-            auto target_time = slow_speed_start_time_ + slow_speed_fallback_timeout_;
+            auto target_time = slow_speed_start_time_ + stalled_download_timeout_;
             auto cur_time = system_clock::now();
             auto diff = duration_cast<seconds>(target_time - cur_time);
 

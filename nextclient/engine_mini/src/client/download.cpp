@@ -55,6 +55,11 @@ void CL_HTTPSetDownloadUrl(const std::string& url)
     g_HttpDownloadManager->SetUrl(url);
 }
 
+bool CL_CanUseHttpDownload()
+{
+    return g_HttpDownloadManager && g_HttpDownloadManager->CanUseHttpDownload();
+}
+
 int CL_HttpGetDownloadQueueSize()
 {
     return g_HttpDownloadManager ? g_HttpDownloadManager->GetDownloadQueueSize() : 0;
