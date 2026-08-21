@@ -19,7 +19,6 @@ public:
     void SetLastConnectionInfo(servernetadr_t address, GuiConnectionSource connection_source, const char* sq_map);
     void InvokeInternetServerSelected(uint32_t ip, uint16_t port, int num, int total_servers);
     bool InvokeRunMenuCommand(const char* command);
-    bool InvokeDequeueGameMenuServer(servernetadr_t* address);
 };
 
 extern CGameUINext &GameUINext();

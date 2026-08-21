@@ -615,6 +615,25 @@ static void OnGameInitialized()
     CL_NclEntitySyncRegisterType(static_cast<uint8_t>(ncl_entity::EntityTypeId::Weapon), std::make_unique<WeaponSyncSystem>());
     CL_NclEntitySyncOverlayInit();
     PROTECTOR_Init(g_SettingGuard);
+
+    // Conservative low-latency defaults. Keep the engine's 100 FPS limit to
+    // preserve GoldSrc movement/physics behavior, and avoid thread priorities
+    // that can starve audio or networking.
+    auto set_cvar = [](const char* name, const char* value) {
+        if (gEngfuncs.pfnGetCvarPointer(name) != nullptr)
+            gEngfuncs.Cvar_Set(name, value);
+    };
+
+    set_cvar("m_rawinput", "1");
+    set_cvar("m_filter", "0");
+    set_cvar("joystick", "0");
+    set_cvar("gl_vsync", "0");
+
+    if (cvar_t* mixahead = gEngfuncs.pfnGetCvarPointer("_snd_mixahead");
+        mixahead != nullptr && mixahead->value > 0.05f)
+    {
+        gEngfuncs.Cvar_Set("_snd_mixahead", "0.05");
+    }
 }
 
 class EngineMini : public EngineMiniInterface

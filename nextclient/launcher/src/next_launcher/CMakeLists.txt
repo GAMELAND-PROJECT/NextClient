@@ -47,6 +47,7 @@ target_link_libraries(${TARGET_NAME} PRIVATE
         CURL::libcurl
         ZLIB::ZLIB
         Dbghelp.lib
+        Winmm.lib
 )
 
 target_compile_definitions(${TARGET_NAME} PRIVATE

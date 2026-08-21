@@ -8,6 +8,7 @@
 #include <magic_enum/magic_enum.hpp>
 #include <string>
 #include <thread>
+#include <mmsystem.h>
 
 #ifdef SENTRY_ENABLE
 #include <sentry.h>
@@ -33,6 +34,27 @@
 #include "taskbar_icon.h"
 
 static const char* NITRO_API_LOG_TAG = "launcher";
+
+namespace
+{
+class TimerResolutionScope
+{
+public:
+    TimerResolutionScope() : enabled_(timeBeginPeriod(1) == TIMERR_NOERROR) { }
+
+    ~TimerResolutionScope()
+    {
+        if (enabled_)
+            timeEndPeriod(1);
+    }
+
+    TimerResolutionScope(const TimerResolutionScope&) = delete;
+    TimerResolutionScope& operator=(const TimerResolutionScope&) = delete;
+
+private:
+    bool enabled_ = false;
+};
+}
 
 
 ClientLauncher::ClientLauncher(HINSTANCE module_instance, const char* cmd_line) :
@@ -278,6 +300,7 @@ ClientLauncher::EngineSessionResult ClientLauncher::RunEngine()
     LOG(INFO) << "IEngineAPI::Run";
     analytics_->AddBreadcrumb("Info", "IEngineAPI::Run");
 
+    TimerResolutionScope timer_resolution;
     EngineRunResult engine_run_result = engine->Run(
         module_instance_,
         "",

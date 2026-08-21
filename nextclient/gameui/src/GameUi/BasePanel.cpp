@@ -750,6 +750,11 @@ CGameMenu *CBasePanel::RecursiveLoadGameMenu(vgui2::Panel *parent, KeyValues *da
         const char *cmd = dat->GetString("command", NULL);
         const char *name = dat->GetString("name", label);
 
+        // Keep nonessential online actions out of the client even when they are
+        // supplied by an external GameMenu.res in the game installation.
+        if (cmd && (!Q_stricmp(cmd, "ConnectToRandomServer") || !Q_stricmp(cmd, "OpenHelpUrl")))
+            continue;
+
         menu->AddMenuItem(name, label, cmd, this, dat);
     }
 
@@ -981,22 +986,6 @@ void CBasePanel::RunMenuCommand(const char *command)
     else if (!Q_stricmp(command, "ReleaseModalWindow"))
     {
         vgui2::surface()->RestrictPaintToSinglePanel(NULL);
-    }
-    else if (!Q_strcmp(command, "ConnectToRandomServer"))
-    {
-        servernetadr_t server_addr{};
-        GameUINext().InvokeDequeueGameMenuServer(&server_addr);
-
-        if (server_addr.GetIP() != 0 && server_addr.GetConnectionPort() != 0)
-        {
-            GameUINext().SetLastConnectionInfo(server_addr, GuiConnectionSource::GameMenu, "");
-            engine->pfnClientCmd(std::format("connect {}\n", server_addr.GetConnectionAddressString()).c_str());
-        }
-        else
-        {
-            auto* dlg = new vgui2::MessageBox("Info", "The master server did not return a list of servers for the Random Servers button, or there is no internet connection.");
-            dlg->DoModal();
-        }
     }
     else if (!Q_stricmp(command, "OpenPlayerListDialog"))
     {

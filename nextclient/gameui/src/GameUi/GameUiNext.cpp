@@ -95,18 +95,3 @@ bool CGameUINext::InvokeRunMenuCommand(const char* command)
     return false;
 }
 
-bool CGameUINext::InvokeDequeueGameMenuServer(servernetadr_t* address)
-{
-    if (address == nullptr)
-        return false;
-
-    for (auto& listener : listeners_)
-    {
-        bool handled = listener->DequeueGameMenuServer(address);
-        if (handled)
-            return true;
-    }
-
-    *address = servernetadr_t{};
-    return false;
-}

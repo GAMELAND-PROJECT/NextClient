@@ -56,9 +56,6 @@ public:
     // Return true to indicate that the command has been processed (the following listeners will not be called).
     virtual bool RunMenuCommand(const char* command) = 0;
 
-    // Called when the player has invoked the ConnectToRandomServer command in the main menu.
-    // Return true to indicate that the address has been written (the following listeners will not be called).
-    virtual bool DequeueGameMenuServer(servernetadr_t* address) = 0;
 };
 
 class IGameUINext : public IBaseInterface
