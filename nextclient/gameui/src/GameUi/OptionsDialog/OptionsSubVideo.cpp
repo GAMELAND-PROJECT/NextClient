@@ -241,7 +241,7 @@ void COptionsSubVideo::OnResetData()
     m_pWindowed->SetSelected(m_CurrentSettings.windowed);
     m_pHDModels->SetSelected(m_CurrentSettings.hdmodels);
     m_pAddonsFolder->SetSelected(m_CurrentSettings.addons_folder);
-    m_pLowVideoDetail->SetSelected(m_CurrentSettings.vid_level);
+    m_pLowVideoDetail->SetSelected(m_CurrentSettings.vid_level == 0);
     m_pDisableMultitexture->SetSelected(m_CurrentSettings.disable_multitexture);
     m_pStretchAspect->SetSelected(m_CurrentSettings.stretch_aspect);
     m_pDetailTextures->Reset();
@@ -292,13 +292,14 @@ void COptionsSubVideo::SetCurrentResolutionComboItem()
 //-----------------------------------------------------------------------------
 void COptionsSubVideo::OnApplyChanges()
 {
-    bool bChanged = m_pBrightnessSlider->HasBeenModified() || m_pGammaSlider->HasBeenModified();
-
+    // Brightness, gamma and VSync are live cvars. Restarting the engine for
+    // these controls discards the just-applied values and needlessly reloads
+    // the whole graphics subsystem.
     m_pBrightnessSlider->ApplyChanges();
     m_pGammaSlider->ApplyChanges();
     m_pVsync->ApplyChanges();
 
-    ApplyVidSettings(bChanged);
+    ApplyVidSettings(false);
 }
 
 //-----------------------------------------------------------------------------
@@ -381,7 +382,8 @@ void COptionsSubVideo::ApplyVidSettings(bool bForceRefresh)
     if ( m_pLowVideoDetail )
     {
         bool checked = m_pLowVideoDetail->IsSelected();
-        m_CurrentSettings.vid_level = checked ? 1 : 0;
+        // GoldSrc stores 0 for low-detail mode and 1 for high-detail mode.
+        m_CurrentSettings.vid_level = checked ? 0 : 1;
     }
 
     if ( m_pDisableMultitexture )

@@ -22,6 +22,7 @@
 #include "common/nclm/NclmBodyWriter.h"
 
 #include "cl_demo.h"
+#include "download.h"
 #include "spriteapi.h"
 #include "vgui_int.h"
 #include "cl_private_resources.h"
@@ -98,6 +99,11 @@ void CL_ClearState(qboolean quiet)
 void CL_Disconnect()
 {
     OPTICK_EVENT();
+
+    // Do not let asynchronous resource transfers outlive the server session.
+    // Late completions can otherwise consume bandwidth or write resources
+    // after the state associated with them has already been cleared.
+    CL_HTTPStop_f();
 
     cls->connect_time = -99999.0;
     cls->connect_retry = 0;

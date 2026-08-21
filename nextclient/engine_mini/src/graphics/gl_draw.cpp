@@ -37,7 +37,7 @@ cvar_t gl_palette_tex = {"gl_palette_tex", const_cast<char*>("0"), FCVAR_ARCHIVE
 cvar_t gl_texturemode = {"gl_texturemode", const_cast<char*>("GL_LINEAR_MIPMAP_LINEAR"), FCVAR_ARCHIVE};
 cvar_t gl_picmip = {"gl_picmip", const_cast<char*>("0"), FCVAR_ARCHIVE};
 cvar_t gl_max_size = {"gl_max_size", const_cast<char*>("1024"), FCVAR_ARCHIVE};
-cvar_t gl_round_down = {"gl_round_down", const_cast<char*>("3"), FCVAR_ARCHIVE};
+cvar_t gl_round_down = {"gl_round_down", const_cast<char*>("0"), FCVAR_ARCHIVE};
 
 int gl_filter_min = GL_LINEAR_MIPMAP_LINEAR;
 int gl_filter_max = GL_LINEAR;

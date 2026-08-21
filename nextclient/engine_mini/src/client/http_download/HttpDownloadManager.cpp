@@ -19,7 +19,7 @@ HttpDownloadManager::HttpDownloadManager(IGameUI* game_ui,
     download_logger_(download_logger),
     config_provider_(config_provider)
 {
-    cvar_max_active_requests = gEngfuncs.pfnRegisterVariable("http_max_active_requests", "5", FCVAR_ARCHIVE);
+    cvar_max_active_requests = gEngfuncs.pfnRegisterVariable("http_max_active_requests", "2", FCVAR_ARCHIVE);
     cvar_max_requests_retries = gEngfuncs.pfnRegisterVariable("http_max_requests_retries", "3", FCVAR_ARCHIVE);
 
     requests_.reserve(MAX_POSSIBLE_ACTIVE_REQUESTS);
@@ -314,7 +314,10 @@ void HttpDownloadManager::UpdateUi()
         {
             const auto &request = requests_[0];
 
-            float download_progress = (float)request.get_shared_data()->download_now / request.get_shared_data()->download_total;
+            const uint32_t download_total = request.get_shared_data()->download_total;
+            const float download_progress = download_total > 0
+                ? (float)request.get_shared_data()->download_now / download_total
+                : 0.0f;
             const char* file_path = request.get_file_resource().get_download_path().c_str();
 
             game_ui_->SetSecondaryProgressBar(download_progress);

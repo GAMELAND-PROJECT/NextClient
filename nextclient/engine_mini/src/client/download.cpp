@@ -17,8 +17,13 @@ void CL_CreateHttpDownloadManager(IGameUI* game_ui,
 
 void CL_DeleteHttpDownloadManager()
 {
-    g_HttpDownloadManager = nullptr;
-    g_DownloadFileLogger = nullptr;
+    if (g_HttpDownloadManager)
+    {
+        g_HttpDownloadManager->Stop();
+        g_HttpDownloadManager.reset();
+    }
+
+    g_DownloadFileLogger.reset();
 }
 
 HttpDownloadManagerInterface* CL_GetHttpDownloadManager()
@@ -44,7 +49,7 @@ bool CL_RemoveDonwloadFileLogger(DownloadFileLoggerInterface* logger)
 
 void CL_HTTPSetDownloadUrl(const std::string& url)
 {
-    if (cls->state == cactive_t::ca_active)
+    if (g_HttpDownloadManager == nullptr || cls == nullptr || cls->state == cactive_t::ca_active)
         return;
 
     g_HttpDownloadManager->SetUrl(url);
@@ -52,27 +57,31 @@ void CL_HTTPSetDownloadUrl(const std::string& url)
 
 int CL_HttpGetDownloadQueueSize()
 {
-    return g_HttpDownloadManager->GetDownloadQueueSize();
+    return g_HttpDownloadManager ? g_HttpDownloadManager->GetDownloadQueueSize() : 0;
 }
 
 void CL_QueueHTTPDownload(const ResourceDescriptor& file_resource)
 {
-    g_HttpDownloadManager->Queue(file_resource);
+    if (g_HttpDownloadManager)
+        g_HttpDownloadManager->Queue(file_resource);
 }
 
 void CL_HTTPUpdate()
 {
-    g_HttpDownloadManager->Update();
+    if (g_HttpDownloadManager)
+        g_HttpDownloadManager->Update();
 }
 
 void CL_HTTPCancel_f()
 {
-    g_HttpDownloadManager->Stop();
+    if (g_HttpDownloadManager)
+        g_HttpDownloadManager->Stop();
 }
 
 void CL_HTTPStop_f()
 {
-    g_HttpDownloadManager->Stop();
+    if (g_HttpDownloadManager)
+        g_HttpDownloadManager->Stop();
 }
 
 void CL_MarkMapAsUsingHTTPDownload()

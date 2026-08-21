@@ -109,6 +109,11 @@ void S_UnloadSounds(const std::unordered_set<std::string>& names)
 {
     OPTICK_EVENT();
 
+    if (p_known_sfx == nullptr || p_num_sfx == nullptr || *p_known_sfx == nullptr)
+    {
+        return;
+    }
+
     sfx_t* known_sfx = *p_known_sfx;
     int num_sfx = *p_num_sfx;
 
