@@ -1,0 +1,5 @@
+# NextClient pinned servers
+# Add one public IP address or hostname per line in this format:
+# 185.10.20.30:27015
+# cs.example.com:27016
+
