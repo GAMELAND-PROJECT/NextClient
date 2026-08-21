@@ -13,9 +13,10 @@ class HttpMasterClient : public MasterClientInterface
     
     std::string url_{};
     std::unordered_map<std::string, std::string> headers_{};
+    bool plain_text_{};
 
 public:
-    explicit HttpMasterClient(NextClientVersion client_version, std::string url);
+    explicit HttpMasterClient(NextClientVersion client_version, std::string url, bool plain_text = false);
 
     concurrencpp::result<std::vector<netadr_t>> GetServerAddressesAsync(
         std::function<void(const netadr_t&)> address_received_callback,

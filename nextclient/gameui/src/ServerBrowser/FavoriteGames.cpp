@@ -1,5 +1,6 @@
 #include "FavoriteGames.h"
 
+#include "GameUi.h"
 #include "ServerContextMenu.h"
 #include "ServerListCompare.h"
 #include "ServerBrowserDialog.h"
@@ -137,7 +138,12 @@ void CFavoriteGames::OnOpenContextMenu(int itemID)
         int serverID = m_pGameList->GetItemUserData(m_pGameList->GetSelectedItem(0));
 
         menu->ShowMenu(this, serverID, true, true, true, false);
-        menu->AddMenuItem("RemoveServer", "#ServerBrowser_RemoveServerFromFavorites", new KeyValues("RemoveFromFavorites"), this);
+        if (m_Servers.IsServerExists(serverID))
+        {
+            const auto& server = m_Servers.GetServer(serverID).gs;
+            if (!EngineMini()->IsPinnedServer(server.m_NetAdr.GetIP(), server.m_NetAdr.GetConnectionPort()))
+                menu->AddMenuItem("RemoveServer", "#ServerBrowser_RemoveServerFromFavorites", new KeyValues("RemoveFromFavorites"), this);
+        }
     }
     else
         menu->ShowMenu(this, (unsigned int)-1, false, false, false, false);
@@ -177,6 +183,9 @@ void CFavoriteGames::OnRemoveFromFavorites()
 
         uint32_t ip = server.gs.m_NetAdr.GetIP();
         uint16_t port = server.gs.m_NetAdr.GetConnectionPort();
+
+        if (EngineMini()->IsPinnedServer(ip, port))
+            return;
 
         SteamMatchmaking()->RemoveFavoriteGame(SteamUtils()->GetAppID(), ip, port, port, k_unFavoriteFlagFavorite);
 

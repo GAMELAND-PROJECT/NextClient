@@ -1,10 +1,16 @@
 #pragma once
+#include <memory>
+#include <unordered_set>
 #include <variant>
+#include <vector>
 #include <steam/steam_api.h>
 
 #include "MatchmakingService.h"
 #include "ServerListRequestData.h"
 #include "SteamServerListRequestData.h"
+
+class FileMasterClient;
+class HttpMasterClient;
 
 namespace service::matchmaking
 {
@@ -15,11 +21,19 @@ namespace service::matchmaking
         int server_list_request_counter_{};
         std::unordered_map<HServerListRequest, std::variant<SteamServersListRequestData, ServerListRequestData>> server_requests_{};
         std::shared_ptr<MultiSourceQuery> source_query_{};
-        std::shared_ptr<MatchmakingService> matchmaking_service_{};
+std::shared_ptr<MatchmakingService> matchmaking_service_{};
+std::shared_ptr<HttpMasterClient> pinned_http_client_{};
+std::shared_ptr<FileMasterClient> pinned_cache_client_{};
+std::shared_ptr<taskcoro::CancellationToken> pinned_cancellation_token_{};
+std::unordered_set<uint64_t> pinned_servers_{};
+bool pinned_servers_initialized_{};
 
     public:
-        explicit MatchmakingSteamComp();
-        ~MatchmakingSteamComp();
+explicit MatchmakingSteamComp();
+~MatchmakingSteamComp();
+
+void InitializePinnedServers();
+[[nodiscard]] bool IsPinnedServer(uint32 ip, uint16 port) const;
 
         // ISteamMatchmakingServers
         HServerListRequest RequestInternetServerList(AppId_t iApp, MatchMakingKeyValuePair_t** ppchFilters, uint32 nFilters, ISteamMatchmakingServerListResponse* response_callback) override;
@@ -62,5 +76,7 @@ namespace service::matchmaking
             const MatchmakingService::ServerInfo& server_info
         );
         void InitEmptyGameServerItem(gameserveritem_t& gameserver, uint32_t ip, uint16_t port);
+        void ApplyPinnedServers(const std::vector<netadr_t>& addresses);
+        static uint64_t MakePinnedServerKey(uint32 ip, uint16 port);
     };
 }

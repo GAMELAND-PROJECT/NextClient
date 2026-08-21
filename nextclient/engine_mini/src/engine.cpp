@@ -725,6 +725,9 @@ static void OnGameInitialized()
     CL_NclEntitySyncOverlayInit();
     PROTECTOR_Init(g_SettingGuard);
 
+    if (g_pMatchmakingServers)
+        g_pMatchmakingServers->InitializePinnedServers();
+
     // Conservative low-latency defaults. Keep the engine's 100 FPS limit to
     // preserve GoldSrc movement/physics behavior, and leave VSync under user
     // control so the Video settings can select latency or tear-free output.
@@ -825,6 +828,11 @@ public:
     ISteamMatchmakingServers* GetSteamMatchmakingServers() override
     {
         return g_pMatchmakingServers.get();
+    }
+
+    bool IsPinnedServer(uint32_t ip, uint16_t port) const override
+    {
+        return g_pMatchmakingServers && g_pMatchmakingServers->IsPinnedServer(ip, port);
     }
     
     void SetNclmVerificator(NclmVerificatorInterface* handler) override

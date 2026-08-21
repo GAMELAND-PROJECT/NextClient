@@ -7,8 +7,29 @@
 #include <KeyValues.h>
 #include <vgui_controls/ListPanel.h>
 
+namespace
+{
+int ComparePinned(ListPanel* panel, const ListPanelItem& first, const ListPanelItem& second)
+{
+    const bool firstPinned = first.kv && first.kv->GetInt("_pinned", 0) != 0;
+    const bool secondPinned = second.kv && second.kv->GetInt("_pinned", 0) != 0;
+    if (firstPinned == secondPinned)
+        return 0;
+
+    const int pinnedFirstOrder = firstPinned ? -1 : 1;
+    [[maybe_unused]] int primaryColumn;
+    [[maybe_unused]] int secondaryColumn;
+    bool ascending;
+    panel->GetSortColumnEx(primaryColumn, secondaryColumn, ascending);
+    return ascending ? pinnedFirstOrder : -pinnedFirstOrder;
+}
+}
+
 int __cdecl ServerIdCompare(ListPanel *pPanel, const ListPanelItem &p1, const ListPanelItem &p2)
 {
+    if (const int pinnedOrder = ComparePinned(pPanel, p1, p2); pinnedOrder != 0)
+        return pinnedOrder;
+
     auto game_list_panel = dynamic_cast<CGameListPanel*>(pPanel);
     if (!game_list_panel)
         return 0;
@@ -26,6 +47,9 @@ int __cdecl ServerIdCompare(ListPanel *pPanel, const ListPanelItem &p1, const Li
 
 int __cdecl PasswordCompare(ListPanel *pPanel, const ListPanelItem &p1, const ListPanelItem &p2)
 {
+    if (const int pinnedOrder = ComparePinned(pPanel, p1, p2); pinnedOrder != 0)
+        return pinnedOrder;
+
     auto game_list_panel = dynamic_cast<CGameListPanel*>(pPanel);
     if (!game_list_panel)
         return 0;
@@ -43,6 +67,9 @@ int __cdecl PasswordCompare(ListPanel *pPanel, const ListPanelItem &p1, const Li
 
 int __cdecl BotsCompare(ListPanel *pPanel, const ListPanelItem &p1, const ListPanelItem &p2)
 {
+    if (const int pinnedOrder = ComparePinned(pPanel, p1, p2); pinnedOrder != 0)
+        return pinnedOrder;
+
     auto game_list_panel = dynamic_cast<CGameListPanel*>(pPanel);
     if (!game_list_panel)
         return 0;
@@ -60,6 +87,9 @@ int __cdecl BotsCompare(ListPanel *pPanel, const ListPanelItem &p1, const ListPa
 
 int __cdecl SecureCompare(ListPanel *pPanel, const ListPanelItem &p1, const ListPanelItem &p2)
 {
+    if (const int pinnedOrder = ComparePinned(pPanel, p1, p2); pinnedOrder != 0)
+        return pinnedOrder;
+
     auto game_list_panel = dynamic_cast<CGameListPanel*>(pPanel);
     if (!game_list_panel)
         return 0;
@@ -77,6 +107,9 @@ int __cdecl SecureCompare(ListPanel *pPanel, const ListPanelItem &p1, const List
 
 int __cdecl PingCompare(ListPanel *pPanel, const ListPanelItem &p1, const ListPanelItem &p2)
 {
+    if (const int pinnedOrder = ComparePinned(pPanel, p1, p2); pinnedOrder != 0)
+        return pinnedOrder;
+
     auto game_list_panel = dynamic_cast<CGameListPanel*>(pPanel);
     if (!game_list_panel)
         return 0;
@@ -94,6 +127,9 @@ int __cdecl PingCompare(ListPanel *pPanel, const ListPanelItem &p1, const ListPa
 
 int __cdecl MapCompare(ListPanel *pPanel, const ListPanelItem &p1, const ListPanelItem &p2)
 {
+    if (const int pinnedOrder = ComparePinned(pPanel, p1, p2); pinnedOrder != 0)
+        return pinnedOrder;
+
     auto game_list_panel = dynamic_cast<CGameListPanel*>(pPanel);
     if (!game_list_panel)
         return 0;
@@ -106,6 +142,9 @@ int __cdecl MapCompare(ListPanel *pPanel, const ListPanelItem &p1, const ListPan
 
 int __cdecl GameCompare(ListPanel *pPanel, const ListPanelItem &p1, const ListPanelItem &p2)
 {
+    if (const int pinnedOrder = ComparePinned(pPanel, p1, p2); pinnedOrder != 0)
+        return pinnedOrder;
+
     auto game_list_panel = dynamic_cast<CGameListPanel*>(pPanel);
     if (!game_list_panel)
         return 0;
@@ -118,6 +157,9 @@ int __cdecl GameCompare(ListPanel *pPanel, const ListPanelItem &p1, const ListPa
 
 int __cdecl ServerNameCompare(ListPanel *pPanel, const ListPanelItem &p1, const ListPanelItem &p2)
 {
+    if (const int pinnedOrder = ComparePinned(pPanel, p1, p2); pinnedOrder != 0)
+        return pinnedOrder;
+
     auto game_list_panel = dynamic_cast<CGameListPanel*>(pPanel);
     if (!game_list_panel)
         return 0;
@@ -130,6 +172,9 @@ int __cdecl ServerNameCompare(ListPanel *pPanel, const ListPanelItem &p1, const 
 
 int __cdecl PlayersCompare(ListPanel *pPanel, const ListPanelItem &p1, const ListPanelItem &p2)
 {
+    if (const int pinnedOrder = ComparePinned(pPanel, p1, p2); pinnedOrder != 0)
+        return pinnedOrder;
+
     auto game_list_panel = dynamic_cast<CGameListPanel*>(pPanel);
     if (!game_list_panel)
         return 0;
@@ -159,6 +204,9 @@ int __cdecl PlayersCompare(ListPanel *pPanel, const ListPanelItem &p1, const Lis
 
 int __cdecl LastPlayedCompare(ListPanel *pPanel, const ListPanelItem &p1, const ListPanelItem &p2)
 {
+    if (const int pinnedOrder = ComparePinned(pPanel, p1, p2); pinnedOrder != 0)
+        return pinnedOrder;
+
     auto game_list_panel = dynamic_cast<CGameListPanel*>(pPanel);
     if (!game_list_panel)
         return 0;

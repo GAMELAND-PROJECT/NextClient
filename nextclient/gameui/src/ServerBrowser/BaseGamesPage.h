@@ -42,12 +42,15 @@ public:
 public:
     CGameListPanel(CBaseGamesPage *pOuter, const char *pName);
     [[nodiscard]] CBaseGamesPage* GetOuterGamesPage() const;
+    void SetPinnedSortFunc(int column, vgui2::SortFunc* sortFunc);
+    void SetSortColumn(int column) override;
 
     // Panel
     void OnKeyCodeTyped(vgui2::KeyCode code) override;
 
 private:
     CBaseGamesPage *m_pOuter;
+    std::unordered_map<int, vgui2::SortFunc*> m_SortFunctions;
 };
 
 class CBaseGamesPage : public vgui2::PropertyPage, public IServerRefreshResponse, public IGameList

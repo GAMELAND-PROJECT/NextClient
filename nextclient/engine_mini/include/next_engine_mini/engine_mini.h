@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstdint>
+
 #include "DownloadFileLoggerInterface.h"
 #include "CommandLoggerInterface.h"
 #include "AnalyticsInterface.h"
@@ -33,6 +35,7 @@ public:
     virtual bool RemoveCmdLogger(CommandLoggerInterface* logger) = 0;
 
     virtual ISteamMatchmakingServers* GetSteamMatchmakingServers() = 0;
+    virtual bool IsPinnedServer(uint32_t ip, uint16_t port) const = 0;
     virtual void SetNclmVerificator(NclmVerificatorInterface* handler) = 0;
 };
 

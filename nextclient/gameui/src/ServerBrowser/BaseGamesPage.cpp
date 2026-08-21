@@ -1,6 +1,7 @@
 #include "BaseGamesPage.h"
 #include "ServerListCompare.h"
 #include "ServerBrowserDialog.h"
+#include "GameUi.h"
 #include <GameServerHelpers.h>
 
 #include <vgui/ILocalize.h>
@@ -60,6 +61,21 @@ CBaseGamesPage *CGameListPanel::GetOuterGamesPage() const
     return m_pOuter;
 }
 
+void CGameListPanel::SetPinnedSortFunc(int column, vgui2::SortFunc* sortFunc)
+{
+    m_SortFunctions[column] = sortFunc;
+    BaseClass::SetSortFunc(column, sortFunc);
+}
+
+void CGameListPanel::SetSortColumn(int column)
+{
+    BaseClass::SetSortColumn(column);
+
+    const auto sortFunction = m_SortFunctions.find(column);
+    if (sortFunction != m_SortFunctions.end())
+        BaseClass::SetSortFunc(column, sortFunction->second);
+}
+
 CBaseGamesPage::CBaseGamesPage(vgui2::Panel *parent, const char *name, const char *pCustomResFilename, const std::vector<GameListColumnType>& columns) :
     PropertyPage(parent, name),
     m_pCustomResFilename(pCustomResFilename),
@@ -94,49 +110,49 @@ CBaseGamesPage::CBaseGamesPage(vgui2::Panel *parent, const char *name, const cha
         {
         case GameListColumnType::Password:
             m_pGameList->AddColumnHeader(i, "Password", "#ServerBrowser_Password", 16, ListPanel::COLUMN_FIXEDSIZE | ListPanel::COLUMN_IMAGE);
-            m_pGameList->SetSortFunc(i, ServerIdCompare);
+            m_pGameList->SetPinnedSortFunc(i, ServerIdCompare);
             m_pGameList->SetColumnHeaderTooltip(i, "#ServerBrowser_PasswordColumn_Tooltip");
             break;
 
         case GameListColumnType::Bots:
             m_pGameList->AddColumnHeader(i, "Bots", "#ServerBrowser_Bots", 17, ListPanel::COLUMN_FIXEDSIZE | ListPanel::COLUMN_HIDDEN);
-            m_pGameList->SetSortFunc(i, BotsCompare);
+            m_pGameList->SetPinnedSortFunc(i, BotsCompare);
             m_pGameList->SetColumnHeaderTooltip(i, "#ServerBrowser_BotColumn_Tooltip");
             break;
         case GameListColumnType::Secure:
             m_pGameList->AddColumnHeader(i, "Secure", "#ServerBrowser_Secure", 16, ListPanel::COLUMN_FIXEDSIZE | ListPanel::COLUMN_HIDDEN);
-            m_pGameList->SetSortFunc(i, SecureCompare);
+            m_pGameList->SetPinnedSortFunc(i, SecureCompare);
             m_pGameList->SetColumnHeaderTooltip(i, "#ServerBrowser_SecureColumn_Tooltip");
             break;
         case GameListColumnType::ServerName:
             m_pGameList->AddColumnHeader(i, "Name", "#ServerBrowser_Servers", 50, ListPanel::COLUMN_RESIZEWITHWINDOW | ListPanel::COLUMN_UNHIDABLE);
-            m_pGameList->SetSortFunc(i, ServerNameCompare);
+            m_pGameList->SetPinnedSortFunc(i, ServerNameCompare);
             break;
         case GameListColumnType::ServerDesc:
             m_pGameList->AddColumnHeader(i, "ServerDesc", "#ServerBrowser_ServerDesc", 100, ListPanel::COLUMN_RESIZEWITHWINDOW);
             break;
         case GameListColumnType::GameDesc:
             m_pGameList->AddColumnHeader(i, "GameDesc", "#ServerBrowser_Game", 112, 112, 300);
-            m_pGameList->SetSortFunc(i, GameCompare);
+            m_pGameList->SetPinnedSortFunc(i, GameCompare);
             break;
         case GameListColumnType::Players:
             m_pGameList->AddColumnHeader(i, "Players", "#ServerBrowser_Players", 55, 55, 300);
-            m_pGameList->SetSortFunc(i, PlayersCompare);
+            m_pGameList->SetPinnedSortFunc(i, PlayersCompare);
             break;
         case GameListColumnType::Map:
             m_pGameList->AddColumnHeader(i, "Map", "#ServerBrowser_Map", 90, 90, 10000);
-            m_pGameList->SetSortFunc(i, MapCompare);
+            m_pGameList->SetPinnedSortFunc(i, MapCompare);
             break;
         case GameListColumnType::Ping:
             m_pGameList->AddColumnHeader(i, "Ping", "#ServerBrowser_Latency", 55, 55, 10000);
-            m_pGameList->SetSortFunc(i, PingCompare);
+            m_pGameList->SetPinnedSortFunc(i, PingCompare);
             break;
         case GameListColumnType::Ip:
             m_pGameList->AddColumnHeader(i, "Address", "#ServerBrowser_IPAddress", 95, 95, 10000, ListPanel::COLUMN_HIDDEN);
             break;
         case GameListColumnType::LastPlayed:
             m_pGameList->AddColumnHeader(i, "LastPlayed", "#ServerBrowser_LastPlayed", 95, 95, 120);
-            m_pGameList->SetSortFunc(i, LastPlayedCompare);
+            m_pGameList->SetPinnedSortFunc(i, LastPlayedCompare);
             break;
         }
 
@@ -374,7 +390,10 @@ void CBaseGamesPage::ServerResponded(serveritem_t &server)
     else
         kv = m_pGameList->GetItem(server.listEntryID);
 
-    kv->SetString("name", server.gs.GetName().c_str());
+    const bool isPinned = EngineMini()->IsPinnedServer(server.gs.m_NetAdr.GetIP(), server.gs.m_NetAdr.GetConnectionPort());
+    const auto displayName = isPinned ? std::format("[PIN] {}", server.gs.GetName()) : server.gs.GetName();
+    kv->SetString("name", displayName.c_str());
+    kv->SetInt("_pinned", isPinned ? 1 : 0);
     kv->SetString("map", server.gs.m_szMap);
     kv->SetString("GameDir", server.gs.m_szGameDir);
     kv->SetString("GameDesc", server.gs.m_szGameDescription);
@@ -516,7 +535,10 @@ void CBaseGamesPage::ApplyGameFilters()
             if (!m_pGameList->IsValidItemID(server.listEntryID))
             {
                 auto *kv = new KeyValues("Server");
-                kv->SetString("name", server.gs.GetName().c_str());
+                const bool isPinned = EngineMini()->IsPinnedServer(server.gs.m_NetAdr.GetIP(), server.gs.m_NetAdr.GetConnectionPort());
+                const auto displayName = isPinned ? std::format("[PIN] {}", server.gs.GetName()) : server.gs.GetName();
+                kv->SetString("name", displayName.c_str());
+                kv->SetInt("_pinned", isPinned ? 1 : 0);
                 kv->SetString("map", server.gs.m_szMap);
                 kv->SetString("GameDir", server.gs.m_szGameDir);
                 kv->SetString("GameDesc", server.gs.m_szGameDescription);

@@ -68,9 +68,15 @@ void FileMasterClient::WriteToFile(const std::wstring& file_name, const std::vec
         return;
     }
 
-    std::filesystem::create_directories(GetSaveDirectoryPath());
+    const auto directory = GetSaveDirectoryPath();
+    const auto destination = GetSaveFilePath(file_name);
+    if (directory.empty() || destination.empty())
+        return;
 
-    std::ofstream file(GetSaveFilePath(file_name), std::ios::binary | std::ios::out);
+    std::filesystem::create_directories(directory);
+    const auto temporary = destination + L".tmp";
+
+    std::ofstream file(temporary, std::ios::binary | std::ios::out | std::ios::trunc);
     if (!file.is_open())
     {
         return;
@@ -86,6 +92,12 @@ void FileMasterClient::WriteToFile(const std::wstring& file_name, const std::vec
     }
 
     file.close();
+
+    if (!file.good() || !MoveFileExW(temporary.c_str(), destination.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
+    {
+        std::error_code error;
+        std::filesystem::remove(temporary, error);
+    }
 }
 
 std::wstring FileMasterClient::GetSaveFilePath(const std::wstring &file_name)
@@ -96,7 +108,9 @@ std::wstring FileMasterClient::GetSaveFilePath(const std::wstring &file_name)
         return {};
     }
 
-    return std::format(L"{}\\CS-NextClient\\{}", roaming_app_data_path, file_name);
+    const auto result = std::format(L"{}\\CS-NextClient\\{}", roaming_app_data_path, file_name);
+    CoTaskMemFree(roaming_app_data_path);
+    return result;
 }
 
 std::wstring FileMasterClient::GetSaveDirectoryPath()
@@ -107,5 +121,7 @@ std::wstring FileMasterClient::GetSaveDirectoryPath()
         return {};
     }
 
-    return std::format(L"{}\\CS-NextClient", roaming_app_data_path);
+    const auto result = std::format(L"{}\\CS-NextClient", roaming_app_data_path);
+    CoTaskMemFree(roaming_app_data_path);
+    return result;
 }

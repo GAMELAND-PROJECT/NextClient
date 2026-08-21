@@ -1,4 +1,7 @@
 #include "MatchmakingSteamComp.h"
+#include "engine.h"
+#include "master/FileMasterClient.h"
+#include "master/HttpMasterClient.h"
 
 #include <cassert>
 #include <optick.h>
@@ -8,6 +11,14 @@ using namespace service::matchmaking;
 using namespace concurrencpp;
 using namespace taskcoro;
 
+namespace
+{
+constexpr char kPinnedServersUrl[] =
+    "https://raw.githubusercontent.com/GAMELAND-PROJECT/NextClient/refs/heads/%D8%B4%D8%B1%D9%88%D8%B9-%D9%82%D8%B3%D9%85%D8%AA-%DA%A9%D9%84%D8%A7%DB%8C%D9%86%D8%AA-%D8%A8%D8%B1%D8%A7%DB%8C-%D8%A8%D9%82%DB%8C%D9%87-%D9%BE%DB%8C%D9%85%D9%86%D8%AA-%D9%87%D8%A7/pinned_servers.txt";
+constexpr wchar_t kPinnedServersCacheFile[] = L"pinned_servers.dat";
+constexpr size_t kMaxPinnedServers = 64;
+}
+
 MatchmakingSteamComp::MatchmakingSteamComp()
 {
     source_query_ = std::make_shared<MultiSourceQuery>(750, 3);
@@ -16,6 +27,9 @@ MatchmakingSteamComp::MatchmakingSteamComp()
 
 MatchmakingSteamComp::~MatchmakingSteamComp()
 {
+    if (pinned_cancellation_token_)
+        pinned_cancellation_token_->SetCanceled();
+
     std::vector<HServerListRequest> request_ids;
     request_ids.reserve(server_requests_.size());
     for (const auto& [request_id, request] : server_requests_)
@@ -25,8 +39,94 @@ MatchmakingSteamComp::~MatchmakingSteamComp()
         ReleaseRequest(request_id);
 }
 
+void MatchmakingSteamComp::InitializePinnedServers()
+{
+    if (pinned_servers_initialized_)
+        return;
+
+    pinned_servers_initialized_ = true;
+    pinned_cancellation_token_ = CancellationToken::Create();
+    pinned_cache_client_ = std::make_shared<FileMasterClient>(kPinnedServersCacheFile);
+    pinned_http_client_ = std::make_shared<HttpMasterClient>(
+        g_NextClientVersion,
+        kPinnedServersUrl,
+        true);
+
+    const auto cancellation_token = pinned_cancellation_token_;
+    const auto cache_client = pinned_cache_client_;
+    const auto http_client = pinned_http_client_;
+
+    TaskCoro::RunInMainThread([this, cancellation_token, cache_client, http_client]() -> result<void>
+    {
+        auto cached_addresses = co_await cache_client->GetServerAddressesAsync({}, cancellation_token);
+        cancellation_token->ThrowIfCancelled();
+        if (cached_addresses.size() > kMaxPinnedServers)
+            cached_addresses.resize(kMaxPinnedServers);
+        ApplyPinnedServers(cached_addresses);
+
+        auto downloaded_addresses = co_await http_client->GetServerAddressesAsync({}, cancellation_token);
+        cancellation_token->ThrowIfCancelled();
+
+        // An empty response is treated as a failed/invalid update. It must not
+        // erase a previously working cache or managed server list.
+        if (downloaded_addresses.empty())
+            co_return;
+
+        if (downloaded_addresses.size() > kMaxPinnedServers)
+            downloaded_addresses.resize(kMaxPinnedServers);
+
+        ApplyPinnedServers(downloaded_addresses);
+        co_await TaskCoro::RunIO([cache_client, downloaded_addresses]
+        {
+            cache_client->Save(downloaded_addresses);
+        });
+    });
+}
+
+bool MatchmakingSteamComp::IsPinnedServer(uint32 ip, uint16 port) const
+{
+    return pinned_servers_.contains(MakePinnedServerKey(ip, port));
+}
+
+void MatchmakingSteamComp::ApplyPinnedServers(const std::vector<netadr_t>& addresses)
+{
+    std::unordered_set<uint64_t> updated_servers;
+    updated_servers.reserve(addresses.size());
+
+    for (const auto& address : addresses)
+    {
+        if (!address.IsValid())
+            continue;
+
+        const auto ip = address.GetIPHostByteOrder();
+        const auto port = address.GetPortHostByteOrder();
+        updated_servers.emplace(MakePinnedServerKey(ip, port));
+        SteamMatchmaking()->AddFavoriteGame(SteamUtils()->GetAppID(), ip, port, port, k_unFavoriteFlagFavorite, 0);
+    }
+
+    for (const auto old_server : pinned_servers_)
+    {
+        if (updated_servers.contains(old_server))
+            continue;
+
+        const auto ip = static_cast<uint32>(old_server >> 16);
+        const auto port = static_cast<uint16>(old_server & 0xFFFFu);
+        SteamMatchmaking()->RemoveFavoriteGame(SteamUtils()->GetAppID(), ip, port, port, k_unFavoriteFlagFavorite);
+    }
+
+    pinned_servers_ = std::move(updated_servers);
+}
+
+uint64_t MatchmakingSteamComp::MakePinnedServerKey(uint32 ip, uint16 port)
+{
+    return (static_cast<uint64_t>(ip) << 16) | port;
+}
+
 void MatchmakingSteamComp::CancelAllQueries()
 {
+    if (pinned_cancellation_token_)
+        pinned_cancellation_token_->SetCanceled();
+
     // Callbacks may mutate request state, so iterate over a stable snapshot.
     std::vector<HServerListRequest> request_ids;
     request_ids.reserve(server_requests_.size());
