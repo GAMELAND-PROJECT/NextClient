@@ -17,7 +17,7 @@ namespace
         return name != nullptr && Q_strnicmp(name, prefix, Q_strlen(prefix)) == 0;
     }
 
-    bool IsMutedGameSound(const sfx_t* sfx)
+    bool IsGrenadeRadioAnnouncement(const sfx_t* sfx)
     {
         if (sfx == nullptr)
         {
@@ -30,12 +30,13 @@ namespace
             name += Q_strlen("sound/");
         }
 
-        return HasSoundPrefix(name, "ambience/") ||
-               HasSoundPrefix(name, "ambient/") ||
-               HasSoundPrefix(name, "radio/") ||
-               HasSoundPrefix(name, "hostage/") ||
-               HasSoundPrefix(name, "vox/") ||
-               Q_stristr(name, "MRAD_") != nullptr;
+        // Suppress only Counter-Strike's automatic "Fire in the hole"
+        // announcement. Do not mute the radio directory as a whole: other
+        // radio commands, hostage speech, VOX and map ambience are gameplay
+        // audio and must continue through the normal mixer path.
+        return Q_stricmp(name, "radio/ct_fireinhole.wav") == 0 ||
+               Q_stricmp(name, "radio/t_fireinhole.wav") == 0 ||
+               Q_stristr(name, "MRAD_FIREINHOLE") != nullptr;
     }
 
     sfx_t* GetReplacementSfx(int entnum, int entchannel, sfx_t* sfx)
@@ -114,7 +115,7 @@ void S_StartDynamicSoundHook(
         return;
     }
 
-    if (IsMutedGameSound(sfx))
+    if (IsGrenadeRadioAnnouncement(sfx))
     {
         return;
     }
@@ -143,10 +144,10 @@ void S_StartStaticSoundHook(
 {
     OPTICK_EVENT();
 
-    // Static channels are map ambience (loops, machinery and environmental
-    // emitters). Suppress them at creation instead of continuously stopping
-    // channels, which keeps the mixer and network voice paths untouched.
-    if (IsMutedGameSound(sfx) || entchannel == CHAN_STATIC)
+    // Keep static/map ambience on the normal mixer path. Dropping every
+    // CHAN_STATIC sound removes legitimate loops and may leave a source in an
+    // inconsistent lifecycle on some engine builds.
+    if (IsGrenadeRadioAnnouncement(sfx))
     {
         return;
     }
