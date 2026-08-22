@@ -65,9 +65,10 @@ private:
 
     void		GetVidSettings();
     void		RevertVidSettings();
-    void		ApplyVidSettings(bool bForceRefresh);
+    void		ApplyVidSettings();
 
     void        SetCurrentResolutionComboItem();
+    bool        GetSelectedResolution(int& width, int& height);
 
     MESSAGE_FUNC( OnDataChanged, "ControlModified" );
     MESSAGE_FUNC_PARAMS( OnButtonChecked, "CheckButtonChecked", panel);

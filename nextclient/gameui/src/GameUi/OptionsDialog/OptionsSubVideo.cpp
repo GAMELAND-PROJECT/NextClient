@@ -18,13 +18,15 @@
 
 #pragma warning(disable: 4101)
 
-inline bool IsWideScreen ( int width, int height )
+inline bool IsWideScreen(int width, int height)
 {
-    // 16:9 or 16:10 is widescreen :)
-    if ( (width * 9) == ( height * 16.0f ) || (width * 5.0) == ( height * 8.0 ))
-        return true;
+    if (width <= 0 || height <= 0)
+        return false;
 
-    return false;
+    // Treat 3:2 and anything wider as widescreen. Integer arithmetic avoids
+    // fragile exact floating-point comparisons and includes 1366x768,
+    // 16:10, 16:9 and ultrawide display modes.
+    return static_cast<long long>(width) * 2 >= static_cast<long long>(height) * 3;
 }
 
 //-----------------------------------------------------------------------------
@@ -134,42 +136,47 @@ void COptionsSubVideo::PrepareResolutionList( void )
 {
     vmode_t *plist = NULL;
     int count = 0;
-    bool bFoundWidescreen = false;
+    bool foundWidescreen = false;
+    bool foundNormal = false;
     int nItemsAdded = 0;
 
     g_pGameUIFuncs->GetVideoModes( &plist, &count );
 
     // Get selected resolution in list (not current game resolution)
     vmode_t lastSelectedResolution{};
-    char szSelectedResolution[256];
-    m_pMode->GetItemText(m_pMode->GetActiveItem(), szSelectedResolution, sizeof(szSelectedResolution));
-    if (szSelectedResolution[0] != '\0')
-        sscanf(szSelectedResolution, "%i x %i", &lastSelectedResolution.iWidth, &lastSelectedResolution.iHeight );
+    lastSelectedResolution.iWidth = m_CurrentSettings.w;
+    lastSelectedResolution.iHeight = m_CurrentSettings.h;
+    GetSelectedResolution(lastSelectedResolution.iWidth, lastSelectedResolution.iHeight);
 
     // Clean up before filling the info again.
     m_pMode->DeleteAllItems();
 
     int selectedItemID = -1;
-    int nearestItemID = -1; int minWidthDiff = INT_MAX;
+    int nearestItemID = -1;
+    int minimumResolutionDistance = INT_MAX;
     for (int i = 0; i < count; i++, plist++)
     {
         // exclude obscenely small resolutions :)
         if (plist->iWidth < 640 || plist->iHeight < 480)
             continue;
 
+        const bool isWidescreen = IsWideScreen(plist->iWidth, plist->iHeight);
+        if (isWidescreen)
+            foundWidescreen = true;
+        else
+            foundNormal = true;
+
         char sz[ 256 ];
         sprintf( sz, "%i x %i", plist->iWidth, plist->iHeight );
 
         int itemID = -1;
-        if ( IsWideScreen( plist->iWidth, plist->iHeight ) )
+        if (isWidescreen)
         {
             if (m_bStartWidescreen)
             {
                 itemID = m_pMode->AddItem( sz, NULL );
                 nItemsAdded++;
             }
-
-            bFoundWidescreen = true;
         }
         else
         {
@@ -189,15 +196,29 @@ void COptionsSubVideo::PrepareResolutionList( void )
             selectedItemID = itemID;
         }
 
-        int widthDiff = std::abs(plist->iWidth - lastSelectedResolution.iWidth);
-        if (widthDiff < minWidthDiff)
+        const int resolutionDistance =
+            std::abs(plist->iWidth - lastSelectedResolution.iWidth) +
+            std::abs(plist->iHeight - lastSelectedResolution.iHeight);
+        if (resolutionDistance < minimumResolutionDistance)
         {
-            minWidthDiff = widthDiff;
+            minimumResolutionDistance = resolutionDistance;
             nearestItemID = itemID;
         }
     }
 
-    m_pAspectRatio->SetEnabled( bFoundWidescreen );
+    m_pAspectRatio->SetEnabled(foundWidescreen && foundNormal);
+
+    const bool oppositeAspectAvailable = m_bStartWidescreen ? foundNormal : foundWidescreen;
+    if (nItemsAdded == 0)
+    {
+        if (oppositeAspectAvailable)
+        {
+            m_bStartWidescreen = !m_bStartWidescreen;
+            m_pAspectRatio->ActivateItem((m_pAspectRatio->GetActiveItem() + 1) % 2);
+            PrepareResolutionList();
+        }
+        return;
+    }
 
     if ( selectedItemID != -1 )
     {
@@ -210,13 +231,6 @@ void COptionsSubVideo::PrepareResolutionList( void )
     else
     {
         m_pMode->ActivateItem( 0 );
-    }
-
-    if ( nItemsAdded == 0 && count != 0 )
-    {
-        m_bStartWidescreen = !m_bStartWidescreen;
-        m_pAspectRatio->ActivateItem( ( m_pAspectRatio->GetActiveItem() + 1 ) % 2 );
-        PrepareResolutionList();
     }
 }
 
@@ -287,6 +301,37 @@ void COptionsSubVideo::SetCurrentResolutionComboItem()
     }
 }
 
+bool COptionsSubVideo::GetSelectedResolution(int& width, int& height)
+{
+    if (!m_pMode || m_pMode->GetActiveItem() < 0)
+        return false;
+
+    char selectedResolution[256]{};
+    m_pMode->GetItemText(m_pMode->GetActiveItem(), selectedResolution, sizeof(selectedResolution));
+
+    int selectedWidth = 0;
+    int selectedHeight = 0;
+    char trailingCharacter = '\0';
+    if (sscanf(selectedResolution, "%d x %d %c", &selectedWidth, &selectedHeight, &trailingCharacter) != 2)
+        return false;
+
+    vmode_t* modes = nullptr;
+    int modeCount = 0;
+    g_pGameUIFuncs->GetVideoModes(&modes, &modeCount);
+
+    for (int i = 0; i < modeCount; ++i)
+    {
+        if (modes[i].iWidth == selectedWidth && modes[i].iHeight == selectedHeight)
+        {
+            width = selectedWidth;
+            height = selectedHeight;
+            return true;
+        }
+    }
+
+    return false;
+}
+
 //-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
@@ -299,7 +344,7 @@ void COptionsSubVideo::OnApplyChanges()
     m_pGammaSlider->ApplyChanges();
     m_pVsync->ApplyChanges();
 
-    ApplyVidSettings(false);
+    ApplyVidSettings();
 }
 
 //-----------------------------------------------------------------------------
@@ -331,19 +376,24 @@ void COptionsSubVideo::RevertVidSettings()
 //-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
-void COptionsSubVideo::ApplyVidSettings(bool bForceRefresh)
+void COptionsSubVideo::ApplyVidSettings()
 {
     // Retrieve text from active controls and parse out strings
     if ( m_pMode )
     {
-        char sz[256], colorDepth[256];
-        m_pMode->GetText(sz, 256);
+        char colorDepth[256];
         m_pColorDepth->GetText(colorDepth, sizeof(colorDepth));
 
-        int w, h;
-        sscanf( sz, "%i x %i", &w, &h );
-        m_CurrentSettings.w = w;
-        m_CurrentSettings.h = h;
+        int selectedWidth = 0;
+        int selectedHeight = 0;
+        if (!GetSelectedResolution(selectedWidth, selectedHeight))
+        {
+            SetCurrentResolutionComboItem();
+            return;
+        }
+
+        m_CurrentSettings.w = selectedWidth;
+        m_CurrentSettings.h = selectedHeight;
         if (strstr(colorDepth, "32"))
         {
             m_CurrentSettings.bpp = 32;
@@ -397,43 +447,70 @@ void COptionsSubVideo::ApplyVidSettings(bool bForceRefresh)
         m_CurrentSettings.stretch_aspect = checked ? 1 : 0;
     }
 
-    const bool vidLevelChanged = m_OrigSettings.vid_level != m_CurrentSettings.vid_level;
-    const bool restartRequired =
+    const bool videoModeChanged =
         m_OrigSettings.w != m_CurrentSettings.w ||
         m_OrigSettings.h != m_CurrentSettings.h ||
-        m_OrigSettings.bpp != m_CurrentSettings.bpp ||
-        m_OrigSettings.windowed != m_CurrentSettings.windowed ||
-        m_OrigSettings.hdmodels != m_CurrentSettings.hdmodels ||
-        m_OrigSettings.addons_folder != m_CurrentSettings.addons_folder ||
-        vidLevelChanged ||
-        m_OrigSettings.disable_multitexture != m_CurrentSettings.disable_multitexture ||
-        m_OrigSettings.stretch_aspect != m_CurrentSettings.stretch_aspect ||
-        strcmp(m_OrigSettings.renderer, m_CurrentSettings.renderer) != 0;
+        m_OrigSettings.bpp != m_CurrentSettings.bpp;
+    const bool rendererChanged = strcmp(m_OrigSettings.renderer, m_CurrentSettings.renderer) != 0;
+    const bool windowModeChanged = m_OrigSettings.windowed != m_CurrentSettings.windowed;
+    const bool hdModelsChanged = m_OrigSettings.hdmodels != m_CurrentSettings.hdmodels;
+    const bool addonsFolderChanged = m_OrigSettings.addons_folder != m_CurrentSettings.addons_folder;
+    const bool videoLevelChanged = m_OrigSettings.vid_level != m_CurrentSettings.vid_level;
+    const bool multitextureChanged =
+        m_OrigSettings.disable_multitexture != m_CurrentSettings.disable_multitexture;
+    const bool stretchAspectChanged = m_OrigSettings.stretch_aspect != m_CurrentSettings.stretch_aspect;
 
-    if (!vidLevelChanged && !restartRequired && !bForceRefresh)
-    {
+    const bool restartRequired =
+        videoModeChanged || rendererChanged || windowModeChanged || hdModelsChanged ||
+        addonsFolderChanged || videoLevelChanged || multitextureChanged || stretchAspectChanged;
+
+    if (!restartRequired)
         return;
-    }
 
     CVidSettings *p = &m_CurrentSettings;
 
     char szCmd[ 256 ];
 
-    // Set mode
-    sprintf( szCmd, "_setvideomode %i %i %i\n", p->w, p->h, p->bpp );
-    engine->pfnClientCmd( szCmd );
+    if (videoModeChanged)
+    {
+        Q_snprintf(szCmd, sizeof(szCmd), "_setvideomode %i %i %i\n", p->w, p->h, p->bpp);
+        engine->pfnClientCmd(szCmd);
+    }
 
-    // Set renderer
-    sprintf( szCmd, "_setrenderer %s %s\n", p->renderer, p->windowed ? "windowed" : "fullscreen" );
-    engine->pfnClientCmd(szCmd);
-    sprintf( szCmd, "_sethdmodels %d\n", p->hdmodels );
-    engine->pfnClientCmd(szCmd);
-    sprintf( szCmd, "_setaddons_folder %d\n", p->addons_folder );
-    engine->pfnClientCmd(szCmd);
-    sprintf( szCmd, "_set_vid_level %d\n", p->vid_level );
-    engine->pfnClientCmd(szCmd);
-    m_pUserConfig->set_value("", "disable_multitexture", std::to_string(p->disable_multitexture), true);
-    m_pUserConfig->set_value("", "stretch_aspect", std::to_string(p->stretch_aspect), true);
+    if (rendererChanged || windowModeChanged)
+    {
+        Q_snprintf(szCmd, sizeof(szCmd), "_setrenderer %s %s\n",
+                   p->renderer, p->windowed ? "windowed" : "fullscreen");
+        engine->pfnClientCmd(szCmd);
+    }
+
+    if (hdModelsChanged)
+    {
+        Q_snprintf(szCmd, sizeof(szCmd), "_sethdmodels %d\n", p->hdmodels);
+        engine->pfnClientCmd(szCmd);
+    }
+
+    if (addonsFolderChanged)
+    {
+        Q_snprintf(szCmd, sizeof(szCmd), "_setaddons_folder %d\n", p->addons_folder);
+        engine->pfnClientCmd(szCmd);
+    }
+
+    if (videoLevelChanged)
+    {
+        Q_snprintf(szCmd, sizeof(szCmd), "_set_vid_level %d\n", p->vid_level);
+        engine->pfnClientCmd(szCmd);
+    }
+
+    if (multitextureChanged)
+        m_pUserConfig->set_value("", "disable_multitexture", std::to_string(p->disable_multitexture), true);
+
+    if (stretchAspectChanged)
+        m_pUserConfig->set_value("", "stretch_aspect", std::to_string(p->stretch_aspect), true);
+
+    // Prevent a second Apply before the queued restart from emitting the same
+    // commands again.
+    m_OrigSettings = m_CurrentSettings;
 
     // Force restart of entire engine
     engine->pfnClientCmd("fmod stop\n");
