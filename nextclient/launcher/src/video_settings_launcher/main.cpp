@@ -17,6 +17,7 @@ constexpr wchar_t kWindowClass[] = L"NextClientLauncherWindow";
 constexpr wchar_t kTitle[] = L"NextClient Launcher";
 constexpr wchar_t kSettingsKey[] = L"Software\\Valve\\Half-Life\\Settings";
 constexpr wchar_t kLauncherKey[] = L"Software\\Valve\\Half-Life\\nextclient\\video_launcher";
+constexpr int kWindowsPointerSpeeds[] = {1, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20};
 
 enum ControlId
 {
@@ -30,6 +31,9 @@ enum ControlId
     IdSafeMode,
     IdStatus,
     IdCancel,
+    IdPointerSpeed,
+    IdEnhancePointer,
+    IdPointerSpeedValue,
 };
 
 struct Resolution
@@ -50,11 +54,43 @@ struct VideoSettings
     DWORD videoLevel = 1;
 };
 
+struct SystemMouseSettings
+{
+    int speed = 10;
+    int acceleration[3] = {6, 10, 1};
+};
+
 bool SameSettings(const VideoSettings& left, const VideoSettings& right)
 {
     return left.width == right.width && left.height == right.height && left.bpp == right.bpp &&
            left.windowed == right.windowed && left.hdModels == right.hdModels &&
            left.videoLevel == right.videoLevel;
+}
+
+bool SameSettings(const SystemMouseSettings& left, const SystemMouseSettings& right)
+{
+    return left.speed == right.speed && left.acceleration[0] == right.acceleration[0] &&
+           left.acceleration[1] == right.acceleration[1] && left.acceleration[2] == right.acceleration[2];
+}
+
+int PointerSpeedToSliderPosition(int speed)
+{
+    const auto it = std::ranges::min_element(kWindowsPointerSpeeds, [speed](int left, int right)
+    {
+        return std::abs(left - speed) < std::abs(right - speed);
+    });
+    return static_cast<int>(std::distance(std::begin(kWindowsPointerSpeeds), it)) + 1;
+}
+
+int SliderPositionToPointerSpeed(int position)
+{
+    const int index = std::clamp(position, 1, static_cast<int>(std::size(kWindowsPointerSpeeds))) - 1;
+    return kWindowsPointerSpeeds[index];
+}
+
+std::wstring PointerPositionText(int position)
+{
+    return std::to_wstring(std::clamp(position, 1, 11)) + L" / 11";
 }
 
 HINSTANCE g_instance{};
@@ -63,9 +99,14 @@ HWND g_resolution{};
 HWND g_fullscreen{};
 HWND g_hdModels{};
 HWND g_highQuality{};
+HWND g_pointerSpeed{};
+HWND g_pointerSpeedValue{};
+HWND g_enhancePointer{};
 HWND g_status{};
 std::vector<Resolution> g_resolutions;
 bool g_launchRequested{};
+SystemMouseSettings g_mouseAtLastApply{};
+bool g_mousePreviewChanged{};
 
 class RegistryKey
 {
@@ -143,6 +184,33 @@ VideoSettings ReadSettings()
     return value;
 }
 
+SystemMouseSettings ReadSystemMouseSettings()
+{
+    SystemMouseSettings value;
+    SystemParametersInfoW(SPI_GETMOUSESPEED, 0, &value.speed, 0);
+    SystemParametersInfoW(SPI_GETMOUSE, 0, value.acceleration, 0);
+    value.speed = std::clamp(value.speed, 1, 20);
+    return value;
+}
+
+bool WriteSystemMouseSettings(const SystemMouseSettings& value)
+{
+    int acceleration[3] = {value.acceleration[0], value.acceleration[1], value.acceleration[2]};
+    constexpr UINT flags = SPIF_UPDATEINIFILE | SPIF_SENDCHANGE;
+    return SystemParametersInfoW(SPI_SETMOUSESPEED, 0,
+                                 reinterpret_cast<void*>(static_cast<INT_PTR>(value.speed)), flags) != FALSE &&
+           SystemParametersInfoW(SPI_SETMOUSE, 0, acceleration, flags) != FALSE;
+}
+
+bool PreviewSystemMouseSettings(const SystemMouseSettings& value)
+{
+    int acceleration[3] = {value.acceleration[0], value.acceleration[1], value.acceleration[2]};
+    constexpr UINT flags = SPIF_SENDCHANGE;
+    return SystemParametersInfoW(SPI_SETMOUSESPEED, 0,
+                                 reinterpret_cast<void*>(static_cast<INT_PTR>(value.speed)), flags) != FALSE &&
+           SystemParametersInfoW(SPI_SETMOUSE, 0, acceleration, flags) != FALSE;
+}
+
 bool WriteSettings(const VideoSettings& value)
 {
     RegistryKey key(HKEY_CURRENT_USER, kSettingsKey, KEY_QUERY_VALUE | KEY_SET_VALUE);
@@ -160,7 +228,7 @@ bool WriteSettings(const VideoSettings& value)
            key.WriteString(L"EngineDLL", L"hw.dll");
 }
 
-bool SaveBackup(const VideoSettings& value)
+bool SaveBackup(const VideoSettings& value, const SystemMouseSettings& mouse)
 {
     RegistryKey key(HKEY_CURRENT_USER, kLauncherKey, KEY_QUERY_VALUE | KEY_SET_VALUE);
     return key.valid() &&
@@ -170,10 +238,14 @@ bool SaveBackup(const VideoSettings& value)
            key.WriteDword(L"BackupWindowed", value.windowed) &&
            key.WriteDword(L"BackupHDModels", value.hdModels) &&
            key.WriteDword(L"BackupVideoLevel", value.videoLevel) &&
+           key.WriteDword(L"BackupPointerSpeed", static_cast<DWORD>(mouse.speed)) &&
+           key.WriteDword(L"BackupMouseThreshold1", static_cast<DWORD>(mouse.acceleration[0])) &&
+           key.WriteDword(L"BackupMouseThreshold2", static_cast<DWORD>(mouse.acceleration[1])) &&
+           key.WriteDword(L"BackupMouseAcceleration", static_cast<DWORD>(mouse.acceleration[2])) &&
            key.WriteDword(L"BackupValid", 1);
 }
 
-bool LoadBackup(VideoSettings& value)
+bool LoadBackup(VideoSettings& value, SystemMouseSettings& mouse)
 {
     RegistryKey key(HKEY_CURRENT_USER, kLauncherKey, KEY_QUERY_VALUE | KEY_SET_VALUE);
     if (!key.valid() || key.ReadDword(L"BackupValid", 0) != 1)
@@ -185,6 +257,10 @@ bool LoadBackup(VideoSettings& value)
     value.windowed = key.ReadDword(L"BackupWindowed", 0);
     value.hdModels = key.ReadDword(L"BackupHDModels", 0);
     value.videoLevel = key.ReadDword(L"BackupVideoLevel", 1);
+    mouse.speed = static_cast<int>(key.ReadDword(L"BackupPointerSpeed", 10));
+    mouse.acceleration[0] = static_cast<int>(key.ReadDword(L"BackupMouseThreshold1", 6));
+    mouse.acceleration[1] = static_cast<int>(key.ReadDword(L"BackupMouseThreshold2", 10));
+    mouse.acceleration[2] = static_cast<int>(key.ReadDword(L"BackupMouseAcceleration", 1));
     return true;
 }
 
@@ -237,6 +313,52 @@ void SetControls(const VideoSettings& value)
     Button_SetCheck(g_highQuality, value.videoLevel ? BST_CHECKED : BST_UNCHECKED);
 }
 
+void SetMouseControls(const SystemMouseSettings& value)
+{
+    const int position = PointerSpeedToSliderPosition(value.speed);
+    SendMessageW(g_pointerSpeed, TBM_SETPOS, TRUE, position);
+    const std::wstring speedText = PointerPositionText(position);
+    SetWindowTextW(g_pointerSpeedValue, speedText.c_str());
+    Button_SetCheck(g_enhancePointer, value.acceleration[2] != 0 ? BST_CHECKED : BST_UNCHECKED);
+}
+
+SystemMouseSettings MouseSettingsFromControls(const SystemMouseSettings& current)
+{
+    SystemMouseSettings value = current;
+    const int position = static_cast<int>(SendMessageW(g_pointerSpeed, TBM_GETPOS, 0, 0));
+    value.speed = SliderPositionToPointerSpeed(position);
+    const bool requestedEnhance = Button_GetCheck(g_enhancePointer) == BST_CHECKED;
+    const bool currentEnhance = current.acceleration[2] != 0;
+    if (requestedEnhance != currentEnhance)
+    {
+        value.acceleration[0] = requestedEnhance ? 6 : 0;
+        value.acceleration[1] = requestedEnhance ? 10 : 0;
+        value.acceleration[2] = requestedEnhance ? 1 : 0;
+    }
+    return value;
+}
+
+void ApplyMousePreview()
+{
+    const SystemMouseSettings requested = MouseSettingsFromControls(g_mouseAtLastApply);
+    if (PreviewSystemMouseSettings(requested))
+    {
+        g_mousePreviewChanged = !SameSettings(requested, g_mouseAtLastApply);
+        SetStatus(L"Mouse preview active. Apply to keep it, or Cancel to revert.");
+    }
+    else
+        SetStatus(L"Windows rejected the mouse preview setting.", true);
+}
+
+void RevertMousePreview()
+{
+    if (!g_mousePreviewChanged)
+        return;
+
+    PreviewSystemMouseSettings(g_mouseAtLastApply);
+    g_mousePreviewChanged = false;
+}
+
 bool SettingsFromControls(VideoSettings& value)
 {
     const LRESULT selected = SendMessageW(g_resolution, CB_GETCURSEL, 0, 0);
@@ -263,25 +385,30 @@ bool ApplySettings()
     }
 
     const VideoSettings previous = ReadSettings();
-    if (SameSettings(previous, requested))
+    const SystemMouseSettings previousMouse = g_mouseAtLastApply;
+    const SystemMouseSettings requestedMouse = MouseSettingsFromControls(previousMouse);
+    if (SameSettings(previous, requested) && SameSettings(previousMouse, requestedMouse))
     {
         SetStatus(L"Video settings are already up to date.");
         return true;
     }
 
-    if (!SaveBackup(previous))
+    if (!SaveBackup(previous, previousMouse))
     {
         SetStatus(L"Could not create a settings backup. No changes were made.", true);
         return false;
     }
-    if (!WriteSettings(requested))
+    if (!WriteSettings(requested) || !WriteSystemMouseSettings(requestedMouse))
     {
         WriteSettings(previous);
-        SetStatus(L"Could not write video settings; the previous values were restored.", true);
+        WriteSystemMouseSettings(previousMouse);
+        SetStatus(L"Could not apply settings; the previous values were restored.", true);
         return false;
     }
 
-    SetStatus(L"Settings applied. They will be used on the next game launch.");
+    g_mouseAtLastApply = requestedMouse;
+    g_mousePreviewChanged = false;
+    SetStatus(L"Video and Windows mouse settings applied successfully.");
     return true;
 }
 
@@ -311,17 +438,32 @@ void CreateControls(HWND window)
                                294, 148, 240, 24, IdHighQuality);
     AddControl(window, L"STATIC", L"OpenGL renderer, 32-bit color", SS_LEFT, 294, 116, 244, 24);
 
-    AddControl(window, L"BUTTON", L"Safe mode", BS_PUSHBUTTON | WS_TABSTOP, 18, 232, 112, 32, IdSafeMode);
-    AddControl(window, L"BUTTON", L"Restore", BS_PUSHBUTTON | WS_TABSTOP, 140, 232, 100, 32, IdRestore);
-    AddControl(window, L"BUTTON", L"Cancel", BS_PUSHBUTTON | WS_TABSTOP, 250, 232, 90, 32, IdCancel);
-    AddControl(window, L"BUTTON", L"Apply", BS_PUSHBUTTON | WS_TABSTOP, 350, 232, 100, 32, IdApply);
+    AddControl(window, L"BUTTON", L"Windows mouse", BS_GROUPBOX, 18, 224, 578, 96);
+    AddControl(window, L"STATIC", L"Pointer speed", SS_LEFT, 38, 252, 112, 22);
+    g_pointerSpeed = AddControl(window, TRACKBAR_CLASSW, L"", TBS_AUTOTICKS | TBS_HORZ | WS_TABSTOP,
+                                150, 244, 280, 34, IdPointerSpeed);
+    SendMessageW(g_pointerSpeed, TBM_SETRANGE, TRUE, MAKELPARAM(1, 11));
+    SendMessageW(g_pointerSpeed, TBM_SETTICFREQ, 1, 0);
+    g_pointerSpeedValue = AddControl(window, L"STATIC", L"6 / 11", SS_CENTER, 438, 250, 54, 22, IdPointerSpeedValue);
+    g_enhancePointer = AddControl(window, L"BUTTON", L"Enhance pointer precision",
+                                  BS_AUTOCHECKBOX | WS_TABSTOP, 38, 282, 250, 24, IdEnhancePointer);
+    AddControl(window, L"STATIC", L"This changes the current Windows user setting.",
+               SS_LEFT, 310, 284, 260, 22);
+
+    AddControl(window, L"BUTTON", L"Safe mode", BS_PUSHBUTTON | WS_TABSTOP, 18, 338, 112, 32, IdSafeMode);
+    AddControl(window, L"BUTTON", L"Restore", BS_PUSHBUTTON | WS_TABSTOP, 140, 338, 100, 32, IdRestore);
+    AddControl(window, L"BUTTON", L"Cancel", BS_PUSHBUTTON | WS_TABSTOP, 250, 338, 90, 32, IdCancel);
+    AddControl(window, L"BUTTON", L"Apply", BS_PUSHBUTTON | WS_TABSTOP, 350, 338, 100, 32, IdApply);
     AddControl(window, L"BUTTON", L"Launch Game", BS_DEFPUSHBUTTON | WS_TABSTOP,
-               460, 232, 136, 32, IdLaunch);
-    g_status = AddControl(window, L"STATIC", L"Ready", SS_LEFT, 20, 282, 576, 36, IdStatus);
+               460, 338, 136, 32, IdLaunch);
+    g_status = AddControl(window, L"STATIC", L"Ready", SS_LEFT, 20, 388, 576, 36, IdStatus);
 
     const VideoSettings current = ReadSettings();
     PopulateResolutions(current);
     SetControls(current);
+    g_mouseAtLastApply = ReadSystemMouseSettings();
+    g_mousePreviewChanged = false;
+    SetMouseControls(g_mouseAtLastApply);
 }
 
 LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam)
@@ -346,13 +488,19 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
             }
             return 0;
         case IdCancel:
+            RevertMousePreview();
             DestroyWindow(window);
+            return 0;
+        case IdEnhancePointer:
+            if (HIWORD(wParam) == BN_CLICKED)
+                ApplyMousePreview();
             return 0;
         case IdSafeMode:
         {
             const VideoSettings safe{800, 600, 32, 1, 0, 1};
             const VideoSettings previous = ReadSettings();
-            if (SaveBackup(previous) && WriteSettings(safe))
+            const SystemMouseSettings mouse = g_mouseAtLastApply;
+            if (SaveBackup(previous, mouse) && WriteSettings(safe))
             {
                 SetControls(safe);
                 SetStatus(L"Safe mode applied: 800 x 600 windowed, OpenGL, 32-bit.");
@@ -367,10 +515,14 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
         case IdRestore:
         {
             VideoSettings backup;
-            if (LoadBackup(backup) && WriteSettings(backup))
+            SystemMouseSettings backupMouse;
+            if (LoadBackup(backup, backupMouse) && WriteSettings(backup) && WriteSystemMouseSettings(backupMouse))
             {
                 SetControls(backup);
-                SetStatus(L"Previous video settings restored.");
+                SetMouseControls(backupMouse);
+                g_mouseAtLastApply = backupMouse;
+                g_mousePreviewChanged = false;
+                SetStatus(L"Previous video and Windows mouse settings restored.");
             }
             else
                 SetStatus(L"No valid backup is available.", true);
@@ -381,11 +533,24 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
         }
         break;
 
+    case WM_HSCROLL:
+        if (reinterpret_cast<HWND>(lParam) == g_pointerSpeed)
+        {
+            const int speed = static_cast<int>(SendMessageW(g_pointerSpeed, TBM_GETPOS, 0, 0));
+            const std::wstring speedText = PointerPositionText(speed);
+            SetWindowTextW(g_pointerSpeedValue, speedText.c_str());
+            ApplyMousePreview();
+            return 0;
+        }
+        break;
+
     case WM_CTLCOLORSTATIC:
         SetBkMode(reinterpret_cast<HDC>(wParam), TRANSPARENT);
         return reinterpret_cast<LRESULT>(GetSysColorBrush(COLOR_WINDOW));
 
     case WM_DESTROY:
+        if (!g_launchRequested)
+            RevertMousePreview();
         PostQuitMessage(0);
         return 0;
     default:
@@ -421,7 +586,7 @@ bool ShowVideoSettingsDialog(HINSTANCE instance)
             return false;
     }
 
-    RECT rect{0, 0, 616, 338};
+    RECT rect{0, 0, 616, 444};
     AdjustWindowRectEx(&rect, WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX, FALSE, 0);
     const int width = rect.right - rect.left;
     const int height = rect.bottom - rect.top;

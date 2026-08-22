@@ -93,6 +93,16 @@ COptionsSubVideo::COptionsSubVideo(vgui2::Panel *parent) : PropertyPage(parent, 
     m_pStretchAspect->SetVisible(true);
 
     LoadControlSettings("Resource\\OptionsSubVideo.res");
+
+    // Restart-sensitive display settings now belong to the main launcher.
+    // Keep the objects alive for compatibility with the legacy page logic,
+    // but do not expose duplicate controls inside a running engine session.
+    m_pMode->SetVisible(false);
+    m_pAspectRatio->SetVisible(false);
+    m_pWindowed->SetVisible(false);
+    m_pHDModels->SetVisible(false);
+    m_pHighVideoQuality->SetVisible(false);
+
     PrepareResolutionList();
 }
 
