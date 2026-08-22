@@ -5,8 +5,6 @@
 #include "CvarToggleCheckButton.h"
 #include "igameuifuncs.h"
 //#include "modes.h"
-#include "ModInfo.h"
-#include "KeyToggleCheckButton.h"
 
 #include <vgui_controls/Tooltip.h>
 #include <vgui_controls/CheckButton.h>
@@ -51,9 +49,6 @@ COptionsSubVideo::COptionsSubVideo(vgui2::Panel *parent) : PropertyPage(parent, 
 
     m_pAspectRatio = new vgui2::ComboBox( this, "AspectRatio", 2, false );
 
-    m_pDetailTextures = new CCvarToggleCheckButton( this, "DetailTextures", "#GameUI_DetailTextures", "r_detailtextures" );
-    m_pDetailTextures->SetVisible(false);
-
     m_pVsync = new CCvarToggleCheckButton( this, "VSync", "#GameUI_VSync", "gl_vsync" );
     m_pVsync->SetVisible(true);
 
@@ -75,37 +70,17 @@ COptionsSubVideo::COptionsSubVideo(vgui2::Panel *parent) : PropertyPage(parent, 
         m_pAspectRatio->ActivateItem( iNormalItemID );
     }
 
-    // disable render selection until new render will be ready
-    m_pRenderer = nullptr;
-
-    // load up the renderer display names
-//    unicodeText = g_pVGuiLocalize->Find("#GameUI_OpenGL");
-//    g_pVGuiLocalize->ConvertUnicodeToANSI(unicodeText, m_pszRenderName, 32);
-
-//    m_pRenderer = new vgui2::ComboBox( this, "Renderer", 3, false ); // "#GameUI_Renderer"
-//    m_pRenderer->AddItem( m_pszRenderName, NULL );
-//    m_pRenderer->ActivateItemByRow( 0 );
-
-    m_pColorDepth = new vgui2::ComboBox( this, "ColorDepth", 2, false );
-    m_pColorDepth->AddItem("#GameUI_MediumBitDepth", NULL);
-    m_pColorDepth->AddItem("#GameUI_HighBitDepth", NULL);
-    m_pColorDepth->SetVisible( false ); // default hide
-
     m_pWindowed = new vgui2::CheckButton( this, "Windowed", "#GameUI_Windowed" );
     m_pWindowed->SetSelected(m_CurrentSettings.windowed != 0);
     m_pWindowed->SetVisible(true);
 
     m_pHDModels = new vgui2::CheckButton( this, "HDModels", "#GameUI_HDModels" );
     m_pHDModels->SetSelected(m_CurrentSettings.hdmodels != 0);
-    m_pHDModels->SetVisible(false);
+    m_pHDModels->SetVisible(true);
 
-    m_pAddonsFolder = new vgui2::CheckButton( this, "AddonsFolder", "#GameUI_AddonsFolder" );
-    m_pAddonsFolder->SetSelected(m_CurrentSettings.addons_folder != 0);
-    m_pAddonsFolder->SetVisible(false);
-
-    m_pLowVideoDetail = new vgui2::CheckButton( this, "LowVideoDetail", "#GameUI_LowVideoDetail" );
-    m_pLowVideoDetail->SetSelected(m_CurrentSettings.vid_level != 0);
-    m_pLowVideoDetail->SetVisible(true);
+    m_pHighVideoQuality = new vgui2::CheckButton(this, "HighVideoQuality", "High Video Quality");
+    m_pHighVideoQuality->SetSelected(m_CurrentSettings.vid_level > 0);
+    m_pHighVideoQuality->SetVisible(true);
 
     m_pDisableMultitexture = new vgui2::CheckButton( this, "DisableMultitexture", "#GameUI_DisableMultitexture" );
     m_pDisableMultitexture->SetSelected(m_CurrentSettings.disable_multitexture != 0);
@@ -119,17 +94,6 @@ COptionsSubVideo::COptionsSubVideo(vgui2::Panel *parent) : PropertyPage(parent, 
 
     LoadControlSettings("Resource\\OptionsSubVideo.res");
     PrepareResolutionList();
-
-    bool detailTexturesSupported = engine->pfnGetCvarFloat( "r_detailtexturessupported" ) > 0;
-    if ( ModInfo().GetDetailedTexture() )
-    {
-        if ( !detailTexturesSupported )
-            m_pDetailTextures->SetEnabled( false );
-    }
-    else
-    {
-        m_pDetailTextures->SetVisible( false );
-    }
 }
 
 void COptionsSubVideo::PrepareResolutionList( void )
@@ -254,11 +218,9 @@ void COptionsSubVideo::OnResetData()
     m_pGammaSlider->Reset();
     m_pWindowed->SetSelected(m_CurrentSettings.windowed);
     m_pHDModels->SetSelected(m_CurrentSettings.hdmodels);
-    m_pAddonsFolder->SetSelected(m_CurrentSettings.addons_folder);
-    m_pLowVideoDetail->SetSelected(m_CurrentSettings.vid_level != 0);
+    m_pHighVideoQuality->SetSelected(m_CurrentSettings.vid_level > 0);
     m_pDisableMultitexture->SetSelected(m_CurrentSettings.disable_multitexture);
     m_pStretchAspect->SetSelected(m_CurrentSettings.stretch_aspect);
-    m_pDetailTextures->Reset();
     m_pVsync->Reset();
 
     SetCurrentResolutionComboItem();
@@ -291,14 +253,6 @@ void COptionsSubVideo::SetCurrentResolutionComboItem()
         m_pMode->SetText(sz);
     }
 
-    if (m_CurrentSettings.bpp > 16)
-    {
-        m_pColorDepth->ActivateItemByRow(1);
-    }
-    else
-    {
-        m_pColorDepth->ActivateItemByRow(0);
-    }
 }
 
 bool COptionsSubVideo::GetSelectedResolution(int& width, int& height)
@@ -381,9 +335,6 @@ void COptionsSubVideo::ApplyVidSettings()
     // Retrieve text from active controls and parse out strings
     if ( m_pMode )
     {
-        char colorDepth[256];
-        m_pColorDepth->GetText(colorDepth, sizeof(colorDepth));
-
         int selectedWidth = 0;
         int selectedHeight = 0;
         if (!GetSelectedResolution(selectedWidth, selectedHeight))
@@ -394,21 +345,6 @@ void COptionsSubVideo::ApplyVidSettings()
 
         m_CurrentSettings.w = selectedWidth;
         m_CurrentSettings.h = selectedHeight;
-        if (strstr(colorDepth, "32"))
-        {
-            m_CurrentSettings.bpp = 32;
-        }
-        else
-        {
-            m_CurrentSettings.bpp = 16;
-        }
-    }
-
-    if ( m_pRenderer )
-    {
-        char sz[ 256 ];
-        m_pRenderer->GetText(sz, sizeof(sz));
-        strcpy( m_CurrentSettings.renderer, "gl" );
     }
 
     if ( m_pWindowed )
@@ -423,15 +359,10 @@ void COptionsSubVideo::ApplyVidSettings()
         m_CurrentSettings.hdmodels = checked ? 1 : 0;
     }
 
-    if ( m_pAddonsFolder )
+    if (m_pHighVideoQuality)
     {
-        bool checked = m_pAddonsFolder->IsSelected();
-        m_CurrentSettings.addons_folder = checked ? 1 : 0;
-    }
-
-    if ( m_pLowVideoDetail )
-    {
-        bool checked = m_pLowVideoDetail->IsSelected();
+        const bool checked = m_pHighVideoQuality->IsSelected();
+        // GoldSrc stores 0 for low-detail mode and 1 for high-detail mode.
         m_CurrentSettings.vid_level = checked ? 1 : 0;
     }
 
@@ -451,18 +382,16 @@ void COptionsSubVideo::ApplyVidSettings()
         m_OrigSettings.w != m_CurrentSettings.w ||
         m_OrigSettings.h != m_CurrentSettings.h ||
         m_OrigSettings.bpp != m_CurrentSettings.bpp;
-    const bool rendererChanged = strcmp(m_OrigSettings.renderer, m_CurrentSettings.renderer) != 0;
     const bool windowModeChanged = m_OrigSettings.windowed != m_CurrentSettings.windowed;
     const bool hdModelsChanged = m_OrigSettings.hdmodels != m_CurrentSettings.hdmodels;
-    const bool addonsFolderChanged = m_OrigSettings.addons_folder != m_CurrentSettings.addons_folder;
     const bool videoLevelChanged = m_OrigSettings.vid_level != m_CurrentSettings.vid_level;
     const bool multitextureChanged =
         m_OrigSettings.disable_multitexture != m_CurrentSettings.disable_multitexture;
     const bool stretchAspectChanged = m_OrigSettings.stretch_aspect != m_CurrentSettings.stretch_aspect;
 
     const bool restartRequired =
-        videoModeChanged || rendererChanged || windowModeChanged || hdModelsChanged ||
-        addonsFolderChanged || videoLevelChanged || multitextureChanged || stretchAspectChanged;
+        videoModeChanged || windowModeChanged || hdModelsChanged || videoLevelChanged ||
+        multitextureChanged || stretchAspectChanged;
 
     if (!restartRequired)
         return;
@@ -477,7 +406,7 @@ void COptionsSubVideo::ApplyVidSettings()
         engine->pfnClientCmd(szCmd);
     }
 
-    if (rendererChanged || windowModeChanged)
+    if (windowModeChanged)
     {
         Q_snprintf(szCmd, sizeof(szCmd), "_setrenderer %s %s\n",
                    p->renderer, p->windowed ? "windowed" : "fullscreen");
@@ -487,12 +416,6 @@ void COptionsSubVideo::ApplyVidSettings()
     if (hdModelsChanged)
     {
         Q_snprintf(szCmd, sizeof(szCmd), "_sethdmodels %d\n", p->hdmodels);
-        engine->pfnClientCmd(szCmd);
-    }
-
-    if (addonsFolderChanged)
-    {
-        Q_snprintf(szCmd, sizeof(szCmd), "_setaddons_folder %d\n", p->addons_folder);
         engine->pfnClientCmd(szCmd);
     }
 
@@ -541,15 +464,7 @@ void COptionsSubVideo::OnButtonChecked(KeyValues *data)
         }
     }
 
-    if (pPanel == m_pAddonsFolder)
-    {
-        if (state != m_CurrentSettings.addons_folder)
-        {
-            OnDataChanged();
-        }
-    }
-
-    if (pPanel == m_pLowVideoDetail)
+    if (pPanel == m_pHighVideoQuality)
     {
         const int requestedVidLevel = state ? 1 : 0;
         if (requestedVidLevel != m_CurrentSettings.vid_level)
@@ -574,11 +489,6 @@ void COptionsSubVideo::OnButtonChecked(KeyValues *data)
         }
     }
 
-    if (pPanel == m_pDetailTextures)
-    {
-        OnDataChanged();
-    }
-
     if (pPanel == m_pVsync)
     {
         OnDataChanged();
@@ -599,10 +509,6 @@ void COptionsSubVideo::OnTextChanged(Panel *pPanel, const char *pszText)
         {
             OnDataChanged();
         }
-    }
-    else if (pPanel == m_pRenderer)
-    {
-        OnDataChanged();
     }
     else if (pPanel == m_pAspectRatio )
     {

@@ -76,22 +76,17 @@ private:
     void		PrepareResolutionList( void );
 
     vgui2::ComboBox *m_pMode;
-    vgui2::ComboBox *m_pRenderer;
-    vgui2::ComboBox *m_pColorDepth;
     vgui2::CheckButton *m_pWindowed;
     vgui2::ComboBox *m_pAspectRatio;
-    CCvarToggleCheckButton *m_pDetailTextures;
     CCvarToggleCheckButton *m_pVsync;
     vgui2::CheckButton *m_pHDModels;
-    vgui2::CheckButton *m_pAddonsFolder;
-    vgui2::CheckButton *m_pLowVideoDetail;
+    vgui2::CheckButton *m_pHighVideoQuality;
     vgui2::CheckButton *m_pDisableMultitexture;
     vgui2::CheckButton *m_pStretchAspect;
 
     CCvarSlider		*m_pBrightnessSlider;
     CCvarSlider		*m_pGammaSlider;
 
-    char            m_pszRenderName[32];
     char            m_pszAspectName[2][32];
 
     int             m_iStartResolution;

@@ -328,6 +328,11 @@ static void EngineMiniInitialize(nitroapi::NitroApiInterface* nitro_api, NextCli
     
     registry = new CRegistry("Software\\Valve\\Half-Life\\Settings");
     registry->Init();
+    if (registry->ReadInt("nextclient_video_defaults_version", 0) < 1)
+    {
+        registry->WriteInt("vid_level", 1);
+        registry->WriteInt("nextclient_video_defaults_version", 1);
+    }
 }
 
 static void OnGameUninitializing()
