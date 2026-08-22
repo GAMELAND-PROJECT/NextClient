@@ -113,6 +113,10 @@ CBaseGamesPage::CBaseGamesPage(vgui2::Panel *parent, const char *name, const cha
     m_pGameList->SetAllowUserModificationOfColumns(true);
 
     int i = 0;
+    int playersColumn = -1;
+    int lastPlayedColumn = -1;
+    int pingColumn = -1;
+    int fallbackColumn = -1;
     for (const auto& type : columns)
     {
         switch (type)
@@ -121,6 +125,7 @@ CBaseGamesPage::CBaseGamesPage(vgui2::Panel *parent, const char *name, const cha
             m_pGameList->AddColumnHeader(i, "Password", "#ServerBrowser_Password", 16, ListPanel::COLUMN_FIXEDSIZE | ListPanel::COLUMN_IMAGE);
             m_pGameList->SetPinnedSortFunc(i, ServerIdCompare);
             m_pGameList->SetColumnHeaderTooltip(i, "#ServerBrowser_PasswordColumn_Tooltip");
+            fallbackColumn = i;
             break;
 
         case GameListColumnType::Bots:
@@ -148,6 +153,7 @@ CBaseGamesPage::CBaseGamesPage(vgui2::Panel *parent, const char *name, const cha
             m_pGameList->AddColumnHeader(i, "Players", "#ServerBrowser_Players", 62, 62, 90);
             m_pGameList->SetPinnedSortFunc(i, PlayersCompare);
             m_pGameList->SetColumnTextAlignment(i, Label::a_center);
+            playersColumn = i;
             break;
         case GameListColumnType::Map:
             m_pGameList->AddColumnHeader(i, "Map", "#ServerBrowser_Map", 100, 85, 160);
@@ -157,6 +163,7 @@ CBaseGamesPage::CBaseGamesPage(vgui2::Panel *parent, const char *name, const cha
             m_pGameList->AddColumnHeader(i, "Ping", "#ServerBrowser_Latency", 52, 52, 72);
             m_pGameList->SetPinnedSortFunc(i, PingCompare);
             m_pGameList->SetColumnTextAlignment(i, Label::a_center);
+            pingColumn = i;
             break;
         case GameListColumnType::Ip:
             m_pGameList->AddColumnHeader(i, "Address", "#ServerBrowser_IPAddress", 95, 95, 10000, ListPanel::COLUMN_HIDDEN);
@@ -164,17 +171,32 @@ CBaseGamesPage::CBaseGamesPage(vgui2::Panel *parent, const char *name, const cha
         case GameListColumnType::LastPlayed:
             m_pGameList->AddColumnHeader(i, "LastPlayed", "#ServerBrowser_LastPlayed", 95, 95, 120);
             m_pGameList->SetPinnedSortFunc(i, LastPlayedCompare);
+            lastPlayedColumn = i;
             break;
         }
-
-        if (type == GameListColumnType::LastPlayed)
-            m_pGameList->SetSortColumnEx(i, -1, false);
-        else if (type == GameListColumnType::Password)
-            m_pGameList->SetSortColumn(i);
 
         m_ColumnsMap.emplace(type, i);
 
         i++;
+    }
+
+    if (lastPlayedColumn >= 0)
+    {
+        // History pages should stay newest-first.
+        m_pGameList->SetSortColumnEx(lastPlayedColumn, -1, false);
+    }
+    else if (playersColumn >= 0)
+    {
+        // Server browsers are most useful when they open on the busiest servers first.
+        m_pGameList->SetSortColumnEx(playersColumn, -1, false);
+    }
+    else if (pingColumn >= 0)
+    {
+        m_pGameList->SetSortColumnEx(pingColumn, -1, true);
+    }
+    else if (fallbackColumn >= 0)
+    {
+        m_pGameList->SetSortColumn(fallbackColumn);
     }
 
     CreateFilters();
