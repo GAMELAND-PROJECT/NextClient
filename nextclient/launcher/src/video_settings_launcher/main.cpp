@@ -25,10 +25,8 @@ enum ControlId
     IdFullscreen,
     IdHdModels,
     IdHighQuality,
-    IdApply,
     IdLaunch,
     IdRestore,
-    IdSafeMode,
     IdStatus,
     IdCancel,
     IdPointerSpeed,
@@ -344,7 +342,7 @@ void ApplyMousePreview()
     if (PreviewSystemMouseSettings(requested))
     {
         g_mousePreviewChanged = !SameSettings(requested, g_mouseAtLastApply);
-        SetStatus(L"Mouse preview active. Apply to keep it, or Cancel to revert.");
+        SetStatus(L"Mouse preview active. Launch Game to keep it, or Cancel to revert.");
     }
     else
         SetStatus(L"Windows rejected the mouse preview setting.", true);
@@ -450,10 +448,8 @@ void CreateControls(HWND window)
     AddControl(window, L"STATIC", L"This changes the current Windows user setting.",
                SS_LEFT, 310, 284, 260, 22);
 
-    AddControl(window, L"BUTTON", L"Safe mode", BS_PUSHBUTTON | WS_TABSTOP, 18, 338, 112, 32, IdSafeMode);
-    AddControl(window, L"BUTTON", L"Restore", BS_PUSHBUTTON | WS_TABSTOP, 140, 338, 100, 32, IdRestore);
-    AddControl(window, L"BUTTON", L"Cancel", BS_PUSHBUTTON | WS_TABSTOP, 250, 338, 90, 32, IdCancel);
-    AddControl(window, L"BUTTON", L"Apply", BS_PUSHBUTTON | WS_TABSTOP, 350, 338, 100, 32, IdApply);
+    AddControl(window, L"BUTTON", L"Restore", BS_PUSHBUTTON | WS_TABSTOP, 18, 338, 112, 32, IdRestore);
+    AddControl(window, L"BUTTON", L"Cancel", BS_PUSHBUTTON | WS_TABSTOP, 140, 338, 100, 32, IdCancel);
     AddControl(window, L"BUTTON", L"Launch Game", BS_DEFPUSHBUTTON | WS_TABSTOP,
                460, 338, 136, 32, IdLaunch);
     g_status = AddControl(window, L"STATIC", L"Ready", SS_LEFT, 20, 388, 576, 36, IdStatus);
@@ -477,9 +473,6 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
     case WM_COMMAND:
         switch (LOWORD(wParam))
         {
-        case IdApply:
-            ApplySettings();
-            return 0;
         case IdLaunch:
             if (ApplySettings())
             {
@@ -495,23 +488,6 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
             if (HIWORD(wParam) == BN_CLICKED)
                 ApplyMousePreview();
             return 0;
-        case IdSafeMode:
-        {
-            const VideoSettings safe{800, 600, 32, 1, 0, 1};
-            const VideoSettings previous = ReadSettings();
-            const SystemMouseSettings mouse = g_mouseAtLastApply;
-            if (SaveBackup(previous, mouse) && WriteSettings(safe))
-            {
-                SetControls(safe);
-                SetStatus(L"Safe mode applied: 800 x 600 windowed, OpenGL, 32-bit.");
-            }
-            else
-            {
-                WriteSettings(previous);
-                SetStatus(L"Could not apply safe mode.", true);
-            }
-            return 0;
-        }
         case IdRestore:
         {
             VideoSettings backup;
