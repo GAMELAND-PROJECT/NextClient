@@ -545,7 +545,7 @@ bool CL_CheckFile(sizebuf_t *msg, const ResourceDescriptor& res_descriptor, std:
             return true;
         }
 
-        if (CL_CanUseHttpDownload() && eng()->CL_CanUseHTTPDownload.InvokeChained())
+        if (eng()->CL_CanUseHTTPDownload.InvokeChained())
         {
             CL_QueueHTTPDownload(res_descriptor);
         }

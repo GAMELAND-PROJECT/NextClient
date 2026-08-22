@@ -14,7 +14,6 @@
 #include <IGameUI.h>
 
 #include <resource/ResourceDescriptor.h>
-#include <unordered_set>
 
 #include "TransferStatistics.h"
 #include "RequestContext.hpp"
@@ -31,7 +30,7 @@ class HttpDownloadManager : public HttpDownloadManagerInterface
 
     const uint32_t slow_speed_threshold_ = 1024 * 30; // bytes per sec
     const std::chrono::seconds connection_timeout_ = std::chrono::seconds(7);
-    const std::chrono::seconds stalled_download_timeout_ = std::chrono::seconds(20);
+    const std::chrono::seconds slow_speed_fallback_timeout_ = std::chrono::seconds(5);
     const std::chrono::seconds slow_speed_fallback_timeout_ui_ = std::chrono::seconds(3);
 
     IGameUI* game_ui_;
@@ -43,17 +42,13 @@ class HttpDownloadManager : public HttpDownloadManagerInterface
     std::vector<HttpDownloadManagerEventsListenerInterface*> listeners_;
 
     std::string base_url_;
-    std::unordered_set<std::string> failed_base_urls_;
 
     std::queue<QueuedRequest> files_to_download_;
     std::vector<RequestContext> requests_;
 
     bool is_download_active_ = false;
     bool is_slow_speed_ = false;
-    bool fallback_requested_ = false;
     time_point slow_speed_start_time_{};
-    time_point last_progress_time_{};
-    uint32_t last_progress_bytes_ = 0;
     uint32_t total_files_to_download_ = 0;
     uint32_t total_bytes_to_download_ = 0;
     uint32_t completed_requests_bytes_downloaded_ = 0;
@@ -68,7 +63,6 @@ public:
                                  std::shared_ptr<nitro_utils::ConfigProviderInterface> config_provider);
 
     void SetUrl(const std::string& url);
-    [[nodiscard]] bool CanUseHttpDownload() const;
     void Queue(const ResourceDescriptor& file_resource);
     void Stop();
     uint32_t GetDownloadQueueSize();
@@ -86,7 +80,6 @@ private:
     void UpdateDownloadSpeed();
     void SlowSpeedDetection();
     void CheckAllDownloadsCompleted();
-    void FallbackToGameDownload();
     uint32_t GetDownloadedBytes();
 
     int GetMaxActiveRequests();

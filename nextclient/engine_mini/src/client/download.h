@@ -14,7 +14,6 @@ bool CL_AddDownloadFileLogger(DownloadFileLoggerInterface* logger);
 bool CL_RemoveDonwloadFileLogger(DownloadFileLoggerInterface* logger);
 
 void CL_HTTPSetDownloadUrl(const std::string& url);
-bool CL_CanUseHttpDownload();
 int CL_HttpGetDownloadQueueSize();
 void CL_QueueHTTPDownload(const ResourceDescriptor& file_resource);
 void CL_HTTPUpdate();
