@@ -7,7 +7,6 @@
 
 #include <vgui_controls/PropertyPage.h>
 
-class CCvarNegateCheckButton;
 class CKeyToggleCheckButton;
 class CCvarToggleCheckButton;
 class CCvarSlider;
@@ -49,7 +48,6 @@ private:
     void BoundSensitivityValue();
 
 private:
-    CCvarNegateCheckButton *m_pReverseMouseCheckBox;
     CKeyToggleCheckButton *m_pMouseLookCheckBox;
     CCvarToggleCheckButton *m_pMouseFilterCheckBox;
     CCvarToggleCheckButton *m_pMouseRawInputCheckBox;

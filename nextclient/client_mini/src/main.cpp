@@ -4,6 +4,10 @@
 #include <next_client_mini/client_mini.h>
 #include <parsemsg.h>
 
+#ifdef _WIN32
+#include <Windows.h>
+#endif
+
 #include "camera.h"
 #include "studiorenderer.h"
 #include "view.h"
@@ -36,6 +40,54 @@ playermove_t* pmove;
 
 std::unique_ptr<GameHud> g_GameHud;
 static std::vector<std::shared_ptr<nitroapi::Unsubscriber>> g_Unsub;
+
+#ifdef _WIN32
+namespace
+{
+    enum class InputFocusState
+    {
+        Unknown,
+        Background,
+        Foreground,
+    };
+
+    InputFocusState g_InputFocusState = InputFocusState::Unknown;
+
+    bool IsProcessForeground()
+    {
+        const HWND foreground_window = GetForegroundWindow();
+        if (foreground_window == nullptr)
+            return false;
+
+        DWORD foreground_process_id = 0;
+        GetWindowThreadProcessId(foreground_window, &foreground_process_id);
+        return foreground_process_id == GetCurrentProcessId();
+    }
+
+    void UpdateInputFocusState()
+    {
+        const InputFocusState current_state = IsProcessForeground()
+            ? InputFocusState::Foreground
+            : InputFocusState::Background;
+
+        if (g_InputFocusState == InputFocusState::Unknown)
+        {
+            g_InputFocusState = current_state;
+            return;
+        }
+
+        if (current_state == g_InputFocusState)
+            return;
+
+        g_InputFocusState = current_state;
+
+        // Clear transitions once on both focus edges so held movement,
+        // attack states and stale mouse deltas cannot survive Alt+Tab.
+        IN_ClearStates();
+        ResetInvertMouse();
+    }
+}
+#endif
 
 cvar_t* hud_draw;
 
@@ -78,6 +130,20 @@ static void HUD_InitPost()
     std::memcpy(&gEngfuncs, g_NitroApi->GetEngineData()->cl_enginefunc, sizeof(gEngfuncs));
     std::memcpy(&g_engfuncs, g_NitroApi->GetEngineData()->enginefuncs, sizeof(g_engfuncs));
     gHUD = g_NitroApi->GetClientData()->gHUD;
+
+    // Apply safe defaults once. These remain ordinary archived cvars and can
+    // still be changed later in-game or by the planned external launcher.
+    cvar_t* input_defaults_version = gEngfuncs.pfnGetCvarPointer("cl_input_defaults_version");
+    if (input_defaults_version == nullptr)
+        input_defaults_version = gEngfuncs.pfnRegisterVariable("cl_input_defaults_version", "0", FCVAR_ARCHIVE);
+
+    if (input_defaults_version != nullptr && input_defaults_version->value < 1.0f)
+    {
+        gEngfuncs.Cvar_Set("m_rawinput", "1");
+        gEngfuncs.Cvar_Set("m_filter", "0");
+        gEngfuncs.Cvar_Set("joystick", "0");
+        gEngfuncs.Cvar_Set("cl_input_defaults_version", "1");
+    }
     sv = g_NitroApi->GetEngineData()->server;
     sv_static = g_NitroApi->GetEngineData()->server_static;
 
@@ -271,6 +337,11 @@ public:
         g_Unsub.emplace_back(client_data->UserMsg_TextMsg |= UserMsg_TextMsgHandler);
         g_Unsub.emplace_back(client_data->CL_CreateMove |= CL_CreateMoveHandler);
 
+#ifdef _WIN32
+        g_InputFocusState = InputFocusState::Unknown;
+        g_Unsub.emplace_back(eng()->Host_FrameInternal += [](float) { UpdateInputFocusState(); });
+#endif
+
         g_GameHud = std::make_unique<GameHud>(nitro_api);
         g_Unsub.emplace_back(client_data->HUD_Shutdown += [] { g_GameHud.reset(); });
 
@@ -284,6 +355,10 @@ public:
     void Uninitialize() override
     {
         ResetInvertMouse();
+
+#ifdef _WIN32
+        g_InputFocusState = InputFocusState::Unknown;
+#endif
 
         for (auto& unsubscriber: g_Unsub) {
             unsubscriber->Unsubscribe();

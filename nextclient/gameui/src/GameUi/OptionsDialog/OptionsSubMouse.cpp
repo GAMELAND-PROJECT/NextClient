@@ -1,7 +1,6 @@
 #include "GameUi.h"
 #include "OptionsSubMouse.h"
 #include "KeyToggleCheckButton.h"
-#include "CvarNegateCheckButton.h"
 #include "CvarToggleCheckButton.h"
 #include "CvarSlider.h"
 
@@ -12,7 +11,6 @@
 
 COptionsSubMouse::COptionsSubMouse(vgui2::Panel *parent) : PropertyPage(parent, NULL)
 {
-    m_pReverseMouseCheckBox = new CCvarNegateCheckButton(this, "ReverseMouse", "#GameUI_ReverseMouse", "m_pitch");
     m_pMouseLookCheckBox = new CKeyToggleCheckButton(this, "MouseLook", "#GameUI_MouseLook", "in_mlook", "mlook");
     m_pMouseFilterCheckBox = new CCvarToggleCheckButton(this, "MouseFilter", "#GameUI_MouseFilter", "m_filter");
     m_pMouseRawInputCheckBox = new CCvarToggleCheckButton(this, "RawInput", "#GameUI_RawInput", "m_rawinput");
@@ -42,7 +40,6 @@ void COptionsSubMouse::OnPageShow(void)
 
 void COptionsSubMouse::OnResetData(void)
 {
-    m_pReverseMouseCheckBox->Reset();
     m_pMouseLookCheckBox->Reset();
     m_pMouseFilterCheckBox->Reset();
     m_pMouseRawInputCheckBox->Reset();
@@ -56,7 +53,6 @@ void COptionsSubMouse::OnResetData(void)
 
 void COptionsSubMouse::OnApplyChanges(void)
 {
-    m_pReverseMouseCheckBox->ApplyChanges();
     m_pMouseLookCheckBox->ApplyChanges();
     m_pMouseFilterCheckBox->ApplyChanges();
     m_pMouseRawInputCheckBox->ApplyChanges();
