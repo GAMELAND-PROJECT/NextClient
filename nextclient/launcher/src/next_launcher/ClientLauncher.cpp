@@ -34,6 +34,7 @@
 #include "EngineCommons.h"
 #include "exception_handler.h"
 #include "taskbar_icon.h"
+#include "VideoSettingsDialog.h"
 
 static const char* NITRO_API_LOG_TAG = "launcher";
 
@@ -135,6 +136,11 @@ void ClientLauncher::Run()
             MB_OK | MB_ICONERROR | MB_DEFAULT_DESKTOP_ONLY);
         return;
     }
+
+    // Video-mode changes are applied before the engine starts, avoiding the
+    // fragile in-game restart path. Internal engine restarts skip this page.
+    if (!is_relaunch_ && !cmd_line_->CheckParm("-novideosettings") && !ShowVideoSettingsDialog(module_instance_))
+        return;
 
     [[maybe_unused]] auto cleanup = ncl_utils::MakeScopeExit([this]
     {

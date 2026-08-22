@@ -13,6 +13,10 @@ file(GLOB_RECURSE LAUNCHER_SOURCES
         "app.manifest"
 )
 
+list(APPEND LAUNCHER_SOURCES
+        "../video_settings_launcher/main.cpp"
+)
+
 # The clean client has no backend consumers (updater, telemetry, or crash upload),
 # so do not compile the resolver that probes backend addresses at startup.
 if (NOT NEXT_LAUNCHER_ENABLE_UPDATER AND
@@ -43,6 +47,7 @@ target_link_libraries(${TARGET_NAME} PRIVATE
         TaskCoro::TaskCoro
         Dbghelp.lib
         Winmm.lib
+        Comctl32.lib
 )
 
 target_compile_definitions(${TARGET_NAME} PRIVATE
