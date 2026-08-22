@@ -6,6 +6,7 @@
 
 #include <easylogging++.h>
 #include <next_launcher/version.h>
+#include <ncl_utils/scope_exit.h>
 #include <nitro_utils/string_utils.h>
 #include <ncl_utils/safe_result.h>
 #include <taskcoro/TaskCoro.h>
@@ -143,35 +144,69 @@ namespace
 
 int WINAPI wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _In_ PWSTR lpCmdLine, _In_ int nCmdShow)
 {
-    SetupLogger();
+    std::optional<ClientLauncher::NextProcess> next_process;
+    bool startup_failed = false;
 
-    LOG(INFO) << "-----------------------------------------------";
-    LOG(INFO) << "Start " << GetCurrentProcessPath().filename();
-    LOG(INFO) << "Version: " << NEXT_CLIENT_BUILD_VERSION;
+    try
+    {
+        SetupLogger();
 
-    SetupTaskCoro();
-    SetupLocale();
+        LOG(INFO) << "-----------------------------------------------";
+        LOG(INFO) << "Start " << GetCurrentProcessPath().filename();
+        LOG(INFO) << "Version: " << NEXT_CLIENT_BUILD_VERSION;
+
+        SetupTaskCoro();
+        [[maybe_unused]] auto task_coro_cleanup = ncl_utils::MakeScopeExit([] { ReleaseTaskCoro(); });
+        SetupLocale();
 
 #ifdef UPDATER_ENABLE
-    FinishLauncherUpdate();
+        FinishLauncherUpdate();
 #endif
 
-    std::optional<ClientLauncher::NextProcess> next_process;
-    {
-        auto launcher = std::make_unique<ClientLauncher>(hInstance, GetCommandLineA());
-        launcher->Run();
+        {
+            auto launcher = std::make_unique<ClientLauncher>(hInstance, GetCommandLineA());
+            launcher->Run();
+            next_process = launcher->next_process();
+        }
 
-        next_process = launcher->next_process();
+        LOG(INFO) << "Exit";
     }
-
-    ReleaseTaskCoro();
-
-    LOG(INFO) << "Exit";
+    catch (const std::exception& e)
+    {
+        LOG(ERROR) << "Launcher startup failed: " << e.what();
+        startup_failed = true;
+    }
+    catch (...)
+    {
+        LOG(ERROR) << "Launcher startup failed: unknown exception";
+        startup_failed = true;
+    }
 
     if (next_process)
     {
         el::Loggers::flushAll();
         SpawnProcess(next_process->application, next_process->command_line);
+    }
+    else if (startup_failed)
+    {
+        try
+        {
+            std::string application = GetCurrentProcessPath().string();
+            std::string command_line = GetCommandLineA();
+            if (command_line.find("-noupdate") == std::string::npos)
+                command_line += " -noupdate";
+
+            el::Loggers::flushAll();
+            SpawnProcess(application, command_line);
+        }
+        catch (const std::exception& e)
+        {
+            LOG(ERROR) << "Safe restart failed: " << e.what();
+        }
+        catch (...)
+        {
+            LOG(ERROR) << "Safe restart failed: unknown exception";
+        }
     }
 
     return EXIT_SUCCESS;

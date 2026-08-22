@@ -1,6 +1,7 @@
 #include "ClientLauncher.h"
 
 #include <clocale>
+#include <exception>
 #include <easylogging++.h>
 #include <filesystem>
 #include <format>
@@ -23,6 +24,7 @@
 #include <nitro_utils/config_utils.h>
 #include <nitro_utils/string_utils.h>
 #include <utils/platform.h>
+#include <ncl_utils/scope_exit.h>
 #include <next_launcher/version.h>
 #include <steam_api_proxy/next_steam_api_proxy.h>
 
@@ -54,6 +56,23 @@ public:
 private:
     bool enabled_ = false;
 };
+
+template<class TFunc>
+void RunStartupStepNoThrow(const char* step_name, TFunc&& func)
+{
+    try
+    {
+        func();
+    }
+    catch (const std::exception& e)
+    {
+        LOG(WARNING) << step_name << " failed: " << e.what();
+    }
+    catch (...)
+    {
+        LOG(WARNING) << step_name << " failed: unknown exception";
+    }
+}
 }
 
 
@@ -106,13 +125,6 @@ void ClientLauncher::Run()
     if (config_provider_->get_value_int("create_console_window", 0))
         CreateConsoleWindowAndRedirectOutput();
 
-    InitializeSentry();
-    InitializeAnalytics();
-    FixScreenResolution();
-
-    if (analytics_)
-        analytics_->SendAnalyticsEvent("startup_init");
-
     if (!GlobalMutexCheck())
     {
         MessageBoxA(
@@ -121,29 +133,71 @@ void ClientLauncher::Run()
             "If it is not, then end the process in the task manager.",
             kErrorTitle,
             MB_OK | MB_ICONERROR | MB_DEFAULT_DESKTOP_ONLY);
-
-        UninitializeAnalytics();
-        UninitializeSentry();
         return;
     }
+
+    [[maybe_unused]] auto cleanup = ncl_utils::MakeScopeExit([this]
+    {
+        UninitializeAnalytics();
+        UninitializeSentry();
+    });
+
+    RunStartupStepNoThrow("Sentry initialization", [this]
+    {
+        InitializeSentry();
+    });
+
+    RunStartupStepNoThrow("Analytics initialization", [this]
+    {
+        InitializeAnalytics();
+    });
+
+    FixScreenResolution();
+
+    if (analytics_)
+        analytics_->SendAnalyticsEvent("startup_init");
 
     if (analytics_)
         analytics_->SendAnalyticsEvent("startup_init_post_mutex");
 
-    UpdaterDoneStatus updater_done = RunStartupUpdater();
+    UpdaterDoneStatus updater_done = UpdaterDoneStatus::RunGame;
+    RunStartupStepNoThrow("Startup updater", [this, &updater_done]
+    {
+        updater_done = RunStartupUpdater();
+    });
 
     if (updater_done == UpdaterDoneStatus::RunGame)
     {
-        EngineSessionResult run_result = RunEngine();
+        EngineSessionResult run_result = EngineSessionResult::Exit;
+
+        try
+        {
+            run_result = RunEngine();
+        }
+        catch (const std::exception& e)
+        {
+            LOG(ERROR) << "Engine startup failed: " << e.what();
+
+            if (!is_relaunch_)
+            {
+                next_process_ = BuildRestartProcess();
+            }
+        }
+        catch (...)
+        {
+            LOG(ERROR) << "Engine startup failed: unknown exception";
+
+            if (!is_relaunch_)
+            {
+                next_process_ = BuildRestartProcess();
+            }
+        }
 
         if (run_result == EngineSessionResult::Restart)
         {
             next_process_ = BuildRestartProcess();
         }
     }
-
-    UninitializeAnalytics();
-    UninitializeSentry();
 
     if (updater_done == UpdaterDoneStatus::RunNewGame)
     {
@@ -159,13 +213,26 @@ void ClientLauncher::Run()
 UpdaterDoneStatus ClientLauncher::RunStartupUpdater()
 {
 #ifdef UPDATER_ENABLE
-    UpdaterFlags updater_flags{};
-    updater_flags |= cmd_line_->CheckParm("-noupdate") ? UpdaterFlags::None : UpdaterFlags::Updater;
+    try
+    {
+        UpdaterFlags updater_flags{};
+        updater_flags |= cmd_line_->CheckParm("-noupdate") ? UpdaterFlags::None : UpdaterFlags::Updater;
 
-    auto [updater_done, available_branches] = RunUpdater(updater_flags);
-    available_branches_ = available_branches;
+        auto [updater_done, available_branches] = RunUpdater(updater_flags);
+        available_branches_ = available_branches;
 
-    return updater_done;
+        return updater_done;
+    }
+    catch (const std::exception& e)
+    {
+        LOG(WARNING) << "Startup updater failed: " << e.what() << ". Continuing with the game.";
+        return UpdaterDoneStatus::RunGame;
+    }
+    catch (...)
+    {
+        LOG(WARNING) << "Startup updater failed: unknown exception. Continuing with the game.";
+        return UpdaterDoneStatus::RunGame;
+    }
 #else
     return UpdaterDoneStatus::RunGame;
 #endif
@@ -456,22 +523,36 @@ bool ClientLauncher::GlobalMutexCheck()
 
 void ClientLauncher::InitializeAnalytics()
 {
-    std::string client_uid = user_info_client_->GetClientUid();
+    try
+    {
+        std::string client_uid = user_info_client_->GetClientUid();
 
-    gameanalytics::GameAnalytics::setEnabledErrorReporting(false);
-    gameanalytics::GameAnalytics::disableDeviceInfo();
-    gameanalytics::GameAnalytics::configureUserId(client_uid.c_str());
-    gameanalytics::GameAnalytics::configureBuild(NEXT_CLIENT_BUILD_VERSION);
-    gameanalytics::GameAnalytics::initialize(GAMEANALYTICS_GAME_KEY, GAMEANALYTICS_SECRET_KEY);
+        gameanalytics::GameAnalytics::setEnabledErrorReporting(false);
+        gameanalytics::GameAnalytics::disableDeviceInfo();
+        gameanalytics::GameAnalytics::configureUserId(client_uid.c_str());
+        gameanalytics::GameAnalytics::configureBuild(NEXT_CLIENT_BUILD_VERSION);
+        gameanalytics::GameAnalytics::initialize(GAMEANALYTICS_GAME_KEY, GAMEANALYTICS_SECRET_KEY);
 
-    analytics_->SendBranchEvent();
-    analytics_->SendPrimaryBackendEvent();
-    analytics_->SendActualBackendEvent();
+        analytics_->SendBranchEvent();
+        analytics_->SendPrimaryBackendEvent();
+        analytics_->SendActualBackendEvent();
+    }
+    catch (const std::exception& e)
+    {
+        LOG(WARNING) << "Analytics initialization failed: " << e.what();
+        analytics_.reset();
+    }
+    catch (...)
+    {
+        LOG(WARNING) << "Analytics initialization failed: unknown exception";
+        analytics_.reset();
+    }
 }
 
 void ClientLauncher::UninitializeAnalytics()
 {
-    gameanalytics::GameAnalytics::onQuit();
+    if (analytics_)
+        gameanalytics::GameAnalytics::onQuit();
 }
 
 #else
@@ -485,37 +566,50 @@ void ClientLauncher::UninitializeAnalytics() { }
 
 void ClientLauncher::InitializeSentry()
 {
-    CHAR exe_file_path[MAX_PATH];
-    GetModuleFileNameA(nullptr, exe_file_path, MAX_PATH);
+    try
+    {
+        CHAR exe_file_path[MAX_PATH];
+        GetModuleFileNameA(nullptr, exe_file_path, MAX_PATH);
 
-    std::string client_uid = user_info_client_->GetClientUid();
+        std::string client_uid = user_info_client_->GetClientUid();
 
-    sentry_options_t *options = sentry_options_new();
-    sentry_options_set_dsn(options, SENTRY_UPLOAD_URL);
-    sentry_options_set_handler_path(options, "crashpad_handler.exe");
-    sentry_options_set_database_path(options, "crashes");
-    sentry_options_set_release(options, SENTRY_PROJECT_NAME "@" NEXT_CLIENT_BUILD_VERSION);
-    sentry_options_set_environment(options, SENTRY_ENV);
-    sentry_options_set_max_breadcrumbs(options, 100);
+        sentry_options_t *options = sentry_options_new();
+        sentry_options_set_dsn(options, SENTRY_UPLOAD_URL);
+        sentry_options_set_handler_path(options, "crashpad_handler.exe");
+        sentry_options_set_database_path(options, "crashes");
+        sentry_options_set_release(options, SENTRY_PROJECT_NAME "@" NEXT_CLIENT_BUILD_VERSION);
+        sentry_options_set_environment(options, SENTRY_ENV);
+        sentry_options_set_max_breadcrumbs(options, 100);
 
-    sentry_options_add_attachment(options, "nitro_api.log");
-    sentry_options_add_attachment(options, "setting_guard.ini");
-    sentry_options_add_attachment(options, "user_game_config.ini");
-    sentry_options_add_attachment(options, "launcher.log");
-    sentry_options_add_attachment(options, "platform\\config\\backend.json");
+        sentry_options_add_attachment(options, "nitro_api.log");
+        sentry_options_add_attachment(options, "setting_guard.ini");
+        sentry_options_add_attachment(options, "user_game_config.ini");
+        sentry_options_add_attachment(options, "launcher.log");
+        sentry_options_add_attachment(options, "platform\\config\\backend.json");
 
-    int result = sentry_init(options);
+        int result = sentry_init(options);
 
-    sentry_value_t user = sentry_value_new_object();
-    sentry_value_set_by_key(user, "id", sentry_value_new_string(client_uid.c_str()));
-    sentry_value_set_by_key(user, "ip_address", sentry_value_new_string("{{auto}}"));
-    sentry_value_set_by_key(user, "Game Dir", sentry_value_new_string(exe_file_path));
-    sentry_set_user(user);
+        sentry_value_t user = sentry_value_new_object();
+        sentry_value_set_by_key(user, "id", sentry_value_new_string(client_uid.c_str()));
+        sentry_value_set_by_key(user, "ip_address", sentry_value_new_string("{{auto}}"));
+        sentry_value_set_by_key(user, "Game Dir", sentry_value_new_string(exe_file_path));
+        sentry_set_user(user);
 
-    if (result == 0)
-        sentry_init_log_ = "Sentry started";
-    else
-        sentry_init_log_ = std::format("Sentry error: {}", GetWinErrorString(GetLastError()));
+        if (result == 0)
+            sentry_init_log_ = "Sentry started";
+        else
+            sentry_init_log_ = std::format("Sentry error: {}", GetWinErrorString(GetLastError()));
+    }
+    catch (const std::exception& e)
+    {
+        sentry_init_log_ = std::format("Sentry error: {}", e.what());
+        LOG(WARNING) << sentry_init_log_;
+    }
+    catch (...)
+    {
+        sentry_init_log_ = "Sentry error: unknown exception";
+        LOG(WARNING) << sentry_init_log_;
+    }
 
 }
 
