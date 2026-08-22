@@ -243,25 +243,6 @@ bool SaveBackup(const VideoSettings& value, const SystemMouseSettings& mouse)
            key.WriteDword(L"BackupValid", 1);
 }
 
-bool LoadBackup(VideoSettings& value, SystemMouseSettings& mouse)
-{
-    RegistryKey key(HKEY_CURRENT_USER, kLauncherKey, KEY_QUERY_VALUE | KEY_SET_VALUE);
-    if (!key.valid() || key.ReadDword(L"BackupValid", 0) != 1)
-        return false;
-
-    value.width = key.ReadDword(L"BackupWidth", 800);
-    value.height = key.ReadDword(L"BackupHeight", 600);
-    value.bpp = key.ReadDword(L"BackupBPP", 32);
-    value.windowed = key.ReadDword(L"BackupWindowed", 0);
-    value.hdModels = key.ReadDword(L"BackupHDModels", 0);
-    value.videoLevel = key.ReadDword(L"BackupVideoLevel", 1);
-    mouse.speed = static_cast<int>(key.ReadDword(L"BackupPointerSpeed", 10));
-    mouse.acceleration[0] = static_cast<int>(key.ReadDword(L"BackupMouseThreshold1", 6));
-    mouse.acceleration[1] = static_cast<int>(key.ReadDword(L"BackupMouseThreshold2", 10));
-    mouse.acceleration[2] = static_cast<int>(key.ReadDword(L"BackupMouseAcceleration", 1));
-    return true;
-}
-
 void SetStatus(const wchar_t* text, bool error = false)
 {
     SetWindowTextW(g_status, text);
@@ -490,18 +471,20 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
             return 0;
         case IdRestore:
         {
-            VideoSettings backup;
-            SystemMouseSettings backupMouse;
-            if (LoadBackup(backup, backupMouse) && WriteSettings(backup) && WriteSystemMouseSettings(backupMouse))
-            {
-                SetControls(backup);
-                SetMouseControls(backupMouse);
-                g_mouseAtLastApply = backupMouse;
-                g_mousePreviewChanged = false;
-                SetStatus(L"Previous video and Windows mouse settings restored.");
-            }
-            else
-                SetStatus(L"No valid backup is available.", true);
+            VideoSettings defaults = ReadSettings();
+            defaults.windowed = 0;
+            defaults.hdModels = 0;
+            defaults.videoLevel = 0;
+            SetControls(defaults);
+
+            SystemMouseSettings mouseDefaults = g_mouseAtLastApply;
+            mouseDefaults.speed = SliderPositionToPointerSpeed(4);
+            mouseDefaults.acceleration[0] = 6;
+            mouseDefaults.acceleration[1] = 10;
+            mouseDefaults.acceleration[2] = 1;
+            SetMouseControls(mouseDefaults);
+            ApplyMousePreview();
+            SetStatus(L"Defaults selected: fullscreen, HD and high quality off, pointer speed 4 / 11, precision on.");
             return 0;
         }
         default:
