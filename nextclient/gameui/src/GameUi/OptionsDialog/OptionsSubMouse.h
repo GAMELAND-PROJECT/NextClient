@@ -51,9 +51,6 @@ private:
     CKeyToggleCheckButton *m_pMouseLookCheckBox;
     CCvarToggleCheckButton *m_pMouseFilterCheckBox;
     CCvarToggleCheckButton *m_pMouseRawInputCheckBox;
-    CCvarToggleCheckButton *m_pJoystickCheckBox;
-    CKeyToggleCheckButton *m_pJoystickLookCheckBox;
-
     CCvarSlider *m_pMouseSensitivitySlider;
     vgui2::TextEntry *m_pMouseSensitivityLabel;
 

@@ -40,6 +40,8 @@ playermove_t* pmove;
 
 std::unique_ptr<GameHud> g_GameHud;
 static std::vector<std::shared_ptr<nitroapi::Unsubscriber>> g_Unsub;
+static bool g_MouseCaptureKnown = false;
+static bool g_MouseCaptured = false;
 
 #ifdef _WIN32
 namespace
@@ -85,6 +87,11 @@ namespace
         // attack states and stale mouse deltas cannot survive Alt+Tab.
         IN_ClearStates();
         ResetInvertMouse();
+    }
+
+    bool IsInputBackground()
+    {
+        return g_InputFocusState == InputFocusState::Background;
     }
 }
 #endif
@@ -290,6 +297,25 @@ static int UserMsg_TextMsgHandler(const char* name, int size, void* data, UserMs
 
 static void CL_CreateMoveHandler(float frametime, usercmd_t* cmd, int active, CL_CreateMoveNext next)
 {
+#ifdef _WIN32
+    if (IsInputBackground())
+    {
+        // Let the original client advance its command clock, but prevent a
+        // focused gameplay command from surviving while our window is inactive.
+        next->Invoke(frametime, cmd, 0);
+
+        if (cmd != nullptr)
+        {
+            cmd->forwardmove = 0.0f;
+            cmd->sidemove = 0.0f;
+            cmd->upmove = 0.0f;
+            cmd->buttons = 0;
+            cmd->impulse = 0;
+        }
+        return;
+    }
+#endif
+
     CL_CreateMove_InvertMousePre(frametime, cmd, active);
 
     next->Invoke(frametime, cmd, active);
@@ -320,6 +346,9 @@ public:
 
         MathLib_Init();
 
+        g_MouseCaptureKnown = false;
+        g_MouseCaptured = false;
+
         nitroapi::ClientData* client_data = nitro_api->GetClientData();
         g_Unsub.emplace_back(client_data->HUD_VidInit |= HUD_VidInitHandler);
         g_Unsub.emplace_back(client_data->HUD_Reset |= HUD_ResetHandler);
@@ -336,6 +365,30 @@ public:
         g_Unsub.emplace_back(client_data->UserMsg_InitHUD += UserMsg_InitHUDPost);
         g_Unsub.emplace_back(client_data->UserMsg_TextMsg |= UserMsg_TextMsgHandler);
         g_Unsub.emplace_back(client_data->CL_CreateMove |= CL_CreateMoveHandler);
+
+        // A capture transition is also an input-state boundary. Clearing once
+        // here prevents held buttons and pre-capture mouse motion leaking into
+        // the first gameplay command without polling or altering mouse deltas.
+        g_Unsub.emplace_back(client_data->IN_ActivateMouse |= [](const auto& next) {
+            next->Invoke();
+            if (!g_MouseCaptureKnown || !g_MouseCaptured)
+            {
+                g_MouseCaptureKnown = true;
+                g_MouseCaptured = true;
+                IN_ClearStates();
+                ResetInvertMouse();
+            }
+        });
+        g_Unsub.emplace_back(client_data->IN_DeactivateMouse |= [](const auto& next) {
+            next->Invoke();
+            if (!g_MouseCaptureKnown || g_MouseCaptured)
+            {
+                g_MouseCaptureKnown = true;
+                g_MouseCaptured = false;
+                IN_ClearStates();
+                ResetInvertMouse();
+            }
+        });
 
 #ifdef _WIN32
         g_InputFocusState = InputFocusState::Unknown;
@@ -355,6 +408,8 @@ public:
     void Uninitialize() override
     {
         ResetInvertMouse();
+        g_MouseCaptureKnown = false;
+        g_MouseCaptured = false;
 
 #ifdef _WIN32
         g_InputFocusState = InputFocusState::Unknown;
