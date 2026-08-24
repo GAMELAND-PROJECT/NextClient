@@ -540,11 +540,8 @@ void CBaseGamesPage::OnTextChanged(Panel *panel, const char *text)
     UpdateFilterSettings();
     ApplyFilters();
 
-    if (m_bFiltersVisible && (panel == m_pGameFilter || panel == m_pLocationFilter))
-    {
-        StopRefresh(CancelQueryReason::FilterChanged);
-        GetNewServerList();
-    }
+    // Filtering is local. Network queries and latency measurements are only
+    // started by an explicit Refresh/Get New List action.
 }
 
 void CBaseGamesPage::ApplyFilters()

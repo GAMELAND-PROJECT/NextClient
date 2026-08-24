@@ -38,7 +38,6 @@ void CFavoriteGames::OnPageShow()
     if (m_ColumnsMap.contains(GameListColumnType::Players))
         m_pGameList->SetSortColumnEx(m_ColumnsMap[GameListColumnType::Players], -1, true);
 
-    GetNewServerList();
 }
 
 void CFavoriteGames::OnPageHide()

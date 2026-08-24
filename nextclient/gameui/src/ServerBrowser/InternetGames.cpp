@@ -36,13 +36,6 @@ CInternetGames::~CInternetGames()
 
 void CInternetGames::OnPageShow()
 {
-    if (!ServerBrowserDialog().IsVisible())
-        return;
-
-    if (m_pGameList->GetItemCount() == 0)
-        GetNewServerList();
-    else if (auto_refresh_)
-        StartRefresh();
 }
 
 void CInternetGames::OnPageHide()

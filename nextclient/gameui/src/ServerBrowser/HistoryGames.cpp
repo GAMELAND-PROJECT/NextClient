@@ -48,7 +48,6 @@ void CHistoryGames::OnPageShow()
     if (!ServerBrowserDialog().IsVisible())
         return;
 
-    GetNewServerList();
 }
 
 void CHistoryGames::OnPageHide()

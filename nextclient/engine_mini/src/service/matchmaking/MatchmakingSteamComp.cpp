@@ -290,7 +290,6 @@ gameserveritem_t* MatchmakingSteamComp::GetServerDetails(HServerListRequest requ
 
 void MatchmakingSteamComp::CancelQuery(HServerListRequest request_id)
 {
-    OPTICK_EVENT();
     
     if (!server_requests_.contains(request_id))
     {
@@ -445,12 +444,10 @@ void MatchmakingSteamComp::RefreshServer(HServerListRequest request_id, int serv
             gameserver.m_ulTimeLastPlayed = request_data.servers[server_id].m_ulTimeLastPlayed;
             request_data.servers[server_id] = gameserver;
 
-            OPTICK_EVENT("MatchmakingSteamComp::RefreshServer - response_callback->ServerResponded")
             request_data.response_callback->ServerResponded(request_id, server_id);
         }
         else
         {
-            OPTICK_EVENT("MatchmakingSteamComp::RefreshServer - response_callback->ServerFailedToRespond")
             request_data.response_callback->ServerFailedToRespond(request_id, server_id);
         }
     }, request_id, server_id, request_data.cancellation_token);
@@ -502,7 +499,6 @@ result<void> MatchmakingSteamComp::RequestServerList(
     // server_requests_ and the response callback are main-thread confined
     assert(TaskCoro::IsMainThread());
 
-    OPTICK_EVENT("MatchmakingSteamComp::RequestServerList - response_callback->RefreshComplete")
     response_callback->RefreshComplete(request_id, eServerResponded);
 }
 
@@ -531,7 +527,6 @@ result<void> MatchmakingSteamComp::RefreshServerList(
 
     assert(TaskCoro::IsMainThread());
 
-    OPTICK_EVENT("MatchmakingSteamComp::RefreshServerList - response_callback->RefreshComplete")
     response_callback->RefreshComplete(request_id, eServerResponded);
 }
 
@@ -540,7 +535,6 @@ void MatchmakingSteamComp::ServerAnsweredHandler(
     ISteamMatchmakingServerListResponse* response_callback,
     const MatchmakingService::ServerInfo& server_info)
 {
-    OPTICK_EVENT("MatchmakingSteamComp::ServerAnsweredHandler")
 
     const auto request_it = server_requests_.find(request_id);
     if (request_it == server_requests_.end())
@@ -569,19 +563,16 @@ void MatchmakingSteamComp::ServerAnsweredHandler(
 
     if (server_info.gameserver.m_bHadSuccessfulResponse)
     {
-        OPTICK_EVENT("MatchmakingSteamComp::ServerAnsweredHandler - ServerResponded")
         response_callback->ServerResponded(request_id, server_info.server_index);
     }
     else
     {
-        OPTICK_EVENT("MatchmakingSteamComp::ServerAnsweredHandler - ServerFailedToRespond")
         response_callback->ServerFailedToRespond(request_id, server_info.server_index);
     }
 }
 
 void MatchmakingSteamComp::InitEmptyGameServerItem(gameserveritem_t& gameserver, uint32_t ip, uint16_t port)
 {
-    OPTICK_EVENT()
 
     if (app_id_ == 0)
     {

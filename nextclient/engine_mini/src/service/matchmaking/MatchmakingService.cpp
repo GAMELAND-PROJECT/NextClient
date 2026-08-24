@@ -291,7 +291,6 @@ result<std::vector<MatchmakingService::ServerInfo>> MatchmakingService::WaitAnyS
 
 bool MatchmakingService::IsServerListForcedToBeEmpty(const std::vector<ServerInfo>& servers)
 {
-    OPTICK_EVENT()
 
     if (servers.size() != 1)
     {
@@ -305,7 +304,6 @@ bool MatchmakingService::IsServerListForcedToBeEmpty(const std::vector<ServerInf
 
 gameserveritem_t MatchmakingService::ConvertToGameServerItem(const SQResponseInfo<SQ_INFO>& sq_info)
 {
-    OPTICK_EVENT()
 
     const netadr_t& address = sq_info.address;
 

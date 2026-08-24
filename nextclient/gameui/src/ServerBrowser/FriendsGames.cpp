@@ -25,9 +25,6 @@ CFriendsGames::~CFriendsGames()
 void CFriendsGames::OnPageShow()
 {
     BaseClass::OnPageShow();
-
-    if (m_pGameList->GetItemCount() == 0 || auto_refresh_)
-        GetNewServerList();
 }
 
 void CFriendsGames::OnPageHide()

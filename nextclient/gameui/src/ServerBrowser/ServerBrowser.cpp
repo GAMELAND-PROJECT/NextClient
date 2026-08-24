@@ -88,8 +88,8 @@ void CServerBrowser::Reactivate()
     {
         server_browser_dialog_->LoadUserData();
 
-        if (server_browser_dialog_->IsVisible())
-            server_browser_dialog_->RefreshCurrentPage();
+        // Restoring the UI must not start network/latency queries. The user
+        // explicitly refreshes the active page when fresh data is wanted.
     }
 }
 

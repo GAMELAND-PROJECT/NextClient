@@ -1,6 +1,7 @@
 #pragma once
 
 #include <unordered_map>
+#include <cstdint>
 #include <steam/steam_api.h>
 #include "serveritem.h"
 #include "IServerRefreshResponse.h"
@@ -13,6 +14,8 @@ class CServerList : public ISteamMatchmakingServerListResponse
 
     // key - server id
     std::unordered_map<int, serveritem_t> servers_;
+    std::unordered_map<std::uint64_t, int> lan_endpoint_to_server_;
+    bool deduplicate_lan_endpoints_ = false;
 
 public:
     explicit CServerList(IServerRefreshResponse* response_target);

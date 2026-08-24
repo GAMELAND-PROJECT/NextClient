@@ -16,6 +16,7 @@ CServerList::~CServerList()
 void CServerList::RequestFavorites(MatchMakingKeyValuePair_t **ppchFilters, uint32 nFilters)
 {
     Clear();
+    deduplicate_lan_endpoints_ = false;
 
     server_list_request_ = EngineMini()->GetSteamMatchmakingServers()->RequestFavoritesServerList(SteamUtils()->GetAppID(), ppchFilters, nFilters, this);
 }
@@ -23,6 +24,7 @@ void CServerList::RequestFavorites(MatchMakingKeyValuePair_t **ppchFilters, uint
 void CServerList::RequestInternet(MatchMakingKeyValuePair_t **ppchFilters, uint32 nFilters)
 {
     Clear();
+    deduplicate_lan_endpoints_ = false;
 
     server_list_request_ = EngineMini()->GetSteamMatchmakingServers()->RequestInternetServerList(SteamUtils()->GetAppID(), ppchFilters, nFilters, this);
 }
@@ -35,6 +37,7 @@ void CServerList::RequestUnique(MatchMakingKeyValuePair_t **ppchFilters, uint32 
 void CServerList::RequestHistory(MatchMakingKeyValuePair_t **ppchFilters, uint32 nFilters)
 {
     Clear();
+    deduplicate_lan_endpoints_ = false;
 
     server_list_request_ = EngineMini()->GetSteamMatchmakingServers()->RequestHistoryServerList(SteamUtils()->GetAppID(), ppchFilters, nFilters, this);
 }
@@ -42,6 +45,7 @@ void CServerList::RequestHistory(MatchMakingKeyValuePair_t **ppchFilters, uint32
 void CServerList::RequestFriends(MatchMakingKeyValuePair_t **ppchFilters, uint32 nFilters)
 {
     Clear();
+    deduplicate_lan_endpoints_ = false;
 
     server_list_request_ = EngineMini()->GetSteamMatchmakingServers()->RequestFriendsServerList(SteamUtils()->GetAppID(), ppchFilters, nFilters, this);
 }
@@ -49,6 +53,7 @@ void CServerList::RequestFriends(MatchMakingKeyValuePair_t **ppchFilters, uint32
 void CServerList::RequestLan()
 {
     Clear();
+    deduplicate_lan_endpoints_ = true;
 
     server_list_request_ = EngineMini()->GetSteamMatchmakingServers()->RequestLANServerList(SteamUtils()->GetAppID(), this);
 }
@@ -100,16 +105,18 @@ void CServerList::StopRefresh(IGameList::CancelQueryReason reason)
 
 void CServerList::Clear()
 {
-    if (server_list_request_ == nullptr)
-        return;
+    if (server_list_request_ != nullptr)
+    {
+        if (IsRefreshing())
+            EngineMini()->GetSteamMatchmakingServers()->CancelQuery(server_list_request_);
 
-    if (IsRefreshing())
-        EngineMini()->GetSteamMatchmakingServers()->CancelQuery(server_list_request_);
+        EngineMini()->GetSteamMatchmakingServers()->ReleaseRequest(server_list_request_);
+        server_list_request_ = nullptr;
+    }
 
-    EngineMini()->GetSteamMatchmakingServers()->ReleaseRequest(server_list_request_);
-
-    server_list_request_ = nullptr;
     servers_.clear();
+    lan_endpoint_to_server_.clear();
+    deduplicate_lan_endpoints_ = false;
 }
 
 bool CServerList::IsRefreshing()
@@ -136,6 +143,24 @@ void CServerList::ServerResponded(HServerListRequest hRequest, int iServer)
         return;
 
     UpdateServerItem(true, iServer);
+
+    if (deduplicate_lan_endpoints_)
+    {
+        auto& incoming = servers_.at(iServer);
+        const auto endpoint = (static_cast<std::uint64_t>(incoming.gs.m_NetAdr.GetIP()) << 16)
+            | incoming.gs.m_NetAdr.GetConnectionPort();
+        const auto [it, inserted] = lan_endpoint_to_server_.emplace(endpoint, iServer);
+
+        if (!inserted && it->second != iServer)
+        {
+            auto& canonical = servers_.at(it->second);
+            incoming.listEntryID = canonical.listEntryID;
+            canonical.gs = incoming.gs;
+            canonical.hadSuccessfulResponse = true;
+            response_target_->ServerResponded(canonical);
+            return;
+        }
+    }
 
     response_target_->ServerResponded(servers_.at(iServer));
 }

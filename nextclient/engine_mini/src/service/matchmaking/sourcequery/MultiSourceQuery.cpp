@@ -126,8 +126,6 @@ void MultiSourceQuery::MainLoop()
     {
         while (!cancellation_token_->IsCanceled())
         {
-            OPTICK_EVENT("MainLoop")
-
             auto current_time = high_resolution_clock::now();
 
             ReceiveAndAssembleBuffers();
@@ -135,10 +133,7 @@ void MultiSourceQuery::MainLoop()
             ProcessIncomingBuffers(current_time);
             CloseExpiredSockets(current_time);
 
-            {
-                OPTICK_EVENT("Update")
-                manual_sync_ctx_->Update();
-            }
+            manual_sync_ctx_->Update();
 
             // Server browsing needs a responsive poll interval, but keeping an
             // otherwise idle query thread at 200 wakeups/second can introduce
@@ -157,8 +152,6 @@ void MultiSourceQuery::MainLoop()
 
 void MultiSourceQuery::AssembleBuffer(ByteBuffer& buffer, netadr_t from_addr)
 {
-    OPTICK_EVENT()
-
     auto current_time = high_resolution_clock::now();
 
     int32_t packet_type{};
@@ -195,7 +188,6 @@ void MultiSourceQuery::AssembleBuffer(ByteBuffer& buffer, netadr_t from_addr)
 
         if (multi_info.recv_done)
         {
-            LOG(DEBUG) << "[MultiSourceQuery] Multi-packet was done parsed, but new message with same requestid received";
             return;
         }
 
@@ -203,8 +195,6 @@ void MultiSourceQuery::AssembleBuffer(ByteBuffer& buffer, netadr_t from_addr)
         {
             multi_info.has_error = true;
             multi_info.recv_done = true;
-            LOG(DEBUG) << "[MultiSourceQuery] Error while parsing multi-packet, next packet has different numpackets then first "
-                          "(first: " <<  multi_info.numpackets << ", current: " << numpackets << ")";
             return;
         }
 
@@ -229,8 +219,6 @@ void MultiSourceQuery::AssembleBuffer(ByteBuffer& buffer, netadr_t from_addr)
 
 void MultiSourceQuery::ProcessIncomingBuffers(high_resolution_clock::time_point current_time)
 {
-    OPTICK_EVENT()
-
     for (auto& rcv : recv_)
     {
         netadr_t address = rcv.first;
@@ -240,14 +228,12 @@ void MultiSourceQuery::ProcessIncomingBuffers(high_resolution_clock::time_point 
         {
             if (it->has_error)
             {
-                LOG(DEBUG) << "[MultiSourceQuery] Dropping a buffer with error. addr: " << address.ToString();
                 it = buffers.erase(it);
                 continue;
             }
 
             if (GetElapsedMs(current_time, it->first_packet_time) >= kMaxBufferHoldsTimeMs)
             {
-                LOG(DEBUG) << "[MultiSourceQuery] Dropping a buffer by timeout. addr: " << address.ToString();
                 it = buffers.erase(it);
                 continue;
             }
@@ -266,8 +252,6 @@ void MultiSourceQuery::ProcessIncomingBuffers(high_resolution_clock::time_point 
 
 void MultiSourceQuery::ProcessQueries(netadr_t address, ByteBuffer& buffer)
 {
-    OPTICK_EVENT()
-
     netadr_t query_address = address;
     if (!queries_.contains(query_address))
     {
@@ -314,8 +298,6 @@ void MultiSourceQuery::ProcessQueries(netadr_t address, ByteBuffer& buffer)
 
 void MultiSourceQuery::ProcessTimeoutQueries(high_resolution_clock::time_point current_time)
 {
-    OPTICK_EVENT()
-
     for (auto& q : queries_)
     {
         netadr_t address = q.first;
@@ -328,7 +310,6 @@ void MultiSourceQuery::ProcessTimeoutQueries(high_resolution_clock::time_point c
             {
                 if (it->retry >= retries_)
                 {
-                    LOG(DEBUG) << "[MultiSourceQuery] Resolving a request by timeout. ms: " << ellapsed << "; addr: " << address.ToString();
                     it->query->Resolve(SQErrorCode::Timeout, address);
                     it = addr_query.erase(it);
                     continue;
@@ -348,8 +329,6 @@ void MultiSourceQuery::ProcessTimeoutQueries(high_resolution_clock::time_point c
 
 void MultiSourceQuery::ReceiveAndAssembleBuffers()
 {
-    OPTICK_EVENT()
-
     int cycle_guard = 1000;
     int total_bytes_received;
     int sockets_count = std::min((int)sockets_.size(), FD_SETSIZE);
@@ -369,8 +348,6 @@ void MultiSourceQuery::ReceiveAndAssembleBuffers()
         int ready_sockets = select(0, &set, nullptr, nullptr, &timeout);
         if (ready_sockets == 0 || ready_sockets == SOCKET_ERROR)
         {
-            if (ready_sockets == SOCKET_ERROR)
-                LOG(DEBUG) << "[MultiSourceQuery] select completed with SOCKET_ERROR: " << WSAGetLastError();
             return;
         }
 
@@ -401,7 +378,6 @@ void MultiSourceQuery::ReceiveAndAssembleBuffers()
             int bytes_received = recvfrom(socket, (char*)recv_buffer.GetBuffer(), (int)recv_buffer.Size(), 0, &from_addr, &from_len);
             if (bytes_received == SOCKET_ERROR)
             {
-                LOG(DEBUG) << "[MultiSourceQuery] recvfrom completed with error: " << WSAGetLastError();
                 break;
             }
 
@@ -422,8 +398,6 @@ void MultiSourceQuery::ReceiveAndAssembleBuffers()
 
 void MultiSourceQuery::CloseExpiredSockets(high_resolution_clock::time_point current_time)
 {
-    OPTICK_EVENT()
-
     for (auto it = sockets_.begin(); it != sockets_.end(); )
     {
         if (current_time > it->close_time)
@@ -439,8 +413,6 @@ void MultiSourceQuery::CloseExpiredSockets(high_resolution_clock::time_point cur
 
 void MultiSourceQuery::CreateSocket(bool broadcast)
 {
-    OPTICK_EVENT()
-
     SOCKET s = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
 
     if (broadcast)
@@ -454,8 +426,6 @@ void MultiSourceQuery::CreateSocket(bool broadcast)
 
 void MultiSourceQuery::CreateSocketIfNeeded(bool broadcast)
 {
-    OPTICK_EVENT()
-
     if (!sockets_.empty())
     {
         int opt_broadcast;

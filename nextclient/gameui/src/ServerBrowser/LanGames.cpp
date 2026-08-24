@@ -29,9 +29,6 @@ CLanGames::~CLanGames(void)
 void CLanGames::OnPageShow(void)
 {
     BaseClass::OnPageShow();
-
-    if (m_pGameList->GetItemCount() == 0 || auto_refresh_)
-        GetNewServerList();
 }
 
 void CLanGames::OnPageHide(void)
