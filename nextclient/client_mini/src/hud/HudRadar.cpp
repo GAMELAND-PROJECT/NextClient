@@ -10,7 +10,9 @@ void HudRadar::Draw(float flTime) {
 
     // Names/teams change infrequently; refreshing all player records every
     // rendered frame wastes CPU. Radar positions are still drawn every frame.
-    constexpr float kPlayerInfoUpdateInterval = 0.05f;
+    // Player names and teams are slow-changing metadata. Four refreshes per
+    // second are enough; live radar positions still render every frame.
+    constexpr float kPlayerInfoUpdateInterval = 0.25f;
     if (flTime < last_player_info_update_ || flTime - last_player_info_update_ >= kPlayerInfoUpdateInterval) {
         GetAllPlayersInfo();
         last_player_info_update_ = flTime;

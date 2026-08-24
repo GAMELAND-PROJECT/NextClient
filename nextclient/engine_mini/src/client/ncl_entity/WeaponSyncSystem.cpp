@@ -47,6 +47,7 @@ void WeaponSyncSystem::OnCreate(uint16_t entity_id, const NclEntityFields& field
         auto existing = entity_to_weapon_.find(entity_id);
         if (existing != entity_to_weapon_.end())
         {
+            override_count_ -= existing->second.sound_overrides.size();
             auto old_rev = weapon_id_to_entity_id_.find(existing->second.weapon_id);
             if (old_rev != weapon_id_to_entity_id_.end() && old_rev->second == entity_id)
             {
@@ -114,6 +115,7 @@ void WeaponSyncSystem::OnDestroy(uint16_t entity_id)
     {
         weapon_id_to_entity_id_.erase(rev);
     }
+    override_count_ -= it->second.sound_overrides.size();
     entity_to_weapon_.erase(it);
 }
 
@@ -121,6 +123,7 @@ void WeaponSyncSystem::OnClear()
 {
     weapon_id_to_entity_id_.clear();
     entity_to_weapon_.clear();
+    override_count_ = 0;
 }
 
 void WeaponSyncSystem::CollectDebugInfo(std::vector<std::string>& out_lines)
@@ -163,6 +166,7 @@ void WeaponSyncSystem::ApplyDelta(const ncl_entity::ArrayStringIdPairsDelta& del
 {
     if (delta.clear)
     {
+        override_count_ -= overrides.size();
         overrides.clear();
         return;
     }
@@ -178,7 +182,7 @@ void WeaponSyncSystem::ApplyDelta(const ncl_entity::ArrayStringIdPairsDelta& del
         sfx_t* original_sfx = eng()->S_FindName(original_path, nullptr);
         if (original_sfx)
         {
-            overrides.erase(original_sfx);
+            override_count_ -= overrides.erase(original_sfx);
         }
     }
 
@@ -206,6 +210,11 @@ void WeaponSyncSystem::ApplyDelta(const ncl_entity::ArrayStringIdPairsDelta& del
             continue;
         }
 
+        const size_t previous_size = overrides.size();
         overrides[original_sfx] = replacement_sfx;
+        if (overrides.size() != previous_size)
+        {
+            ++override_count_;
+        }
     }
 }

@@ -17,6 +17,7 @@ class WeaponSyncSystem : public INclEntityHandler
 
     ankerl::unordered_dense::map<uint16_t, WeaponData> entity_to_weapon_;
     ankerl::unordered_dense::map<uint32_t, uint16_t> weapon_id_to_entity_id_;
+    size_t override_count_ = 0;
 
 public:
     const std::vector<ClientNclEntityFieldDescriptor>& Fields() const override;
@@ -27,6 +28,7 @@ public:
     void CollectDebugInfo(std::vector<std::string>& out_lines) override;
 
     const ankerl::unordered_dense::map<sfx_t*, sfx_t*>& GetOverrides(uint32_t weapon_id) const;
+    bool HasAnyOverrides() const noexcept { return override_count_ != 0; }
 
 private:
     void ApplyDelta(const ncl_entity::ArrayStringIdPairsDelta& delta, ankerl::unordered_dense::map<sfx_t*, sfx_t*>& overrides);

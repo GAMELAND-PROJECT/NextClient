@@ -45,13 +45,20 @@ namespace
             return nullptr;
         }
 
-        PlayerSyncSystem* player_sync =
-            static_cast<PlayerSyncSystem*>(CL_NclEntitySyncGetHandler(static_cast<uint8_t>(ncl_entity::EntityTypeId::Player)));
-
         WeaponSyncSystem* weapon_sync =
             static_cast<WeaponSyncSystem*>(CL_NclEntitySyncGetHandler(static_cast<uint8_t>(ncl_entity::EntityTypeId::Weapon)));
 
-        if (player_sync == nullptr || weapon_sync == nullptr)
+        // The normal case has no server-provided replacements. Avoid player,
+        // weapon and hash-map lookups on every gunshot/item sound in that case.
+        if (weapon_sync == nullptr || !weapon_sync->HasAnyOverrides())
+        {
+            return nullptr;
+        }
+
+        PlayerSyncSystem* player_sync =
+            static_cast<PlayerSyncSystem*>(CL_NclEntitySyncGetHandler(static_cast<uint8_t>(ncl_entity::EntityTypeId::Player)));
+
+        if (player_sync == nullptr)
         {
             return nullptr;
         }

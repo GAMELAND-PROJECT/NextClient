@@ -54,6 +54,7 @@ namespace
     };
 
     InputFocusState g_InputFocusState = InputFocusState::Unknown;
+    ULONGLONG g_NextFocusPollMs = 0;
 
     bool IsProcessForeground()
     {
@@ -63,7 +64,8 @@ namespace
 
         DWORD foreground_process_id = 0;
         GetWindowThreadProcessId(foreground_window, &foreground_process_id);
-        return foreground_process_id == GetCurrentProcessId();
+        static const DWORD current_process_id = GetCurrentProcessId();
+        return foreground_process_id == current_process_id;
     }
 
     void UpdateInputFocusState()
@@ -87,6 +89,18 @@ namespace
         // attack states and stale mouse deltas cannot survive Alt+Tab.
         IN_ClearStates();
         ResetInvertMouse();
+    }
+
+    void PollInputFocusState()
+    {
+        const ULONGLONG now_ms = GetTickCount64();
+        if (now_ms < g_NextFocusPollMs)
+            return;
+
+        // Focus changes do not need frame-rate polling. Ten checks per second
+        // keep Alt+Tab handling responsive without doing Win32 queries every frame.
+        g_NextFocusPollMs = now_ms + 100;
+        UpdateInputFocusState();
     }
 
     bool IsInputBackground()
@@ -392,7 +406,8 @@ public:
 
 #ifdef _WIN32
         g_InputFocusState = InputFocusState::Unknown;
-        g_Unsub.emplace_back(eng()->Host_FrameInternal += [](float) { UpdateInputFocusState(); });
+        g_NextFocusPollMs = 0;
+        g_Unsub.emplace_back(eng()->Host_FrameInternal += [](float) { PollInputFocusState(); });
 #endif
 
         g_GameHud = std::make_unique<GameHud>(nitro_api);

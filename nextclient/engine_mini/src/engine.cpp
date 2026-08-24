@@ -184,6 +184,10 @@ constexpr auto kLockedClientProfile = std::to_array<LockedCvar>({
     {"scoreboard_showavatars", "0"},
     {"developer", "0"},
     {"r_speeds", "0"},
+    // Lightweight 4v4/5v5 firing profile: cap accumulating cosmetic effects
+    // while preserving muzzle flashes, tracers, bullet decals and smoke grenades.
+    {"max_shells", "32"},
+    {"max_smokepuffs", "32"},
 });
 
 const char* GetLockedClientCvarValue(const char* name)
@@ -607,11 +611,11 @@ static void OnGameInitializing(void* mainwindow, HDC* pmaindc, HGLRC* pbaseRC, c
     // Enforce the clean-client profile at the mutation point. This covers
     // console commands, configs and server stuffcmds without per-frame polling.
     g_Unsubs.emplace_back(eng()->Cvar_Set |= [](const char* name, const char* value, const auto& next) {
-        // The shipped 0.05 value underruns on the tested Windows audio path.
-        // 0.06 is the measured stable floor; keep larger user-selected values.
-        if (!Q_stricmp(name, "_snd_mixahead") && value != nullptr && Q_atof(value) < 0.06f)
+        // Keep enough queued audio to prevent underruns during weapon, movement
+        // and voice bursts. Configs and server commands cannot lower it.
+        if (!Q_stricmp(name, "_snd_mixahead"))
         {
-            next->Invoke(name, "0.06");
+            next->Invoke(name, "0.1");
             return;
         }
 
@@ -751,11 +755,8 @@ static void OnGameInitialized()
             gEngfuncs.Cvar_Set(locked.name, locked.value);
     }
 
-    if (const auto snd_mixahead = gEngfuncs.pfnGetCvarPointer("_snd_mixahead");
-        snd_mixahead && snd_mixahead->value < 0.06f)
-    {
-        gEngfuncs.Cvar_Set("_snd_mixahead", "0.06");
-    }
+    if (gEngfuncs.pfnGetCvarPointer("_snd_mixahead") != nullptr)
+        gEngfuncs.Cvar_Set("_snd_mixahead", "0.1");
 }
 
 class EngineMini : public EngineMiniInterface
