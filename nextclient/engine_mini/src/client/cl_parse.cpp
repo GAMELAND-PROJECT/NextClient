@@ -9,7 +9,6 @@
 #include "cl_spectator.h"
 #include "cl_main.h"
 #include "cl_private_resources.h"
-#include "analytics.h"
 #include "vgui_int.h"
 #include "console/console.h"
 #include "common/sys_dll.h"
@@ -283,7 +282,6 @@ void CL_ProcessFile_0(qboolean successfully_received, const char* filename)
     }
     else
     {
-        AN_AddBreadcrumb(va("CL_ProcessFile_0(successfully_received: %d, filename: %s)", successfully_received, filename));
         Con_Printf(S_ERROR "server failed to transmit file '%s'\n", CL_CleanFileName(filename));
     }
 

@@ -171,7 +171,7 @@ struct LockedCvar
 
 constexpr auto kLockedClientProfile = std::to_array<LockedCvar>({
     {"cl_allowdownload", "1"},
-    {"cl_download_ingame", "1"},
+    {"cl_download_ingame", "0"},
     {"fps_override", "0"},
     {"fps_max", "100.0"},
     {"rate", "100000"},
@@ -186,8 +186,8 @@ constexpr auto kLockedClientProfile = std::to_array<LockedCvar>({
     {"r_speeds", "0"},
     // Lightweight 4v4/5v5 firing profile: cap accumulating cosmetic effects
     // while preserving muzzle flashes, tracers, bullet decals and smoke grenades.
-    {"max_shells", "32"},
-    {"max_smokepuffs", "32"},
+    {"max_shells", "16"},
+    {"max_smokepuffs", "16"},
 });
 
 const char* GetLockedClientCvarValue(const char* name)
@@ -311,7 +311,7 @@ static void EngineMiniUninitialize()
     p_cvar_vars = nullptr;
 }
 
-static void EngineMiniInitialize(nitroapi::NitroApiInterface* nitro_api, NextClientVersion next_client_version, AnalyticsInterface* analytics)
+static void EngineMiniInitialize(nitroapi::NitroApiInterface* nitro_api, NextClientVersion next_client_version, AnalyticsInterface*)
 {
     ConfigureEngineElppLogger();
 
@@ -325,7 +325,9 @@ static void EngineMiniInitialize(nitroapi::NitroApiInterface* nitro_api, NextCli
 
     g_NitroApi = nitro_api;
     g_NextClientVersion = next_client_version;
-    g_Analytics = analytics;
+    // This performance client deliberately does not attach telemetry or crash
+    // breadcrumb sinks to the live engine process.
+    g_Analytics = nullptr;
 
     g_pMatchmakingServers = std::make_unique<service::matchmaking::MatchmakingSteamComp>();
     
@@ -340,9 +342,6 @@ static void EngineMiniInitialize(nitroapi::NitroApiInterface* nitro_api, NextCli
 
 static void OnGameUninitializing()
 {
-    if (g_Analytics)
-        g_Analytics->AddBreadcrumb("info", BREADCRUMBS_TAG " OnGameUninitializing");
-    
     // Notify the server of disconnect when the game is closed via the window's X button.
     if (cls && (cls->state == ca_connected || cls->state == ca_active || cls->state == ca_uninitialized || cls->state == ca_connecting))
         CL_Disconnect();
@@ -363,9 +362,6 @@ static void OnGameUninitializing()
 
 static void OnGameInitializing(void* mainwindow, HDC* pmaindc, HGLRC* pbaseRC, const char* pszDriver, const char* pszCmdLine, bool result)
 {
-    if (g_Analytics)
-        g_Analytics->AddBreadcrumb("info", BREADCRUMBS_TAG " OnGameInitializing");
-
     nitro_utils::PtrValidator v;
 
     v.Assign(p_currenttexture, GET_VARIABLE_NAME(p_currenttexture), eng()->currenttexture);
@@ -670,11 +666,19 @@ static void OnGameInitializing(void* mainwindow, HDC* pmaindc, HGLRC* pbaseRC, c
         pStudioAPI = *ppinterface;
     });
 
-    g_Unsubs.emplace_back(eng()->Host_FrameInternal += [](float delta) {
-        if (g_pTaskCoroImpl)
-        {
-            g_pTaskCoroImpl->Update();
-        }
+    g_Unsubs.emplace_back(eng()->Host_FrameInternal += [](float) {
+        if (!g_pTaskCoroImpl)
+            return;
+
+        // Main-thread coroutine continuations belong to auxiliary services
+        // (browser, HTTP and extensions), not to gameplay simulation. Suspend
+        // them completely while connected so they cannot consume or stall a
+        // live frame. The executor retains queued work and resumes normally
+        // after disconnect, when the client leaves ca_active.
+        if (cls != nullptr && cls->state == ca_active)
+            return;
+
+        g_pTaskCoroImpl->Update();
     });
 
     g_Unsubs.emplace_back(eng()->S_StartDynamicSound |= S_StartDynamicSoundHook);
@@ -767,16 +771,13 @@ class EngineMini : public EngineMiniInterface
 public:
     void Init(nitroapi::NitroApiInterface* nitro_api, NextClientVersion client_version, AnalyticsInterface* analytics) override
     {
-        if (analytics)
-            analytics->AddBreadcrumb("info", BREADCRUMBS_TAG " EngineMini::Init");
-
         EngineMiniInitialize(nitro_api, client_version, analytics);
 
         nitroapi::EngineData* engine_data = nitro_api->GetEngineData();
 
         unsubs_.emplace_back(engine_data->COM_InitArgv |= [](int argc, char** argv, const auto& next) {
             COM_InitArgv(argc, argv);
-            next->Invoke(argc, argv);
+            next->Invoke(com_argc, com_argv);
         });
 
         unsubs_.emplace_back(engine_data->GL_SetMode += [](void* mainwindow, HDC* pmaindc, HGLRC* pbaseRC, const char* pszDriver, const char* pszCmdLine, bool result) {
@@ -803,9 +804,6 @@ public:
 
     void Uninitialize() override
     {
-        if (g_Analytics)
-            g_Analytics->AddBreadcrumb("info", BREADCRUMBS_TAG " EngineMini::Uninitialize");
-
         g_pMatchmakingServers = nullptr;
 
         for (auto &unsubscriber : unsubs_)

@@ -73,6 +73,7 @@ private:
     CreateInterfaceFn m_FactoryList[MAX_NUM_FACTORIES];
 
     std::shared_ptr<TaskCoroImpl> task_run_impl_;
+    bool auxiliary_tasks_suspended_ = false;
 
 };
 

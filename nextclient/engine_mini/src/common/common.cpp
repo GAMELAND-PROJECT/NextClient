@@ -156,35 +156,19 @@ void COM_InitArgv(int argc, char *argv[])
     int i, j;
     char *c;
 
-    // Reconstruct full command line
-    com_cmdline[0] = 0;
-    for (i = 0, j = 0; i < MAX_NUM_ARGVS && i < argc && j < COM_MAX_CMD_LINE - 1; i++)
-    {
-        c = argv[i];
-        if (*c)
-        {
-            while (*c && j < COM_MAX_CMD_LINE - 1)
-            {
-                com_cmdline[j++] = *c++;
-            }
-            if (j >= COM_MAX_CMD_LINE - 1)
-            {
-                break;
-            }
-            com_cmdline[j++] = ' ';
-        }
-    }
-    com_cmdline[j] = 0;
-
     // Copy args pointers to our array
-    for (com_argc = 0; (com_argc < MAX_NUM_ARGVS) && (com_argc < argc); com_argc++)
+    com_argc = 0;
+    for (i = 0; i < MAX_NUM_ARGVS && i < argc; ++i)
     {
-        largv[com_argc] = argv[com_argc];
+        // Diagnostic modes can cause console/file work inside the original
+        // engine. They are intentionally unsupported by the clean client.
+        if (!Q_stricmp("-condebug", argv[i]) || !Q_stricmp("-dev", argv[i]))
+            continue;
 
-        if (!Q_strcmp("-safe", argv[com_argc]))
-        {
+        largv[com_argc++] = argv[i];
+
+        if (!Q_strcmp("-safe", argv[i]))
             safe = 1;
-        }
     }
 
     // Add arguments introducing more failsafeness
@@ -201,6 +185,20 @@ void COM_InitArgv(int argc, char *argv[])
 
     largv[com_argc] = " ";
     com_argv = const_cast<char**>(largv);
+
+    // Reconstruct the public command line from the filtered arguments too, so
+    // downstream checks cannot rediscover a removed diagnostic switch.
+    com_cmdline[0] = 0;
+    for (i = 0, j = 0; i < com_argc && j < COM_MAX_CMD_LINE - 1; ++i)
+    {
+        c = com_argv[i];
+        while (*c && j < COM_MAX_CMD_LINE - 1)
+            com_cmdline[j++] = *c++;
+
+        if (j < COM_MAX_CMD_LINE - 1)
+            com_cmdline[j++] = ' ';
+    }
+    com_cmdline[j] = 0;
 }
 
 const char *COM_FileBase_s(const char *in, char *out, int size)

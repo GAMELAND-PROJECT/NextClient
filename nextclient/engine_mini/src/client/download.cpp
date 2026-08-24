@@ -26,12 +26,11 @@ HttpDownloadManagerInterface* CL_GetHttpDownloadManager()
     return g_HttpDownloadManager.get();
 }
 
-bool CL_AddDownloadFileLogger(DownloadFileLoggerInterface* logger)
+bool CL_AddDownloadFileLogger(DownloadFileLoggerInterface*)
 {
-    if (g_DownloadFileLogger == nullptr)
-        g_DownloadFileLogger = std::make_shared<DownloadLoggerAggregator>();
-
-    return g_DownloadFileLogger->AddLogger(logger);
+    // Downloads may occur while joining, but reporting sinks are unnecessary
+    // and could perform external I/O. Keep the aggregator permanently empty.
+    return false;
 }
 
 bool CL_RemoveDonwloadFileLogger(DownloadFileLoggerInterface* logger)

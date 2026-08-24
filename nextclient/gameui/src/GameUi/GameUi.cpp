@@ -286,11 +286,17 @@ void CGameUI::RunFrame(void)
         BasePanel()->RunFrame();
     }
 
-    task_run_impl_->OnUpdate();
+    if (!auxiliary_tasks_suspended_)
+        task_run_impl_->OnUpdate();
 }
 
 void CGameUI::ConnectToServer(const char *game, int IP, int port)
 {
+    // Browser/JavaScript continuations are menu services. Keep their queued
+    // work dormant for the entire connected session so GameUI cannot consume
+    // a gameplay frame.
+    auxiliary_tasks_suspended_ = true;
+
     if (g_pServerBrowser)
         g_pServerBrowser->ConnectToGame(IP, port);
 
@@ -308,6 +314,8 @@ void CGameUI::ConnectToServer(const char *game, int IP, int port)
 
 void CGameUI::DisconnectFromServer(void)
 {
+    auxiliary_tasks_suspended_ = false;
+
     if (g_pServerBrowser)
         g_pServerBrowser->DisconnectFromGame();
 
@@ -508,5 +516,6 @@ void CGameUI::NeedApplyMultiplayerGameSettings()
 
 void CGameUI::OnDisconnectFromServer(int eSteamLoginFailure, const char *username)
 {
+    auxiliary_tasks_suspended_ = false;
     m_bNeedApplyMultiplayerGameSettings = false;
 }

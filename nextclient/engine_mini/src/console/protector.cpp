@@ -178,14 +178,11 @@ void PROTECTOR_Shutdown()
     g_CmdLogger = nullptr;
 }
 
-bool PROTECTOR_AddCmdLogger(CommandLoggerInterface* logger)
+bool PROTECTOR_AddCmdLogger(CommandLoggerInterface*)
 {
-    if (g_CmdLogger == nullptr)
-    {
-        g_CmdLogger = std::make_shared<CmdLoggerAggregator>();
-    }
-
-    return g_CmdLogger->AddLogger(logger);
+    // Command filtering remains active, but this performance build never
+    // accepts reporting sinks that could format, transmit or write during play.
+    return false;
 }
 
 bool PROTECTOR_RemoveCmdLogger(CommandLoggerInterface* logger)

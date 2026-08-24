@@ -7,7 +7,6 @@
 #include "gl_local.h"
 #include "gl_draw.h"
 #include "ViewmodelFrustumCalculator.h"
-#include "console/console.h"
 #include "common/sys_dll.h"
 #include "common/cvar.h"
 #include "client/cl_main.h"
@@ -15,7 +14,7 @@
 namespace
 {
 constexpr float kAdaptiveSmokeDistanceSq = 256.0f * 256.0f;
-constexpr int kFullQualityNearbySmokeLayers = 6;
+constexpr int kFullQualityNearbySmokeLayers = 4;
 
 bool ShouldSkipAdaptiveSmokeLayer(const cl_entity_t* ent, int& nearby_smoke_layers)
 {
@@ -32,8 +31,11 @@ bool ShouldSkipAdaptiveSmokeLayer(const cl_entity_t* ent, int& nearby_smoke_laye
         return false;
 
     ++nearby_smoke_layers;
+    // Preserve the first four nearby layers, then retain only one of every
+    // three additional layers. This keeps the grenade readable while bounding
+    // fill-rate growth when several smokes overlap during a firefight.
     return nearby_smoke_layers > kFullQualityNearbySmokeLayers &&
-           ((nearby_smoke_layers - kFullQualityNearbySmokeLayers) & 1) != 0;
+           ((nearby_smoke_layers - kFullQualityNearbySmokeLayers) % 3) != 0;
 }
 }
 
@@ -301,6 +303,7 @@ void R_DrawStudioModel(cl_entity_t* ent, const std::function<cl_entity_t*(int in
                     pStudioAPI->StudioDrawModel(0);
                 *p_currententity = ent;
                 pStudioAPI->StudioDrawModel(STUDIO_RENDER | STUDIO_EVENTS);
+                break;
             }
         }
     }
@@ -332,9 +335,6 @@ void R_DrawTEntitiesOnList(qboolean clientOnly)
             if (*p_r_blend > 0.0)
             {
                 *p_r_blend *= 1.f / 255.f;
-
-                if (ent->model->type != mod_sprite && ent->curstate.rendermode == kRenderGlow)
-                    Con_DPrintf(ConLogType::Info, "Non-sprite set to glow!\n");
 
                 switch (ent->model->type)
                 {
@@ -510,21 +510,11 @@ void R_RenderView()
 {
     OPTICK_EVENT();
 
-    double time1 = 0;
-
     if (r_norefresh->value != 0.0)
         return;
 
     if (!p_r_worldentity->model || !cl->worldmodel)
         Sys_Error("%s: NULL worldmodel", __func__);
-
-    if (r_speeds->value != 0.0)
-    {
-        qglFinish();
-        time1 = Sys_FloatTime();
-        *p_c_brush_polys = 0;
-        *p_c_alias_polys = 0;
-    }
 
     *p_mirror = false;
     R_Clear();
@@ -544,18 +534,6 @@ void R_RenderView()
 
     S_ExtraUpdate();
 
-    if (r_speeds->value != 0.0)
-    {
-        double framerate = cl->time - cl->oldtime;
-        if (framerate > 0.0)
-            framerate = 1.0 / framerate;
-
-        Con_Printf("%3ifps %3i ms  %4i wpoly %4i epoly\n",
-            (int) lround(framerate + 0.5),
-            (int) ((Sys_FloatTime() - time1) * 1000.0),
-            *p_c_brush_polys,
-            *p_c_alias_polys);
-    }
 }
 
 void R_ForceCVars(qboolean mp)
