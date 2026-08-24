@@ -1,5 +1,6 @@
 /out
 /build
+/installer/output/
 
 # Visual Studio
 .vs
