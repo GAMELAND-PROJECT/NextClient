@@ -607,6 +607,15 @@ static void OnGameInitializing(void* mainwindow, HDC* pmaindc, HGLRC* pbaseRC, c
     // Enforce the clean-client profile at the mutation point. This covers
     // console commands, configs and server stuffcmds without per-frame polling.
     g_Unsubs.emplace_back(eng()->Cvar_Set |= [](const char* name, const char* value, const auto& next) {
+        // The shipped configs contain 0.05, which can underrun on Windows
+        // under weapon/voice load. Clamp only the unsafe lower bound so users
+        // with demanding audio hardware may still select 0.15 or 0.2.
+        if (!Q_stricmp(name, "_snd_mixahead") && value != nullptr && Q_atof(value) < 0.1f)
+        {
+            next->Invoke(name, "0.1");
+            return;
+        }
+
         if (const char* locked_value = GetLockedClientCvarValue(name))
             next->Invoke(name, locked_value);
         else
@@ -743,9 +752,6 @@ static void OnGameInitialized()
             gEngfuncs.Cvar_Set(locked.name, locked.value);
     }
 
-    // Values below 100 ms can underrun on some Windows audio drivers and
-    // produce intermittent crackling. Upgrade the old forced 0.05 value once,
-    // but deliberately leave the cvar unlocked for hardware-specific tuning.
     if (const auto snd_mixahead = gEngfuncs.pfnGetCvarPointer("_snd_mixahead");
         snd_mixahead && snd_mixahead->value < 0.1f)
     {

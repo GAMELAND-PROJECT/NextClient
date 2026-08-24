@@ -2,7 +2,6 @@
 #include "../common/zone.h"
 #include "../common/com_strings.h"
 #include "cl_sound.h"
-#include "optick.h"
 #include "ncl_entity/PlayerSyncSystem.h"
 #include "ncl_entity/WeaponSyncSystem.h"
 #include "ncl_entity/cl_ncl_entity_sync.h"
@@ -87,8 +86,6 @@ namespace
 
 sfx_t* S_PrecacheSound(char* sample)
 {
-    OPTICK_EVENT();
-
     return eng()->S_PrecacheSound(sample);
 }
 
@@ -104,8 +101,6 @@ void S_StartDynamicSoundHook(
     S_StartDynamicSoundChain* next
 )
 {
-    OPTICK_EVENT();
-
     // Network voice owns dedicated channels and must never enter weapon/item
     // replacement logic. Keeping this path transparent avoids interference
     // with the engine's streaming voice cache and decoder lifecycle.
@@ -142,8 +137,6 @@ void S_StartStaticSoundHook(
     S_StartStaticSoundChain* next
 )
 {
-    OPTICK_EVENT();
-
     // Keep static/map ambience on the normal mixer path. Dropping every
     // CHAN_STATIC sound removes legitimate loops and may leave a source in an
     // inconsistent lifecycle on some engine builds.
@@ -157,15 +150,11 @@ void S_StartStaticSoundHook(
 
 void S_StopAllSounds(qboolean clear)
 {
-    OPTICK_EVENT();
-
     eng()->S_StopAllSounds.InvokeChained(clear);
 }
 
 void S_UnloadSounds(const std::unordered_set<std::string>& names)
 {
-    OPTICK_EVENT();
-
     if (p_known_sfx == nullptr || p_num_sfx == nullptr || *p_known_sfx == nullptr)
     {
         return;
