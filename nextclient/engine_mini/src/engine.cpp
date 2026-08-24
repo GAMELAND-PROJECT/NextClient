@@ -607,12 +607,11 @@ static void OnGameInitializing(void* mainwindow, HDC* pmaindc, HGLRC* pbaseRC, c
     // Enforce the clean-client profile at the mutation point. This covers
     // console commands, configs and server stuffcmds without per-frame polling.
     g_Unsubs.emplace_back(eng()->Cvar_Set |= [](const char* name, const char* value, const auto& next) {
-        // The shipped configs contain 0.05, which can underrun on Windows
-        // under weapon/voice load. Clamp only the unsafe lower bound so users
-        // with demanding audio hardware may still select 0.15 or 0.2.
-        if (!Q_stricmp(name, "_snd_mixahead") && value != nullptr && Q_atof(value) < 0.1f)
+        // The shipped 0.05 value underruns on the tested Windows audio path.
+        // 0.06 is the measured stable floor; keep larger user-selected values.
+        if (!Q_stricmp(name, "_snd_mixahead") && value != nullptr && Q_atof(value) < 0.06f)
         {
-            next->Invoke(name, "0.1");
+            next->Invoke(name, "0.06");
             return;
         }
 
@@ -753,9 +752,9 @@ static void OnGameInitialized()
     }
 
     if (const auto snd_mixahead = gEngfuncs.pfnGetCvarPointer("_snd_mixahead");
-        snd_mixahead && snd_mixahead->value < 0.1f)
+        snd_mixahead && snd_mixahead->value < 0.06f)
     {
-        gEngfuncs.Cvar_Set("_snd_mixahead", "0.1");
+        gEngfuncs.Cvar_Set("_snd_mixahead", "0.06");
     }
 }
 

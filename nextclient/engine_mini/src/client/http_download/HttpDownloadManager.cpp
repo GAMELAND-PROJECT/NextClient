@@ -95,6 +95,12 @@ uint32_t HttpDownloadManager::GetDownloadQueueSize()
 
 void HttpDownloadManager::Update()
 {
+    // GoldSrc calls CL_HTTPUpdate every rendered frame. Once the queue is
+    // empty there is no request, UI or speed state to poll, so leave the hot
+    // gameplay path immediately instead of running five idle update passes.
+    if (!is_download_active_ && files_to_download_.empty() && requests_.empty())
+        return;
+
     PruneCompletedRequests();
     StartNewDownloads();
     UpdateDownloadSpeed();

@@ -34,6 +34,7 @@ MultiSourceQuery::MultiSourceQuery(int32_t timeout, uint8_t retries) :
 MultiSourceQuery::~MultiSourceQuery()
 {
     cancellation_token_->SetCanceled();
+    manual_sync_ctx_->Wake();
 
     while (!main_loop_done_)
     {
@@ -135,11 +136,14 @@ void MultiSourceQuery::MainLoop()
 
             manual_sync_ctx_->Update();
 
-            // Server browsing needs a responsive poll interval, but keeping an
-            // otherwise idle query thread at 200 wakeups/second can introduce
-            // scheduler and audio jitter while a listen server is running.
-            const bool idle = sockets_.empty() && queries_.empty() && recv_.empty();
-            std::this_thread::sleep_for(idle ? 50ms : 5ms);
+            // No timed polling while idle. RunTask wakes this context as soon
+            // as an explicit browser query is queued, so refresh starts
+            // immediately without periodic scheduler pressure.
+            const bool idle = queries_.empty() && recv_.empty();
+            if (idle)
+                manual_sync_ctx_->WaitForWork();
+            else
+                std::this_thread::sleep_for(5ms);
         }
     }
     catch (const TaskCoroShutdownException& e)
@@ -219,10 +223,10 @@ void MultiSourceQuery::AssembleBuffer(ByteBuffer& buffer, netadr_t from_addr)
 
 void MultiSourceQuery::ProcessIncomingBuffers(high_resolution_clock::time_point current_time)
 {
-    for (auto& rcv : recv_)
+    for (auto rcv_it = recv_.begin(); rcv_it != recv_.end(); )
     {
-        netadr_t address = rcv.first;
-        std::vector<RecvData>& buffers = rcv.second;
+        const netadr_t address = rcv_it->first;
+        std::vector<RecvData>& buffers = rcv_it->second;
 
         for (auto it = buffers.begin(); it != buffers.end(); )
         {
@@ -247,6 +251,11 @@ void MultiSourceQuery::ProcessIncomingBuffers(high_resolution_clock::time_point 
 
             it++;
         }
+
+        if (buffers.empty())
+            rcv_it = recv_.erase(rcv_it);
+        else
+            ++rcv_it;
     }
 }
 
@@ -298,10 +307,10 @@ void MultiSourceQuery::ProcessQueries(netadr_t address, ByteBuffer& buffer)
 
 void MultiSourceQuery::ProcessTimeoutQueries(high_resolution_clock::time_point current_time)
 {
-    for (auto& q : queries_)
+    for (auto query_it = queries_.begin(); query_it != queries_.end(); )
     {
-        netadr_t address = q.first;
-        auto& addr_query = q.second;
+        const netadr_t address = query_it->first;
+        auto& addr_query = query_it->second;
 
         for (auto it = addr_query.begin(); it != addr_query.end(); )
         {
@@ -324,6 +333,11 @@ void MultiSourceQuery::ProcessTimeoutQueries(high_resolution_clock::time_point c
 
             it++;
         }
+
+        if (addr_query.empty())
+            query_it = queries_.erase(query_it);
+        else
+            ++query_it;
     }
 }
 
