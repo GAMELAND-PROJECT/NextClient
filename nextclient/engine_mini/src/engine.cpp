@@ -181,7 +181,6 @@ constexpr auto kLockedClientProfile = std::to_array<LockedCvar>({
     {"cl_lc", "1"},
     {"cl_lw", "1"},
     {"ex_interp", "0.01"},
-    {"_snd_mixahead", "0.05"},
     {"scoreboard_showavatars", "0"},
     {"developer", "0"},
     {"r_speeds", "0"},
@@ -312,10 +311,10 @@ static void EngineMiniInitialize(nitroapi::NitroApiInterface* nitro_api, NextCli
 {
     ConfigureEngineElppLogger();
 
-    // Give the game priority over ordinary desktop workloads without using
-    // REALTIME_PRIORITY_CLASS, which can starve audio, input and network threads.
-    if (!SetPriorityClass(GetCurrentProcess(), HIGH_PRIORITY_CLASS))
-        LOG(WARNING) << "Unable to set the game process priority to High (error " << GetLastError() << ")";
+    // Keep the host responsive under load without letting the game starve
+    // Windows networking, audio and driver threads used by a LAN session.
+    if (!SetPriorityClass(GetCurrentProcess(), ABOVE_NORMAL_PRIORITY_CLASS))
+        LOG(WARNING) << "Unable to set the game process priority to Above Normal (error " << GetLastError() << ")";
 
     g_pTaskCoroImpl = std::make_shared<taskcoro::TaskCoroImpl>(std::this_thread::get_id());
     taskcoro::TaskCoro::Initialize(g_pTaskCoroImpl);
@@ -732,9 +731,6 @@ static void OnGameInitialized()
     CL_NclEntitySyncOverlayInit();
     PROTECTOR_Init(g_SettingGuard);
 
-    if (g_pMatchmakingServers)
-        g_pMatchmakingServers->InitializePinnedServers();
-
     // Conservative low-latency defaults. Keep the engine's 100 FPS limit to
     // preserve GoldSrc movement/physics behavior, and leave VSync under user
     // control so the Video settings can select latency or tear-free output.
@@ -742,6 +738,15 @@ static void OnGameInitialized()
     {
         if (gEngfuncs.pfnGetCvarPointer(locked.name) != nullptr)
             gEngfuncs.Cvar_Set(locked.name, locked.value);
+    }
+
+    // Values below 100 ms can underrun on some Windows audio drivers and
+    // produce intermittent crackling. Upgrade the old forced 0.05 value once,
+    // but deliberately leave the cvar unlocked for hardware-specific tuning.
+    if (const auto snd_mixahead = gEngfuncs.pfnGetCvarPointer("_snd_mixahead");
+        snd_mixahead && snd_mixahead->value < 0.1f)
+    {
+        gEngfuncs.Cvar_Set("_snd_mixahead", "0.1");
     }
 }
 

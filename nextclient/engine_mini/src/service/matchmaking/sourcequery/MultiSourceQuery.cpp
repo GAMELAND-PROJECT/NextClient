@@ -140,8 +140,11 @@ void MultiSourceQuery::MainLoop()
                 manual_sync_ctx_->Update();
             }
 
-            // TODO make conditional variable
-            std::this_thread::sleep_for(5ms);
+            // Server browsing needs a responsive poll interval, but keeping an
+            // otherwise idle query thread at 200 wakeups/second can introduce
+            // scheduler and audio jitter while a listen server is running.
+            const bool idle = sockets_.empty() && queries_.empty() && recv_.empty();
+            std::this_thread::sleep_for(idle ? 50ms : 5ms);
         }
     }
     catch (const TaskCoroShutdownException& e)
