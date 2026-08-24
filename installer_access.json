@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "manifest_id": "nextclient-installer-access",
+  "enabled": true,
+  "validation": {
+    "algorithm": "SHA-256",
+    "normalization": "trim-uppercase",
+    "salt": "bfcb32fc93201df26f56894f3c215f93",
+    "code_hash": "d1e7e2dbc70ac88d5ffc94cafb430fbe6b751f77d225e86dbbe40fdf0bd50c11"
+  },
+  "message": "Installation is authorized."
+}
