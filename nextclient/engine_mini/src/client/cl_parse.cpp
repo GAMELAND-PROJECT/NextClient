@@ -1,5 +1,6 @@
 #include "engine.h"
 
+#include <chrono>
 #include <optick.h>
 #include <common/filesystem.h>
 #include <md5.h>
@@ -384,8 +385,14 @@ void CL_ProcessFile_0(qboolean successfully_received, const char* filename)
 void CL_ReadPackets()
 {
     OPTICK_EVENT();
-    
-    const int kMaxPackets = 250;
+
+    // Do not let a UDP burst monopolize the game thread. Normal 101 Hz LAN
+    // traffic is only one or two packets per rendered frame; these limits
+    // affect abnormal bursts while leaving packets queued in the socket for
+    // the next frame instead of reading and discarding them.
+    constexpr int kMaxActivePacketsPerFrame = 32;
+    constexpr int kMaxInactivePacketsPerFrame = 250;
+    constexpr auto kActivePacketBudget = std::chrono::microseconds(2000);
 
     int packets_count = 0;
 
@@ -395,13 +402,13 @@ void CL_ReadPackets()
     cl->oldtime = cl->time;
     cl->time = cl->time + *host_frametime;
 
-    while (NET_GetPacket_0())
+    const bool active_game = cls->state == ca_active;
+    const int packet_limit = active_game ? kMaxActivePacketsPerFrame : kMaxInactivePacketsPerFrame;
+    const auto packet_work_started = std::chrono::steady_clock::now();
+
+    while (packets_count < packet_limit && NET_GetPacket_0())
     {
-        if (++packets_count > kMaxPackets && !cls->demoplayback)
-        {
-            Con_DPrintf(ConLogType::Info, "Ignored %i messages", packets_count - kMaxPackets);
-            break;
-        }
+        ++packets_count;
 
         if (*(int *) net_message->data == -1)
         {
@@ -442,7 +449,15 @@ void CL_ReadPackets()
         if (Netchan_Process(&cls->netchan))
         {
             CL_ParseServerMessage(TRUE);
-            continue;
+        }
+
+        // Always finish the packet already read, then yield the main thread.
+        // The unread datagrams stay in the OS socket queue and are processed
+        // in sequence on the following frame.
+        if (active_game &&
+            std::chrono::steady_clock::now() - packet_work_started >= kActivePacketBudget)
+        {
+            break;
         }
     }
 

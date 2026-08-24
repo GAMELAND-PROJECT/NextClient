@@ -3528,6 +3528,10 @@ qboolean QGL_Init()
 
 void GLimp_EnableLogging(qboolean enable)
 {
+    // Per-call OpenGL tracing writes thousands of lines during live rendering
+    // and can stall the game thread. This client intentionally never enables it.
+    enable = false;
+
     if(enable)
     {
         if(!glw_state.log_fp)

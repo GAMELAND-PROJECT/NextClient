@@ -11,6 +11,11 @@ bool con_initialized;
 
 void Con_DebugLog(const char* file, const char* format, ...)
 {
+    // Never perform diagnostic disk I/O while actively playing, even when the
+    // process was launched with -condebug.
+    if (cls != nullptr && cls->state == ca_active)
+        return;
+
     static char text[8192];
 
     va_list params;
@@ -57,7 +62,7 @@ void Con_DPrintf(ConLogType type, const char* format, ...)
 
     Sys_Printf("%s%s", prefix, text);
 
-    if (con_debuglog)
+    if (con_debuglog && (cls == nullptr || cls->state != ca_active))
         Con_DebugLog("qconsole.log", "%s%s", prefix, text);
 
     if (type == ConLogType::Info)

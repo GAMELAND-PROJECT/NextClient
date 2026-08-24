@@ -5,7 +5,6 @@
 
 #include "CmdChecker.h"
 #include "CmdLoggerAggregator.h"
-#include "ConsoleCmdLogger.h"
 
 namespace
 {
@@ -156,8 +155,6 @@ void PROTECTOR_Init(std::shared_ptr<nitro_utils::ConfigProviderInterface> config
     {
         g_CmdLogger = std::make_shared<CmdLoggerAggregator>();
     }
-
-    g_CmdLogger->AddLogger(new ConsoleCmdLogger());
 
     g_CmdChecker = std::make_unique<CmdChecker>(g_CmdLogger, config_provider);
 
