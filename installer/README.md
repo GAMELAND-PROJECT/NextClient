@@ -8,6 +8,31 @@
 4. creates Voice and No Voice desktop shortcuts;
 5. creates a standard Windows uninstaller.
 
+Online verification first uses an installed Chrome or Edge browser in hidden
+headless mode, which avoids networks where the native Windows downloader cannot
+complete a Google TLS connection. If neither browser is installed, the installer
+extracts its bundled Chromium 109 x86 into its temporary directory and uses it
+only for the access request. The access page includes a connection-status
+indicator and a manual refresh button. A built-in HTTPS fallback remains as the
+last attempt.
+
+## Chromium 109 fallback
+
+Place the portable x86 archive at:
+
+```text
+installer\runtime\chromium109\chrome.nosync.7z
+```
+
+The archive must contain `chrome.exe`; its internal folder layout does not
+matter. The build automatically includes the archive when it exists and omits
+the fallback when it does not. The archive is stored without a second compression
+pass, then extracted on demand only if Chrome and Edge are both unavailable.
+
+Chromium 109 is required only for legacy Windows 7/8 compatibility. It is no
+longer security-maintained, so it is launched headlessly with a temporary profile
+and is not installed as the user's general-purpose browser.
+
 ## Build
 
 Install Inno Setup 7, then run from the repository root:
