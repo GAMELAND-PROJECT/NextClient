@@ -289,7 +289,7 @@ begin
   AccessStatusLabel.Font.Color := clGray;
   AccessStatusLabel.Caption := 'Checking online service...';
 
-  if FetchAccessResponse(AccessApiUrl, ResponseText) and
+  if FetchAccessResponse(AccessApiUrl + '?action=status', ResponseText) and
      (Pos('"service":"allclient-access"', Lowercase(ResponseText)) > 0) then
   begin
     AccessStatusLabel.Font.Color := clGreen;
