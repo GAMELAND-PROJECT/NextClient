@@ -32,6 +32,7 @@
 #include "ToolBar.h"
 #include "GameConsole.h"
 #include "PlayerListDialog.h"
+#include "../ServerBrowser/ServerBrowserDialog.h"
 
 #include <keydefs.h>
 
@@ -935,6 +936,10 @@ void CBasePanel::OnGameUIActivated(void)
 
     if (GameUI().IsInLevel())
     {
+        // Entering the pause menu is a clean idle boundary. Stop or hide any
+        // previously open UI work; a feature restarts only when explicitly
+        // opened by the user from the pause menu.
+        CloseBaseDialogs();
         OnCommand("OpenPauseMenu");
         m_pGameMenu->SetVisible(false);
     }
@@ -1521,6 +1526,22 @@ void CMainMenuGameLogo::ApplySchemeSettings(vgui2::IScheme *pScheme)
 
 void CBasePanel::CloseBaseDialogs(void)
 {
+    GameConsole().Hide();
+
+    if (m_hOptionsDialog.Get())
+        m_hOptionsDialog->Close();
+
     if (m_hCreateMultiplayerGameDialog.Get())
         m_hCreateMultiplayerGameDialog->Close();
+
+    if (m_hPlayerListDialog.Get())
+        m_hPlayerListDialog->Close();
+
+    if (CServerBrowserDialog::GetInstance())
+    {
+        // "Close" is sent first so both LAN and Online pages cancel their
+        // outstanding refresh/query work before the window is hidden.
+        ServerBrowserDialog().OnCommand("Close");
+        ServerBrowserDialog().Close();
+    }
 }

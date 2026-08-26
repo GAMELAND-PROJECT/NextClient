@@ -102,6 +102,12 @@ CServerBrowserDialog::~CServerBrowserDialog()
 
 void CServerBrowserDialog::OnKeyCodeTyped(vgui2::KeyCode code)
 {
+    if (code == vgui2::KEY_SPACE)
+    {
+        RefreshCurrentPage();
+        return;
+    }
+
     if (!GameUI().IsInLevel() && code == vgui2::KEY_ESCAPE)
     {
         Close();
@@ -139,6 +145,7 @@ void CServerBrowserDialog::Open()
 {
     LoadUserConfig("CServerBrowserDialog");
     Activate();
+    MoveToCenterOfScreen();
 
     m_pTabPanel->RequestFocus();
 

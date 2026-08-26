@@ -50,6 +50,12 @@ CGameListPanel::CGameListPanel(CBaseGamesPage *pOuter, const char *pName) : Base
 
 void CGameListPanel::OnKeyCodeTyped(vgui2::KeyCode code)
 {
+    if (code == KEY_SPACE)
+    {
+        ServerBrowserDialog().RefreshCurrentPage();
+        return;
+    }
+
     if ((code == KEY_ENTER || code == KEY_PAD_ENTER) &&
         m_pOuter->OnGameListEnterPressed())
         return;
@@ -960,6 +966,12 @@ void CBaseGamesPage::OnViewGameInfo()
 
 void CBaseGamesPage::OnKeyCodeTyped(KeyCode code)
 {
+    if (code == vgui2::KEY_SPACE)
+    {
+        StartRefresh();
+        return;
+    }
+
     if (code == vgui2::KEY_ENTER || code == vgui2::KEY_PAD_ENTER)
         OnBeginConnect();
 

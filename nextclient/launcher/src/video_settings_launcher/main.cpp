@@ -169,6 +169,42 @@ private:
     HKEY key_{};
 };
 
+void InitializeNativeResolutionIfNeeded()
+{
+    RegistryKey launcherKey(HKEY_CURRENT_USER, kLauncherKey,
+                            KEY_QUERY_VALUE | KEY_SET_VALUE);
+    if (launcherKey.ReadDword(L"NativeResolutionInitialized", 0) != 0)
+        return;
+
+    RegistryKey settingsKey(HKEY_CURRENT_USER, kSettingsKey,
+                            KEY_QUERY_VALUE | KEY_SET_VALUE);
+    const DWORD savedWidth = settingsKey.ReadDword(L"ScreenWidth", 0);
+    const DWORD savedHeight = settingsKey.ReadDword(L"ScreenHeight", 0);
+    bool initialized = savedWidth != 0 && savedHeight != 0;
+
+    // Respect any existing user-selected mode. Only a genuinely fresh profile
+    // is initialized to the monitor's current native desktop resolution.
+    if (!initialized)
+    {
+        DEVMODEW mode{};
+        mode.dmSize = sizeof(mode);
+        if (EnumDisplaySettingsW(nullptr, ENUM_CURRENT_SETTINGS, &mode) &&
+            mode.dmPelsWidth >= 640 && mode.dmPelsHeight >= 480)
+        {
+            initialized =
+                settingsKey.WriteDword(L"ScreenWidth", mode.dmPelsWidth) &&
+                settingsKey.WriteDword(L"ScreenHeight", mode.dmPelsHeight) &&
+                settingsKey.WriteDword(L"ScreenBPP", 32) &&
+                settingsKey.WriteDword(L"ScreenWindowed", 0);
+        }
+    }
+
+    // Retry on the next launch if Windows did not provide a usable mode or
+    // registry writes failed; never lock in a partial initialization.
+    if (initialized)
+        launcherKey.WriteDword(L"NativeResolutionInitialized", 1);
+}
+
 VideoSettings ReadSettings()
 {
     RegistryKey key(HKEY_CURRENT_USER, kSettingsKey, KEY_QUERY_VALUE | KEY_SET_VALUE);
@@ -403,6 +439,8 @@ HWND AddControl(HWND parent, const wchar_t* type, const wchar_t* text, DWORD sty
 
 void CreateControls(HWND window)
 {
+    InitializeNativeResolutionIfNeeded();
+
     AddControl(window, L"STATIC", L"Configure restart-sensitive video options, then launch NextClient.",
                SS_LEFT, 24, 18, 572, 22);
     AddControl(window, L"BUTTON", L"Display", BS_GROUPBOX, 18, 48, 578, 166);
@@ -471,11 +509,11 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
             return 0;
         case IdRestore:
         {
-            VideoSettings defaults = ReadSettings();
-            defaults.windowed = 0;
-            defaults.hdModels = 0;
-            defaults.videoLevel = 1;
-            SetControls(defaults);
+            // Resolution is intentionally not touched. Restore only resets the
+            // non-resolution defaults and preserves the user's current choice.
+            Button_SetCheck(g_fullscreen, BST_CHECKED);
+            Button_SetCheck(g_hdModels, BST_UNCHECKED);
+            Button_SetCheck(g_highQuality, BST_CHECKED);
 
             SystemMouseSettings mouseDefaults = g_mouseAtLastApply;
             mouseDefaults.speed = SliderPositionToPointerSpeed(4);
@@ -484,7 +522,7 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
             mouseDefaults.acceleration[2] = 1;
             SetMouseControls(mouseDefaults);
             ApplyMousePreview();
-            SetStatus(L"Defaults selected: fullscreen and high quality on, HD off, pointer speed 4 / 11, precision on.");
+            SetStatus(L"Defaults selected; resolution preserved. Fullscreen and high quality on, HD off, pointer speed 4 / 11, precision on.");
             return 0;
         }
         default:
