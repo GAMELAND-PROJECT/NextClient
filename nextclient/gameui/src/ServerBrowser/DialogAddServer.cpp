@@ -37,7 +37,7 @@ void CAddServerGameList::OnKeyCodeTyped(vgui2::KeyCode code)
             return;
         }
 
-        if (code == KEY_ENTER)
+        if (code == KEY_ENTER || code == KEY_PAD_ENTER)
         {
             PostActionSignal(new KeyValues("Command", "command", "addselected"));
             return;
@@ -185,7 +185,7 @@ void CDialogAddServer::OnKeyCodeTyped(KeyCode code)
     {
         Close();
     }
-    else if (code == KEY_ENTER)
+    else if (code == KEY_ENTER || code == KEY_PAD_ENTER)
     {
         OnOK();
     }

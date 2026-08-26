@@ -43,6 +43,8 @@ CVideoAdvancedDialog::CVideoAdvancedDialog(vgui2::Panel *parent) :
 
     LoadControlSettings("Resource\\VideoAvancedDialog.res");
 
+    MoveToCenterOfScreen();
+
     m_pSettings_ = GetSettings();
     LoadValues();
 
@@ -61,6 +63,8 @@ CVideoAdvancedDialog::~CVideoAdvancedDialog()
 void CVideoAdvancedDialog::Activate()
 {
     BaseClass::Activate();
+
+    MoveToCenterOfScreen();
 
     vgui2::input()->SetAppModalSurface(GetVPanel());
 }
@@ -93,6 +97,9 @@ void CVideoAdvancedDialog::OnCommand(const char *command)
 
 void CVideoAdvancedDialog::OnKeyCodeTyped(vgui2::KeyCode code)
 {
+    if (code == vgui2::KEY_PAD_ENTER)
+        code = vgui2::KEY_ENTER;
+
     if (code == vgui2::KEY_ESCAPE)
     {
         Close();

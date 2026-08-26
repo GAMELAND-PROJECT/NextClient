@@ -245,7 +245,6 @@ void COptionsSubMultiplayer::OnCommand(const char *command)
             m_hMultiplayerAdvancedDialog = new CMultiplayerAdvancedDialog(this);
 
         m_hMultiplayerAdvancedDialog->Activate();
-        m_hMultiplayerAdvancedDialog->SetPos(100, 100);
     }
 
     BaseClass::OnCommand(command);

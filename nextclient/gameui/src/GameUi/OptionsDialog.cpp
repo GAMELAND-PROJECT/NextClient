@@ -97,6 +97,9 @@ COptionsDialog::~COptionsDialog(void)
 
 void COptionsDialog::OnKeyCodeTyped(vgui2::KeyCode code)
 {
+    if (code == vgui2::KEY_PAD_ENTER)
+        code = vgui2::KEY_ENTER;
+
     if (!GameUI().IsInLevel() && code == vgui2::KEY_ESCAPE)
     {
         Close();

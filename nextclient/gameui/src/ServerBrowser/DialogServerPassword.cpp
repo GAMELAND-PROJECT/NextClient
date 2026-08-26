@@ -62,7 +62,7 @@ void CDialogServerPassword::OnKeyCodeTyped(vgui2::KeyCode code)
     {
         OnCommand("Close");
     }
-    else if (code == vgui2::KEY_ENTER)
+    else if (code == vgui2::KEY_ENTER || code == vgui2::KEY_PAD_ENTER)
     {
         OnCommand("Connect");
     }

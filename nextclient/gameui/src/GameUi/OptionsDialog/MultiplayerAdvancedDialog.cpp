@@ -67,6 +67,8 @@ void CMultiplayerAdvancedDialog::Activate(void)
 {
     BaseClass::Activate();
 
+    MoveToCenterOfScreen();
+
     vgui2::input()->SetAppModalSurface(GetVPanel());
 }
 
@@ -91,6 +93,9 @@ void CMultiplayerAdvancedDialog::OnCommand(const char *command)
 
 void CMultiplayerAdvancedDialog::OnKeyCodeTyped(vgui2::KeyCode code)
 {
+    if (code == vgui2::KEY_PAD_ENTER)
+        code = vgui2::KEY_ENTER;
+
     if (code == vgui2::KEY_ESCAPE)
     {
         Close();

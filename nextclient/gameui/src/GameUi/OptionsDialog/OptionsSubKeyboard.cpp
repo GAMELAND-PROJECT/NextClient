@@ -945,7 +945,7 @@ void COptionsSubKeyboard::Finish(int key, int button)
 //-----------------------------------------------------------------------------
 void COptionsSubKeyboard::OnKeyCodeTyped(vgui2::KeyCode code)
 {
-    if (vgui2::KEY_ENTER == code)
+    if (vgui2::KEY_ENTER == code || vgui2::KEY_PAD_ENTER == code)
     {
         if (!m_pKeyBindList->IsCapturing())
         {

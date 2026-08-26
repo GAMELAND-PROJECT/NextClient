@@ -154,6 +154,9 @@ void CDialogGameInfo::OnConnectToGame(int ip, int port)
 
 void CDialogGameInfo::OnKeyCodeTyped(KeyCode code)
 {
+    if (code == vgui2::KEY_PAD_ENTER)
+        code = vgui2::KEY_ENTER;
+
     if (!GameUI().IsInLevel() && code == vgui2::KEY_ESCAPE)
     {
         Close();
