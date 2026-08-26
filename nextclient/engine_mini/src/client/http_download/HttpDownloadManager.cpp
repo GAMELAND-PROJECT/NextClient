@@ -1,4 +1,5 @@
 #include "HttpDownloadManager.h"
+#include "../download.h"
 #include "../../engine.h"
 #include "../../console/console.h"
 #include <nitro_utils/string_utils.h>
@@ -47,6 +48,16 @@ void HttpDownloadManager::SetUrl(const std::string &url)
 
 void HttpDownloadManager::Queue(const ResourceDescriptor& file_resource)
 {
+    if (file_resource.get_download_size() < 0 ||
+        static_cast<uint32_t>(file_resource.get_download_size()) > kMaxServerResourceBytes)
+    {
+        return;
+    }
+
+    const uint32_t resource_size = static_cast<uint32_t>(file_resource.get_download_size());
+    if (resource_size > kMaxServerDownloadBatchBytes - total_bytes_to_download_)
+        return;
+
     if (!IsSafeFileToDownload(file_resource.get_download_path()))
     {
         Con_Printf("[HTTP] Invalid file path to download: %s\n", file_resource.get_download_path().c_str());
@@ -61,7 +72,7 @@ void HttpDownloadManager::Queue(const ResourceDescriptor& file_resource)
         return;
     }
 
-    total_bytes_to_download_ += file_resource.get_download_size();
+    total_bytes_to_download_ += resource_size;
     total_files_to_download_++;
 
     files_to_download_.emplace(file_resource, 0);
@@ -214,6 +225,9 @@ void HttpDownloadManager::StartNewDownloads()
                     (size_t downloadTotal, size_t downloadNow, size_t uploadTotal, size_t uploadNow, intptr_t userdata)
                 {
                     if (shared_data->stop_download)
+                        return false;
+
+                    if (downloadNow > kMaxServerResourceBytes || downloadTotal > kMaxServerResourceBytes)
                         return false;
 
                     shared_data->download_total = downloadTotal;
@@ -400,6 +414,9 @@ std::optional<std::string> HttpDownloadManager::ValidateResponseAndGetErrorMessa
 
     if (response.text.empty())
         return "Empty file";
+
+    if (response.text.size() > kMaxServerResourceBytes)
+        return "File is too large";
 
     if (!ValidateDownloadedData(response.text))
         return "Invalid downloaded data";

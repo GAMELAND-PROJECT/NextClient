@@ -56,11 +56,21 @@ int CL_HttpGetDownloadQueueSize()
 
 void CL_QueueHTTPDownload(const ResourceDescriptor& file_resource)
 {
+    if (cls != nullptr && cls->state == ca_active)
+        return;
+
     g_HttpDownloadManager->Queue(file_resource);
 }
 
 void CL_HTTPUpdate()
 {
+    if (cls != nullptr && cls->state == ca_active)
+    {
+        if (g_HttpDownloadManager->GetDownloadQueueSize() != 0)
+            g_HttpDownloadManager->Stop();
+        return;
+    }
+
     g_HttpDownloadManager->Update();
 }
 

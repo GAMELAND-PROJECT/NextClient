@@ -6,11 +6,66 @@
 #include "ncl_entity/WeaponSyncSystem.h"
 #include "ncl_entity/cl_ncl_entity_sync.h"
 
+#include <array>
+#include <cstdint>
 #include <format>
 #include <iterator>
 
 namespace
 {
+    struct RecentDynamicSound
+    {
+        const sfx_t* sfx{};
+        int entnum{};
+        int entchannel{};
+        int flags{};
+        int pitch{};
+        double time{};
+    };
+
+    constexpr size_t kRecentDynamicSoundSlots = 64;
+    constexpr double kDuplicateSoundWindow = 0.001;
+    constexpr double kSoundBurstWindow = 0.010;
+    constexpr unsigned int kMaxDynamicSoundsPerBurst = 96;
+
+    std::array<RecentDynamicSound, kRecentDynamicSoundSlots> g_RecentDynamicSounds{};
+    double g_SoundBurstStarted = -1.0;
+    unsigned int g_DynamicSoundsInBurst{};
+
+    bool ShouldDropDynamicSound(int entnum, int entchannel, const sfx_t* sfx, int flags, int pitch)
+    {
+        if (sfx == nullptr)
+            return false;
+
+        // Reuse the engine clock, which is already updated once per frame. No
+        // timer query, allocation or reporting is added to the sound hot path.
+        const double now = *realtime;
+        if (g_SoundBurstStarted < 0.0 || now < g_SoundBurstStarted || now - g_SoundBurstStarted >= kSoundBurstWindow)
+        {
+            g_SoundBurstStarted = now;
+            g_DynamicSoundsInBurst = 0;
+        }
+
+        // A normal frame never approaches this ceiling. It only prevents an
+        // abnormal packet from monopolizing the mixer with hundreds of events.
+        if (g_DynamicSoundsInBurst >= kMaxDynamicSoundsPerBurst)
+            return true;
+
+        ++g_DynamicSoundsInBurst;
+
+        const auto pointer_bits = reinterpret_cast<uintptr_t>(sfx) >> 4;
+        const size_t slot = (pointer_bits ^ static_cast<uintptr_t>(entnum) * 131u ^
+                             static_cast<uintptr_t>(entchannel) * 17u) % kRecentDynamicSoundSlots;
+        auto& recent = g_RecentDynamicSounds[slot];
+
+        const bool duplicate = recent.sfx == sfx && recent.entnum == entnum &&
+            recent.entchannel == entchannel && recent.flags == flags && recent.pitch == pitch &&
+            now - recent.time <= kDuplicateSoundWindow;
+
+        recent = {sfx, entnum, entchannel, flags, pitch, now};
+        return duplicate;
+    }
+
     bool HasSoundPrefix(const char* name, const char* prefix)
     {
         return name != nullptr && Q_strnicmp(name, prefix, Q_strlen(prefix)) == 0;
@@ -124,6 +179,9 @@ void S_StartDynamicSoundHook(
         next->Invoke(entnum, entchannel, sfx, origin, fvol, attenuation, flags, pitch);
         return;
     }
+
+    if (ShouldDropDynamicSound(entnum, entchannel, sfx, flags, pitch))
+        return;
 
     if (IsGrenadeRadioAnnouncement(sfx))
     {

@@ -1,7 +1,13 @@
 #pragma once
 
+#include <cstdint>
 #include <resource/ResourceDescriptor.h>
 #include "http_download/DownloadLoggerAggregator.h"
+
+// Large enough for legitimate GoldSrc resources while preventing a remote
+// server from forcing an unbounded allocation or decompression on the client.
+inline constexpr uint32_t kMaxServerResourceBytes = 64u * 1024u * 1024u;
+inline constexpr uint32_t kMaxServerDownloadBatchBytes = 512u * 1024u * 1024u;
 
 extern std::shared_ptr<DownloadLoggerAggregator> g_DownloadFileLogger;
 

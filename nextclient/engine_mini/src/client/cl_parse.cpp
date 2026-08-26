@@ -162,9 +162,26 @@ int CL_EstimateNeededResources()
 {
     OPTICK_EVENT();
     
-    int nTotalSize = 0;
+    uint64_t nTotalSize = 0;
 
     client_stateex.resourcesNeeded.clear();
+
+    const auto add_missing_resource = [&nTotalSize](resource_t* resource)
+    {
+        if (resource->nDownloadSize <= 0 ||
+            static_cast<uint32_t>(resource->nDownloadSize) > kMaxServerResourceBytes)
+        {
+            return;
+        }
+
+        const uint64_t next_total = nTotalSize + static_cast<uint32_t>(resource->nDownloadSize);
+        if (next_total > kMaxServerDownloadBatchBytes)
+            return;
+
+        SetBits(resource->ucFlags, RES_WASMISSING);
+        nTotalSize = next_total;
+        client_stateex.resourcesNeeded[resource->szFileName] = *resource;
+    };
 
     for (resource_t* pResource = cl->resourcesneeded.pNext, * pNext; pResource != &cl->resourcesneeded; pResource = pNext)
     {
@@ -177,17 +194,13 @@ int CL_EstimateNeededResources()
             case t_sound:
                 if (pResource->szFileName[0] != '*' && resource_descriptor.NeedToDownload())
                 {
-                    SetBits(pResource->ucFlags, RES_WASMISSING);
-                    nTotalSize += pResource->nDownloadSize;
-                    client_stateex.resourcesNeeded[pResource->szFileName] = *pResource;
+                    add_missing_resource(pResource);
                 }
                 break;
             case t_model:
                 if (pResource->szFileName[0] != '*' && resource_descriptor.NeedToDownload())
                 {
-                    SetBits(pResource->ucFlags, RES_WASMISSING);
-                    nTotalSize += pResource->nDownloadSize;
-                    client_stateex.resourcesNeeded[pResource->szFileName] = *pResource;
+                    add_missing_resource(pResource);
                 }
                 break;
             case t_skin:
@@ -195,17 +208,13 @@ int CL_EstimateNeededResources()
             case t_eventscript:
                 if (resource_descriptor.NeedToDownload())
                 {
-                    SetBits(pResource->ucFlags, RES_WASMISSING);
-                    nTotalSize += pResource->nDownloadSize;
-                    client_stateex.resourcesNeeded[pResource->szFileName] = *pResource;
+                    add_missing_resource(pResource);
                 }
                 break;
             case t_decal:
                 if (FBitSet(pResource->ucFlags, RES_CUSTOM))
                 {
-                    SetBits(pResource->ucFlags, RES_WASMISSING);
-                    nTotalSize += pResource->nDownloadSize;
-                    client_stateex.resourcesNeeded[pResource->szFileName] = *pResource;
+                    add_missing_resource(pResource);
                 }
                 break;
             case t_world:
@@ -215,12 +224,15 @@ int CL_EstimateNeededResources()
         }
     }
 
-    return nTotalSize;
+    return static_cast<int>(nTotalSize);
 }
 
 qboolean CL_RequestMissingResources()
 {
     OPTICK_EVENT();
+
+    if (cls->state == ca_active)
+        return false;
     
     if (!cls->dl.doneregistering && (cls->dl.custom || cls->state == ca_uninitialized))
     {
@@ -704,6 +716,9 @@ void CL_BatchResourceRequest()
 void CL_StartResourceDownloading(const char *pszMessage, bool bCustom)
 {
     OPTICK_EVENT();
+
+    if (cls->state == ca_active)
+        return;
     
     resourceinfo_t ri;
 

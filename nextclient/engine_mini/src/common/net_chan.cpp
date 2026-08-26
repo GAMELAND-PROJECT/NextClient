@@ -10,6 +10,8 @@
 #include "../client/cl_private_resources.h"
 #include "../client/download.h"
 
+#include <cstdint>
+
 void Netchan_Setup(
     netsrc_t socketnumber,
     netchan_t *chan,
@@ -122,13 +124,55 @@ qboolean Netchan_CopyFileFragments(netchan_t *chan)
         }
     }
 
-    nsize = 0;
+    uint64_t assembledSize = 0;
     while (p)
     {
-        nsize += p->frag_message.cursize;
+        if (p->frag_message.cursize < 0)
+        {
+            Netchan_FlushIncoming(chan, FRAG_FILE_STREAM);
+            return FALSE;
+        }
+
+        assembledSize += static_cast<uint32_t>(p->frag_message.cursize);
         if (p == chan->incomingbufs[FRAG_FILE_STREAM])
-            nsize -= *pMsg_readcount;
+        {
+            if (*pMsg_readcount < 0 || *pMsg_readcount > p->frag_message.cursize)
+            {
+                Netchan_FlushIncoming(chan, FRAG_FILE_STREAM);
+                return FALSE;
+            }
+            assembledSize -= static_cast<uint32_t>(*pMsg_readcount);
+        }
+
+        if (assembledSize > kMaxServerResourceBytes)
+        {
+            Netchan_FlushIncoming(chan, FRAG_FILE_STREAM);
+            return FALSE;
+        }
+
         p = p->next;
+    }
+
+    if (assembledSize == 0)
+    {
+        Netchan_FlushIncoming(chan, FRAG_FILE_STREAM);
+        return FALSE;
+    }
+
+    // Never assemble, decompress or write a server file on the gameplay path.
+    // Required resources are still handled normally while connecting.
+    if (cls->state == ca_active)
+    {
+        Netchan_FlushIncoming(chan, FRAG_FILE_STREAM);
+        return FALSE;
+    }
+
+    nsize = static_cast<int>(assembledSize);
+
+    if (bCompressed && (uncompressedSize == 0 || uncompressedSize > kMaxServerResourceBytes))
+    {
+        Netchan_FlushIncoming(chan, FRAG_FILE_STREAM);
+        return FALSE;
     }
 
     buffer = (unsigned char *)Mem_ZeroMalloc(nsize + 1);
@@ -171,9 +215,23 @@ qboolean Netchan_CopyFileFragments(netchan_t *chan)
     if (bCompressed)
     {
         unsigned char *uncompressedBuffer = (unsigned char *)Mem_Malloc(uncompressedSize);
+        if (!uncompressedBuffer)
+        {
+            Mem_Free(buffer);
+            return FALSE;
+        }
+
         Con_DPrintf(ConLogType::Info, "Decompressing file %s (%d -> %d)\n", filename, nsize, uncompressedSize);
-        BZ2_bzBuffToBuffDecompress((char *)uncompressedBuffer, &uncompressedSize, (char *)buffer, nsize, 1, 0);
+        const int decompressResult = BZ2_bzBuffToBuffDecompress(
+            (char *)uncompressedBuffer, &uncompressedSize, (char *)buffer, nsize, 1, 0);
         Mem_Free(buffer);
+
+        if (decompressResult != BZ_OK)
+        {
+            Mem_Free(uncompressedBuffer);
+            return FALSE;
+        }
+
         pos = uncompressedSize;
         buffer = uncompressedBuffer;
     }
