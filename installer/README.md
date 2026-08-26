@@ -8,13 +8,13 @@
 4. creates Voice and No Voice desktop shortcuts;
 5. creates a standard Windows uninstaller.
 
-Online verification first uses an installed Chrome or Edge browser in hidden
-headless mode, which avoids networks where the native Windows downloader cannot
-complete a Google TLS connection. If neither browser is installed, the installer
-extracts its bundled Chromium 109 x86 into its temporary directory and uses it
-only for the access request. The access page includes a connection-status
-indicator and a manual refresh button. A built-in HTTPS fallback remains as the
-last attempt.
+Online verification uses the bundled Chromium 109 x86 in hidden headless mode,
+which avoids networks where the native Windows downloader cannot complete a
+Google TLS connection. It is extracted into the installer's temporary directory
+and used only for access requests. Installed browsers and the Windows HTTPS
+downloader are deliberately ignored, so every machine uses the exact same
+verification engine. The access page includes a connection-status indicator and
+a manual refresh button.
 
 ## Chromium 109 fallback
 
@@ -25,9 +25,9 @@ installer\runtime\chromium109\chrome.nosync.7z
 ```
 
 The archive must contain `chrome.exe`; its internal folder layout does not
-matter. The build automatically includes the archive when it exists and omits
-the fallback when it does not. The archive is stored without a second compression
-pass, then extracted on demand only if Chrome and Edge are both unavailable.
+matter. The build requires the archive and stops with a clear compiler error if
+it is missing. The archive is stored without a second compression pass, then
+extracted on demand when the online service is first contacted.
 
 Chromium 109 is required only for legacy Windows 7/8 compatibility. It is no
 longer security-maintained, so it is launched headlessly with a temporary profile

@@ -7,10 +7,11 @@
   #define SourceRoot "F:\CS 1.6 - AllClient"
 #endif
 
-#define BundledChromiumArchive "runtime\chromium109\chrome.nosync.7z"
-#if FileExists(BundledChromiumArchive)
-  #define HasBundledChromium
+#define BundledChromiumArchive AddBackslash(SourcePath) + "runtime\chromium109\chrome.nosync.7z"
+#ifnexist BundledChromiumArchive
+  #error Bundled Chromium is missing: installer\runtime\chromium109\chrome.nosync.7z
 #endif
+#define HasBundledChromium
 
 [Setup]
 AppId={{D9E46BD1-52F8-470F-8639-FF31FE7C5E48}
@@ -138,60 +139,6 @@ begin
 #endif
 end;
 
-function FindChromiumBrowser(var BrowserPath: String): Boolean;
-begin
-  Result := False;
-  BrowserPath := '';
-
-  if RegQueryStringValue(HKCU, 'Software\Microsoft\Windows\CurrentVersion\App Paths\chrome.exe', '', BrowserPath) and FileExists(BrowserPath) then
-  begin
-    Result := True;
-    Exit;
-  end;
-  if RegQueryStringValue(HKLM32, 'Software\Microsoft\Windows\CurrentVersion\App Paths\chrome.exe', '', BrowserPath) and FileExists(BrowserPath) then
-  begin
-    Result := True;
-    Exit;
-  end;
-  if IsWin64 and RegQueryStringValue(HKLM64, 'Software\Microsoft\Windows\CurrentVersion\App Paths\chrome.exe', '', BrowserPath) and FileExists(BrowserPath) then
-  begin
-    Result := True;
-    Exit;
-  end;
-  if RegQueryStringValue(HKLM32, 'Software\Microsoft\Windows\CurrentVersion\App Paths\msedge.exe', '', BrowserPath) and FileExists(BrowserPath) then
-  begin
-    Result := True;
-    Exit;
-  end;
-  if IsWin64 and RegQueryStringValue(HKLM64, 'Software\Microsoft\Windows\CurrentVersion\App Paths\msedge.exe', '', BrowserPath) and FileExists(BrowserPath) then
-  begin
-    Result := True;
-    Exit;
-  end;
-
-  BrowserPath := ExpandConstant('{localappdata}\Google\Chrome\Application\chrome.exe');
-  if FileExists(BrowserPath) then
-  begin
-    Result := True;
-    Exit;
-  end;
-  BrowserPath := ExpandConstant('{pf}\Google\Chrome\Application\chrome.exe');
-  if FileExists(BrowserPath) then
-  begin
-    Result := True;
-    Exit;
-  end;
-  BrowserPath := ExpandConstant('{pf32}\Microsoft\Edge\Application\msedge.exe');
-  if FileExists(BrowserPath) then
-  begin
-    Result := True;
-    Exit;
-  end;
-
-  { The bundled Chromium is extracted only when no installed browser exists. }
-  Result := PrepareBundledChromium(BrowserPath);
-end;
-
 function DownloadWithChromium(const Url, ResponsePath: String): Boolean;
 var
   BrowserPath, ScriptPath, ProfilePath, Parameters: String;
@@ -199,7 +146,8 @@ var
   ResultCode: Integer;
 begin
   Result := False;
-  if not FindChromiumBrowser(BrowserPath) then
+  { Online access always uses the Chromium runtime embedded in this Setup. }
+  if not PrepareBundledChromium(BrowserPath) then
     Exit;
 
   ScriptPath := ExpandConstant('{tmp}\allclient-browser-request.cmd');
@@ -208,8 +156,10 @@ begin
   DelTree(ProfilePath, True, True, True);
 
   CommandText := '@echo off' + #13#10 +
-    '"' + BrowserPath + '" --headless=new --disable-gpu --no-first-run ' +
-    '--disable-background-networking --user-data-dir="' + ProfilePath + '" ' +
+    '"' + BrowserPath + '" --headless --disable-gpu --no-first-run ' +
+    '--no-default-browser-check --disable-extensions --disable-sync ' +
+    '--disable-component-update --disable-background-networking ' +
+    '--user-data-dir="' + ProfilePath + '" ' +
     '--dump-dom "' + Url + '" > "' + ResponsePath + '" 2>nul' + #13#10;
 
   if not SaveStringToFile(ScriptPath, CommandText, False) then
@@ -233,21 +183,7 @@ begin
   ResponsePath := ExpandConstant('{tmp}\allclient-access-response.html');
 
   if DownloadWithChromium(Url, ResponsePath) then
-  begin
     Result := LoadStringFromFile(ResponsePath, ResponseText);
-    Exit;
-  end;
-
-  { Fallback for systems without Chrome or Edge. }
-  try
-    ResponsePath := ExpandConstant('{tmp}\allclient-access-response.json');
-    DeleteFile(ResponsePath);
-    DownloadTemporaryFile(Url, 'allclient-access-response.json', '', nil);
-    Result := LoadStringFromFile(ResponsePath, ResponseText);
-  except
-    Log('Built-in access download failed: ' + GetExceptionMessage);
-    Result := False;
-  end;
 end;
 
 function OnlineAccessCodeIsValid(const EnteredCode: String): Boolean;
@@ -270,7 +206,7 @@ begin
   else
   begin
     OnlineServiceUnavailable := True;
-    Log('Online code verification unavailable through Chromium and built-in downloader.');
+    Log('Online code verification unavailable through bundled Chromium.');
   end;
 end;
 
