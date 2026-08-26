@@ -5,6 +5,8 @@
 
 CLabeledCommandComboBox::CLabeledCommandComboBox(vgui2::Panel *parent, const char *panelName) : vgui2::ComboBox(parent, panelName, 6, false)
 {
+    SetEditable(false);
+    SetDropdownButtonVisible(true);
     AddActionSignalTarget(this);
     m_iCurrentSelection = -1;
     m_iStartSelection = -1;
@@ -12,6 +14,45 @@ CLabeledCommandComboBox::CLabeledCommandComboBox(vgui2::Panel *parent, const cha
 
 CLabeledCommandComboBox::~CLabeledCommandComboBox(void)
 {
+}
+
+void CLabeledCommandComboBox::OnMousePressed(vgui2::MouseCode code)
+{
+    if (code == vgui2::MOUSE_LEFT && IsEnabled() && IsCursorOver())
+    {
+        // Treat the whole field as a dropdown button. Do not hand the click to
+        // TextEntry, otherwise it receives a caret/focus as if it were editable.
+        ShowMenu();
+        return;
+    }
+
+    BaseClass::OnMousePressed(code);
+}
+
+void CLabeledCommandComboBox::OnMouseDoublePressed(vgui2::MouseCode code)
+{
+    OnMousePressed(code);
+}
+
+void CLabeledCommandComboBox::OnKeyTyped(wchar_t)
+{
+    // Selection-only control: never pass printable characters to TextEntry.
+}
+
+void CLabeledCommandComboBox::OnSetFocus()
+{
+    // ComboBox normally selects its text and displays an edit caret here.
+    // Keep keyboard focus available for navigation without edit visuals.
+}
+
+void CLabeledCommandComboBox::ApplySettings(KeyValues *resourceData)
+{
+    BaseClass::ApplySettings(resourceData);
+
+    // Resource files are applied after construction and may otherwise restore
+    // TextEntry editing. This control must always remain selection-only.
+    SetEditable(false);
+    SetDropdownButtonVisible(true);
 }
 
 void CLabeledCommandComboBox::DeleteAllItems(void)

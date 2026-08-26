@@ -22,6 +22,13 @@ public:
     virtual void AddItem(char const *text, char const *engineCommand);
     virtual void ActivateItem(int itemIndex);
 
+protected:
+    virtual void OnMousePressed(vgui2::MouseCode code);
+    virtual void OnMouseDoublePressed(vgui2::MouseCode code);
+    virtual void OnKeyTyped(wchar_t);
+    virtual void OnSetFocus();
+    virtual void ApplySettings(KeyValues *resourceData);
+
 public:
     const char *GetActiveItemCommand(void);
     void SetInitialItem(int itemIndex);

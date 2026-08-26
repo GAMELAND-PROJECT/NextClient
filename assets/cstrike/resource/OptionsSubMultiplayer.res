@@ -147,6 +147,18 @@
 		"ControlName" "CLabeledCommandComboBox"
 		"fieldName" "CrosshairTypeComboBox"
 		"xpos" "348"
+		"ypos" "200"
+		"wide" "140"
+		"tall" "24"
+		"visible" "1"
+		"enabled" "1"
+		"tabPosition" "7"
+	}
+	"CrosshairSizeComboBox"
+	{
+		"ControlName" "CLabeledCommandComboBox"
+		"fieldName" "CrosshairSizeComboBox"
+		"xpos" "348"
 		"ypos" "132"
 		"wide" "140"
 		"tall" "24"
@@ -154,10 +166,10 @@
 		"enabled" "1"
 		"tabPosition" "5"
 	}
-	"CrosshairSizeComboBox"
+	"CrosshairColorComboBox"
 	{
 		"ControlName" "CLabeledCommandComboBox"
-		"fieldName" "CrosshairSizeComboBox"
+		"fieldName" "CrosshairColorComboBox"
 		"xpos" "348"
 		"ypos" "166"
 		"wide" "140"
@@ -165,18 +177,6 @@
 		"visible" "1"
 		"enabled" "1"
 		"tabPosition" "6"
-	}
-	"CrosshairColorComboBox"
-	{
-		"ControlName" "CLabeledCommandComboBox"
-		"fieldName" "CrosshairColorComboBox"
-		"xpos" "348"
-		"ypos" "200"
-		"wide" "140"
-		"tall" "24"
-		"visible" "1"
-		"enabled" "1"
-		"tabPosition" "7"
 	}
 	"CrosshairTranslucencyCheckbox"
 	{
