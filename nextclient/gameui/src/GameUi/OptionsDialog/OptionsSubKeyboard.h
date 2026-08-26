@@ -31,6 +31,7 @@ public:
 
     virtual void	OnResetData();
     virtual void	OnApplyChanges();
+    virtual void    PerformLayout();
 
     // Trap ENTER key to initiate binding
     virtual void	OnKeyCodePressed(vgui2::KeyCode code);

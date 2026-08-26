@@ -44,6 +44,7 @@ private:
 
 private:
     MESSAGE_FUNC_PTR(OnTextChanged, "TextChanged", panel);
+    MESSAGE_FUNC_PTR(OnTextNewLine, "TextNewLine", panel);
     MESSAGE_FUNC_PARAMS(OnSliderMoved, "SliderMoved", data);
     MESSAGE_FUNC(OnApplyButtonEnable, "ControlModified");
 

@@ -312,6 +312,30 @@ COptionsSubKeyboard::~COptionsSubKeyboard()
     DeleteSavedBindings();
 }
 
+void COptionsSubKeyboard::PerformLayout()
+{
+    BaseClass::PerformLayout();
+
+    int wide, tall;
+    GetSize(wide, tall);
+
+    const int margin = 12;
+    const int gap = 8;
+    const int buttonTall = 23;
+    const int buttonWide = 118;
+    const int buttonY = tall - margin - buttonTall;
+
+    m_pKeyBindList->SetBounds(
+        margin, margin, wide - (margin * 2), buttonY - margin - gap);
+    m_pSetBindingButton->SetBounds(margin, buttonY, buttonWide, buttonTall);
+    m_pClearBindingButton->SetBounds(
+        margin + buttonWide + gap, buttonY, buttonWide, buttonTall);
+
+    if (vgui2::Panel* defaults = FindChildByName("DefaultsButton"))
+        defaults->SetBounds(wide - margin - buttonWide,
+                            buttonY, buttonWide, buttonTall);
+}
+
 //-----------------------------------------------------------------------------
 // Purpose: reloads current keybinding
 //-----------------------------------------------------------------------------

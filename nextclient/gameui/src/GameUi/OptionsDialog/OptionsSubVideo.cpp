@@ -103,7 +103,8 @@ COptionsSubVideo::COptionsSubVideo(vgui2::Panel *parent) : PropertyPage(parent, 
     m_pHDModels->SetVisible(false);
     m_pHighVideoQuality->SetVisible(false);
 
-    PrepareResolutionList();
+    // Restart-sensitive display controls belong exclusively to the launcher.
+    // Do not enumerate display modes from the in-game Options window.
 }
 
 void COptionsSubVideo::PrepareResolutionList( void )
@@ -233,7 +234,6 @@ void COptionsSubVideo::OnResetData()
     m_pStretchAspect->SetSelected(m_CurrentSettings.stretch_aspect);
     m_pVsync->Reset();
 
-    SetCurrentResolutionComboItem();
 }
 
 //-----------------------------------------------------------------------------
@@ -342,39 +342,8 @@ void COptionsSubVideo::RevertVidSettings()
 //-----------------------------------------------------------------------------
 void COptionsSubVideo::ApplyVidSettings()
 {
-    // Retrieve text from active controls and parse out strings
-    if ( m_pMode )
-    {
-        int selectedWidth = 0;
-        int selectedHeight = 0;
-        if (!GetSelectedResolution(selectedWidth, selectedHeight))
-        {
-            SetCurrentResolutionComboItem();
-            return;
-        }
-
-        m_CurrentSettings.w = selectedWidth;
-        m_CurrentSettings.h = selectedHeight;
-    }
-
-    if ( m_pWindowed )
-    {
-        bool checked = m_pWindowed->IsSelected();
-        m_CurrentSettings.windowed = checked ? 1 : 0;
-    }
-
-    if ( m_pHDModels )
-    {
-        bool checked = m_pHDModels->IsSelected();
-        m_CurrentSettings.hdmodels = checked ? 1 : 0;
-    }
-
-    if (m_pHighVideoQuality)
-    {
-        const bool checked = m_pHighVideoQuality->IsSelected();
-        // GoldSrc stores 0 for low-detail mode and 1 for high-detail mode.
-        m_CurrentSettings.vid_level = checked ? 1 : 0;
-    }
+    // Resolution, window mode, HD models and video quality are owned by the
+    // pre-launch dialog and are never read or changed from this page.
 
     if ( m_pDisableMultitexture )
     {
@@ -388,52 +357,16 @@ void COptionsSubVideo::ApplyVidSettings()
         m_CurrentSettings.stretch_aspect = checked ? 1 : 0;
     }
 
-    const bool videoModeChanged =
-        m_OrigSettings.w != m_CurrentSettings.w ||
-        m_OrigSettings.h != m_CurrentSettings.h ||
-        m_OrigSettings.bpp != m_CurrentSettings.bpp;
-    const bool windowModeChanged = m_OrigSettings.windowed != m_CurrentSettings.windowed;
-    const bool hdModelsChanged = m_OrigSettings.hdmodels != m_CurrentSettings.hdmodels;
-    const bool videoLevelChanged = m_OrigSettings.vid_level != m_CurrentSettings.vid_level;
     const bool multitextureChanged =
         m_OrigSettings.disable_multitexture != m_CurrentSettings.disable_multitexture;
     const bool stretchAspectChanged = m_OrigSettings.stretch_aspect != m_CurrentSettings.stretch_aspect;
 
-    const bool restartRequired =
-        videoModeChanged || windowModeChanged || hdModelsChanged || videoLevelChanged ||
-        multitextureChanged || stretchAspectChanged;
+    const bool restartRequired = multitextureChanged || stretchAspectChanged;
 
     if (!restartRequired)
         return;
 
     CVidSettings *p = &m_CurrentSettings;
-
-    char szCmd[ 256 ];
-
-    if (videoModeChanged)
-    {
-        Q_snprintf(szCmd, sizeof(szCmd), "_setvideomode %i %i %i\n", p->w, p->h, p->bpp);
-        engine->pfnClientCmd(szCmd);
-    }
-
-    if (windowModeChanged)
-    {
-        Q_snprintf(szCmd, sizeof(szCmd), "_setrenderer %s %s\n",
-                   p->renderer, p->windowed ? "windowed" : "fullscreen");
-        engine->pfnClientCmd(szCmd);
-    }
-
-    if (hdModelsChanged)
-    {
-        Q_snprintf(szCmd, sizeof(szCmd), "_sethdmodels %d\n", p->hdmodels);
-        engine->pfnClientCmd(szCmd);
-    }
-
-    if (videoLevelChanged)
-    {
-        Q_snprintf(szCmd, sizeof(szCmd), "_set_vid_level %d\n", p->vid_level);
-        engine->pfnClientCmd(szCmd);
-    }
 
     if (multitextureChanged)
         m_pUserConfig->set_value("", "disable_multitexture", std::to_string(p->disable_multitexture), true);

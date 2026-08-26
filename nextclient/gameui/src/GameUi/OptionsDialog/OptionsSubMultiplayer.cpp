@@ -192,20 +192,15 @@ void CrosshairImagePanel::Paint(void)
 
 COptionsSubMultiplayer::COptionsSubMultiplayer(vgui2::Panel *parent) : vgui2::PropertyPage(parent, "OptionsSubMultiplayer")
 {
-    vgui2::Button *cancel = new vgui2::Button(this, "Cancel", "#GameUI_Cancel");
-    cancel->SetCommand("Close");
-
-    vgui2::Button *ok = new vgui2::Button(this, "OK", "#GameUI_OK");
-    ok->SetCommand("Ok");
-
-    vgui2::Button *apply = new vgui2::Button(this, "Apply", "#GameUI_Apply");
-    apply->SetCommand("Apply");
-
     vgui2::Button *advanced = new vgui2::Button(this, "Advanced", "#GameUI_AdvancedEllipsis");
     advanced->SetCommand("Advanced");
 
     m_pNameTextEntry = new CCvarTextEntry(this, "NameEntry", "name");
     m_pPasswordTextEntry = new CSetinfoTextEntry(this, "PasswordEntry", "_pw");
+    m_pNameTextEntry->SendNewLine(true);
+    m_pNameTextEntry->AddActionSignalTarget(this);
+    m_pPasswordTextEntry->SendNewLine(true);
+    m_pPasswordTextEntry->AddActionSignalTarget(this);
     m_pHighQualityModelCheckBox = new CCvarToggleCheckButton(this, "High Quality Models", "#GameUI_HighModels", "cl_himodels");
 
     m_pLogoList = new CLabeledCommandComboBox(this, "SpraypaintList");
@@ -442,6 +437,23 @@ void COptionsSubMultiplayer::OnSliderMoved(KeyValues *data)
 {
 }
 
+void COptionsSubMultiplayer::OnTextNewLine(vgui2::Panel *panel)
+{
+    if (panel == m_pNameTextEntry)
+    {
+        m_pPasswordTextEntry->RequestFocus();
+        m_pPasswordTextEntry->SelectAllText(true);
+        return;
+    }
+
+    if (panel == m_pPasswordTextEntry)
+    {
+        vgui2::Panel* dialog = GetParent() ? GetParent()->GetParent() : nullptr;
+        if (dialog)
+            PostMessage(dialog, new KeyValues("Command", "command", "OK"));
+    }
+}
+
 void COptionsSubMultiplayer::OnApplyButtonEnable(void)
 {
     PostMessage(GetParent(), new KeyValues("ApplyButtonEnable"));
@@ -550,6 +562,8 @@ void COptionsSubMultiplayer::OnPageShow(void)
     m_pNameTextEntry->GotoTextEnd();
     m_pPasswordTextEntry->Reset();
     m_pPasswordTextEntry->GotoTextEnd();
+    m_pNameTextEntry->RequestFocus();
+    m_pNameTextEntry->SelectAllText(true);
 }
 
 void COptionsSubMultiplayer::OnResetData(void)

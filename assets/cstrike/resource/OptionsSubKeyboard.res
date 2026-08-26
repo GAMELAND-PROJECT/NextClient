@@ -1,0 +1,45 @@
+"Resource/OptionsSubKeyboard.res"
+{
+	"ChangeKeyButton"
+	{
+		"ControlName" "Button"
+		"fieldName" "ChangeKeyButton"
+		"xpos" "14"
+		"ypos" "260"
+		"wide" "126"
+		"tall" "24"
+		"visible" "1"
+		"enabled" "1"
+		"tabPosition" "2"
+		"labelText" "Change Key"
+		"command" "ChangeKey"
+	}
+	"ClearKeyButton"
+	{
+		"ControlName" "Button"
+		"fieldName" "ClearKeyButton"
+		"xpos" "148"
+		"ypos" "260"
+		"wide" "126"
+		"tall" "24"
+		"visible" "1"
+		"enabled" "1"
+		"tabPosition" "3"
+		"labelText" "Clear Key"
+		"command" "ClearKey"
+	}
+	"DefaultsButton"
+	{
+		"ControlName" "Button"
+		"fieldName" "DefaultsButton"
+		"xpos" "356"
+		"ypos" "260"
+		"wide" "126"
+		"tall" "24"
+		"visible" "1"
+		"enabled" "1"
+		"tabPosition" "4"
+		"labelText" "#GameUI_UseDefaults"
+		"command" "Defaults"
+	}
+}
