@@ -223,7 +223,12 @@ void COptionsDialog::PerformLayout()
     }
 
     if (vgui2::Panel* page = sheet->GetActivePage())
+    {
         page->SetBounds(0, 0, contentWide, contentTall);
+        // Pages with responsive child layouts (notably Keyboard) must be laid
+        // out after PropertySheet has assigned their final content bounds.
+        page->InvalidateLayout(true);
+    }
 }
 
 void COptionsDialog::OnClose(void)

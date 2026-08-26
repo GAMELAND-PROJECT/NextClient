@@ -86,6 +86,7 @@ private:
 
     // Bind a key to the item
     void			AddBinding( KeyValues *item, const char *keyname );
+    void            SynchronizeBindingItems(KeyValues *sourceItem);
     // Remove all instances of a key from all bindings
     void			RemoveKeyFromBindItems( const char *key );
     // Find item by binding name

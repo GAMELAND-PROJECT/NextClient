@@ -319,20 +319,29 @@ void COptionsSubKeyboard::PerformLayout()
     int wide, tall;
     GetSize(wide, tall);
 
-    const int margin = 12;
-    const int gap = 8;
+    const int horizontalMargin = 20;
+    const int listTop = 38;
+    const int bottomMargin = 30;
+    const int gap = 10;
     const int buttonTall = 23;
     const int buttonWide = 118;
-    const int buttonY = tall - margin - buttonTall;
+    const int buttonY = tall - bottomMargin - buttonTall;
 
     m_pKeyBindList->SetBounds(
-        margin, margin, wide - (margin * 2), buttonY - margin - gap);
-    m_pSetBindingButton->SetBounds(margin, buttonY, buttonWide, buttonTall);
+        horizontalMargin,
+        listTop,
+        wide - (horizontalMargin * 2),
+        buttonY - listTop - gap);
+    m_pSetBindingButton->SetBounds(
+        horizontalMargin, buttonY, buttonWide, buttonTall);
     m_pClearBindingButton->SetBounds(
-        margin + buttonWide + gap, buttonY, buttonWide, buttonTall);
+        horizontalMargin + buttonWide + gap,
+        buttonY,
+        buttonWide,
+        buttonTall);
 
     if (vgui2::Panel* defaults = FindChildByName("DefaultsButton"))
-        defaults->SetBounds(wide - margin - buttonWide,
+        defaults->SetBounds(wide - horizontalMargin - buttonWide,
                             buttonY, buttonWide, buttonTall);
 }
 
@@ -464,6 +473,39 @@ void COptionsSubKeyboard::ParseActionDescriptions( void )
     data[size] = 0;
 
     int sectionIndex = 0;
+
+    // Keep the most frequently changed movement bindings immediately visible
+    // while retaining their original rows in the Movement section below.
+    m_pKeyBindList->AddSection(++sectionIndex, "Recommended");
+    m_pKeyBindList->AddColumnToSection(
+        sectionIndex, "Action", "Recommended",
+        vgui2::SectionedListPanel::COLUMN_BRIGHT, 206);
+    m_pKeyBindList->AddColumnToSection(
+        sectionIndex, "Key", "#GameUI_KeyButton",
+        vgui2::SectionedListPanel::COLUMN_BRIGHT, 108);
+    m_pKeyBindList->AddColumnToSection(
+        sectionIndex, "AltKey", "#GameUI_Alternate",
+        vgui2::SectionedListPanel::COLUMN_BRIGHT, 108);
+
+    const char *recommendedBindings[][2] =
+    {
+        { "+left", "#Valve_Turn_Left" },
+        { "+right", "#Valve_Turn_Right" },
+        { "+jump", "#Valve_Jump" },
+        { "+duck", "#Valve_Duck" }
+    };
+
+    for (int i = 0; i < ARRAYSIZE(recommendedBindings); ++i)
+    {
+        item = new KeyValues("Item");
+        item->SetString("Action", recommendedBindings[i][1]);
+        item->SetString("Binding", recommendedBindings[i][0]);
+        item->SetString("Key", "");
+        item->SetString("AltKey", "");
+        m_pKeyBindList->AddItem(sectionIndex, item);
+        item->deleteThis();
+    }
+
     while ( 1 )
     {
         data = UTIL_Parse( data );
@@ -489,9 +531,9 @@ void COptionsSubKeyboard::ParseActionDescriptions( void )
             {
                 // add header item
                 m_pKeyBindList->AddSection(++sectionIndex, szDescription);
-                m_pKeyBindList->AddColumnToSection(sectionIndex, "Action", szDescription, vgui2::SectionedListPanel::COLUMN_BRIGHT, 226);
-                m_pKeyBindList->AddColumnToSection(sectionIndex, "Key", "#GameUI_KeyButton", vgui2::SectionedListPanel::COLUMN_BRIGHT, 128);
-                m_pKeyBindList->AddColumnToSection(sectionIndex, "AltKey", "#GameUI_Alternate", vgui2::SectionedListPanel::COLUMN_BRIGHT, 128);
+                m_pKeyBindList->AddColumnToSection(sectionIndex, "Action", szDescription, vgui2::SectionedListPanel::COLUMN_BRIGHT, 206);
+                m_pKeyBindList->AddColumnToSection(sectionIndex, "Key", "#GameUI_KeyButton", vgui2::SectionedListPanel::COLUMN_BRIGHT, 108);
+                m_pKeyBindList->AddColumnToSection(sectionIndex, "AltKey", "#GameUI_Alternate", vgui2::SectionedListPanel::COLUMN_BRIGHT, 108);
             }
             else
             {
@@ -590,6 +632,32 @@ void COptionsSubKeyboard::AddBinding( KeyValues *item, const char *keyname )
     item->SetString( "AltKey", item->GetString( "Key", "" ) );
     // Set new Key
     item->SetString( "Key", keyname );
+    SynchronizeBindingItems(item);
+}
+
+void COptionsSubKeyboard::SynchronizeBindingItems(KeyValues *sourceItem)
+{
+    if (!sourceItem)
+        return;
+
+    const char *binding = sourceItem->GetString("Binding", "");
+    if (!binding[0])
+        return;
+
+    for (int i = 0; i < m_pKeyBindList->GetItemCount(); ++i)
+    {
+        const int itemID = m_pKeyBindList->GetItemIDFromRow(i);
+        KeyValues *item = m_pKeyBindList->GetItemData(itemID);
+        if (!item || item == sourceItem ||
+            stricmp(item->GetString("Binding", ""), binding))
+        {
+            continue;
+        }
+
+        item->SetString("Key", sourceItem->GetString("Key", ""));
+        item->SetString("AltKey", sourceItem->GetString("AltKey", ""));
+        m_pKeyBindList->InvalidateItem(itemID);
+    }
 }
 
 //-----------------------------------------------------------------------------
@@ -763,6 +831,11 @@ void COptionsSubKeyboard::ApplyAllBindings( void )
         // See if it has a binding
         const char *binding = item->GetString( "Binding", "" );
         if ( !binding || !binding[ 0 ] )
+            continue;
+
+        // Recommended rows mirror their original Movement rows. Apply each
+        // underlying command once, using the first synchronized occurrence.
+        if (GetItemForBinding(binding) != item)
             continue;
 
         const char *keyname;
