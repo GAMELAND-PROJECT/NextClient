@@ -106,6 +106,10 @@ ClientLauncher::ClientLauncher(HINSTANCE module_instance, const char* cmd_line) 
     {
         LOG(INFO) << "Relaunch after restart";
     }
+    else
+    {
+        RestoreGameConfigOnFreshLaunch();
+    }
 
     InitializeCmdLine(cmd_line);
 
@@ -791,4 +795,24 @@ void ClientLauncher::ProvisionDefaultConfigs()
             LOG(WARNING) << "Failed to provision config '" << target << "': " << ec.message();
         }
     }
+}
+
+void ClientLauncher::RestoreGameConfigOnFreshLaunch()
+{
+    namespace fs = std::filesystem;
+
+    constexpr char kDefaultConfig[] = "default/config.cfg";
+    constexpr char kGameConfig[] = "cstrike/config.cfg";
+
+    std::error_code ec;
+    if (!fs::is_regular_file(kDefaultConfig, ec))
+        return;
+
+    ec.clear();
+    fs::create_directories(fs::path(kGameConfig).parent_path(), ec);
+    if (ec)
+        return;
+
+    ec.clear();
+    fs::copy_file(kDefaultConfig, kGameConfig, fs::copy_options::overwrite_existing, ec);
 }

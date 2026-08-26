@@ -1,6 +1,110 @@
 #include "CmdChecker.h"
+#include <algorithm>
+#include <array>
+#include <cctype>
 #include <utility>
 #include <nitro_utils/string_utils.h>
+
+namespace
+{
+    std::string_view TrimAscii(std::string_view value)
+    {
+        while (!value.empty() && static_cast<unsigned char>(value.front()) <= ' ')
+            value.remove_prefix(1);
+        while (!value.empty() && static_cast<unsigned char>(value.back()) <= ' ')
+            value.remove_suffix(1);
+        return value;
+    }
+
+    bool IsAllowedLocalExec(std::string_view arguments)
+    {
+        arguments = TrimAscii(arguments);
+        if (arguments.empty())
+            return false;
+
+        if (arguments.front() == '"')
+        {
+            if (arguments.size() < 3 || arguments.back() != '"')
+                return false;
+            arguments.remove_prefix(1);
+            arguments.remove_suffix(1);
+        }
+        else
+        {
+            // CFG paths used by the game contain no spaces. Extra tokens are
+            // therefore malformed and must not be silently ignored.
+            for (const char ch : arguments)
+            {
+                if (static_cast<unsigned char>(ch) <= ' ')
+                    return false;
+            }
+        }
+
+        std::string normalized(arguments);
+        for (char& ch : normalized)
+        {
+            if (ch == '\\')
+                ch = '/';
+            else
+                ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+        }
+
+        if (normalized.empty() || normalized.front() == '/' ||
+            normalized.find(':') != std::string::npos ||
+            normalized.find("..") != std::string::npos ||
+            normalized.find("//") != std::string::npos)
+        {
+            return false;
+        }
+
+        static constexpr auto kAllowedFiles = std::to_array<std::string_view>({
+            "config.cfg",
+            "userconfig.cfg",
+            "autoexec.cfg",
+            "listenserver.cfg",
+            "server.cfg",
+            "valve.rc",
+            "skill.cfg",
+            "game.cfg",
+            "joystick.cfg",
+            "language.cfg",
+            "violence.cfg",
+            "default/config.cfg",
+            "hw/opengl.cfg",
+            "hw/3dfxvoodoo1.cfg",
+            "hw/3dfxvoodoo2.cfg",
+            "hw/3dfx.cfg",
+            "hw/riva128.cfg",
+            "hw/rivatnt.cfg",
+            "hw/geforce.cfg",
+            "hw/powervrpcx2.cfg",
+            "hw/powervrsg.cfg",
+            "hw/v2200.cfg",
+            "hw/3dlabs.cfg",
+            "hw/matrox.cfg",
+            "hw/atirage128.cfg",
+            "hw/g200d3d.cfg",
+            "hw/atirage128d3d.cfg",
+            "hw/nvidiad3d.cfg",
+        });
+
+        if (std::find(kAllowedFiles.begin(), kAllowedFiles.end(), normalized) != kAllowedFiles.end())
+            return true;
+
+        // Stock-compatible per-map configuration, limited to one plain file
+        // directly under maps/. Its commands still pass through this filter.
+        constexpr std::string_view kMapsPrefix = "maps/";
+        constexpr std::string_view kCfgSuffix = ".cfg";
+        if (normalized.starts_with(kMapsPrefix) && normalized.ends_with(kCfgSuffix))
+        {
+            const std::string_view filename(normalized.data() + kMapsPrefix.size(),
+                                            normalized.size() - kMapsPrefix.size() - kCfgSuffix.size());
+            return !filename.empty() && filename.find('/') == std::string_view::npos;
+        }
+
+        return false;
+    }
+}
 
 CmdChecker::CmdChecker(
     std::shared_ptr<CommandLoggerInterface> cmd_logger,
@@ -74,6 +178,17 @@ bool CmdChecker::FilterSingleCmd(const std::string_view& cmd, CommandSource comm
     if (is_bind && nitro_utils::contains(cmd, "sv_clienttrace", nitro_utils::CompareOptions::RegisterIndependent))
     {
         return false;
+    }
+
+    const bool is_exec = first_cmd_token.token.size() == 4 &&
+        nitro_utils::contains(first_cmd_token.token, "exec", nitro_utils::CompareOptions::RegisterIndependent);
+    if (is_exec)
+    {
+        // Remote exec is never legitimate. Local exec is restricted to the
+        // engine/client's known configuration files; their contents are still
+        // filtered again when inserted into the command buffer.
+        if (IsCommandFromServer(command_source) || !IsAllowedLocalExec(cmd.substr(pos)))
+            return false;
     }
 
     auto it = blocked_commands_.find(first_cmd_token.token);

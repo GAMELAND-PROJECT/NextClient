@@ -159,8 +159,6 @@ static std::shared_ptr<taskcoro::TaskCoroImpl> g_pTaskCoroImpl;
 static std::vector<std::shared_ptr<nitroapi::Unsubscriber>> g_Unsubs;
 // Process-lifetime guard: video/resolution changes can initialize the engine
 // again without starting a new game process.
-static bool g_DefaultConfigQueued;
-
 namespace
 {
 struct LockedCvar
@@ -580,31 +578,6 @@ static void OnGameInitializing(void* mainwindow, HDC* pmaindc, HGLRC* pbaseRC, c
 
     g_Unsubs.emplace_back(eng()->Sys_InitGame += [](char *pOrgCmdLine, char *pBaseDir, void *pwnd, int bIsDedicated, bool ret) {
         g_bIsDedicatedServer = bIsDedicated;
-    });
-
-    // Command-line +commands run before the normal config.cfg in GoldSrc.
-    // Queue the baseline only after ForceReloadProfile signals that the active
-    // game profile has finished loading, so the baseline wins deterministically.
-    g_Unsubs.emplace_back(eng()->ForceReloadProfile += [] {
-        constexpr char kDefaultConfigPath[] = "default/config.cfg";
-
-        // Applying video settings launches a replacement process. The launcher
-        // marks that process explicitly; it is not a fresh user launch and must
-        // preserve the settings that triggered the restart.
-        if (g_DefaultConfigQueued || std::getenv("NEXTCLIENT_RELAUNCH") != nullptr)
-            return;
-
-        g_DefaultConfigQueued = true;
-
-        if (g_pFileSystem->FileExists(kDefaultConfigPath))
-        {
-            Cbuf_InsertText("exec default/config.cfg\n");
-            Con_DPrintf(ConLogType::Info, "Queued default config after profile load: %s\n", kDefaultConfigPath);
-        }
-        else
-        {
-            Con_Printf("Default config not found: %s\n", kDefaultConfigPath);
-        }
     });
 
     // Enforce the clean-client profile at the mutation point. This covers

@@ -124,6 +124,7 @@ private:
                                             ClientMiniInterface* client_mini,
                                             IGameUINext* gameui_next);
     static void ProvisionDefaultConfigs();
+    static void RestoreGameConfigOnFreshLaunch();
 
     template<class T>
     std::tuple<T*, CSysModule*> LoadModule(const char* module_name, const char* interface_version)

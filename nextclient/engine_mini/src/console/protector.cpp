@@ -43,6 +43,23 @@ namespace
         return kEmpty;
     }
 
+    void Cbuf_InsertTextHandler(const char* text, nitroapi::NextHandlerInterface<void, const char*>* next)
+    {
+        if (text == nullptr || text[0] == '\0')
+        {
+            next->Invoke(text);
+            return;
+        }
+
+        std::string_view cmd = text;
+        if (cmd.starts_with(kPrivateResourceMsgMarker))
+            return;
+
+        g_CmdChecker->FilterCmd(cmd, g_CommandSource, g_FilteredCmd);
+        if (!g_FilteredCmd.empty())
+            next->Invoke(g_FilteredCmd.c_str());
+    }
+
     void CL_ConnectionlessPacket(nitroapi::NextHandlerInterface<void>* next)
     {
         int read_count = *pMsg_readcount;
@@ -159,6 +176,7 @@ void PROTECTOR_Init(std::shared_ptr<nitro_utils::ConfigProviderInterface> config
     g_CmdChecker = std::make_unique<CmdChecker>(g_CmdLogger, config_provider);
 
     g_Unsubs.emplace_back(eng()->Cbuf_AddText |= Cbuf_AddTextHandler);
+    g_Unsubs.emplace_back(eng()->Cbuf_InsertText |= Cbuf_InsertTextHandler);
     g_Unsubs.emplace_back(eng()->CL_ConnectionlessPacket |= CL_ConnectionlessPacket);
     g_Unsubs.emplace_back(eng()->SVC_StuffText |= SVC_StufftextHandler);
     g_Unsubs.emplace_back(eng()->SVC_Director |= SVC_DirectorHandler);
