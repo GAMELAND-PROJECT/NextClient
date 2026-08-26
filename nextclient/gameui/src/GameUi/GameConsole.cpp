@@ -94,6 +94,13 @@ void CGameConsole::Activate()
     if (GameUI().IsInLevel())
         m_pConsole->SetFadeEffectDisableOverride(true);
 
+    const bool show_lan_host_guide =
+        GameUI().IsInLevel() &&
+        engine->pfnGetCvarFloat("sv_lan") != 0.0f &&
+        EngineMini() &&
+        EngineMini()->IsListenServerActive();
+    m_pConsole->ShowLanHostGuide(show_lan_host_guide);
+
     m_pConsole->Activate();
 
     if (GameUI().IsInLevel())

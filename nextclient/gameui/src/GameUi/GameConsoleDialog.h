@@ -74,6 +74,9 @@ public:
     // clears the console
     void Clear();
 
+    // Shows the small, static LAN-host command card without enabling engine logs.
+    void ShowLanHostGuide(bool show);
+
     void Hide();
     void DumpConsoleTextToFile();
 

@@ -36,8 +36,9 @@ public:
 
     virtual ISteamMatchmakingServers* GetSteamMatchmakingServers() = 0;
     virtual bool IsPinnedServer(uint32_t ip, uint16_t port) const = 0;
+    virtual bool IsListenServerActive() const = 0;
     virtual void SetNclmVerificator(NclmVerificatorInterface* handler) = 0;
 };
 
-#define ENGINE_MINI_INTERFACE_VERSION "EngineMini007"
+#define ENGINE_MINI_INTERFACE_VERSION "EngineMini008"
 

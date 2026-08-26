@@ -266,6 +266,32 @@ void CGameConsoleDialog::Clear()
     m_pHistory->SetText("");
 }
 
+void CGameConsoleDialog::ShowLanHostGuide(bool show)
+{
+    m_pHistory->SetVisible(show);
+    m_pHistory->SetVerticalScrollbar(false);
+
+    if (!show)
+    {
+        m_pHistory->SetMaximumCharCount(1);
+        m_pHistory->SetText("");
+        return;
+    }
+
+    static constexpr char kLanHostGuide[] =
+        "LAN HOST COMMANDS\n"
+        "\n"
+        "mix   Start match settings\n"
+        "warm  Start warmup mode\n"
+        "1v1   Aim-map duel mode\n"
+        "r     Restart current round\n"
+        "lv    Countdown and go LIVE\n";
+
+    m_pHistory->SetMaximumCharCount(sizeof(kLanHostGuide));
+    m_pHistory->SetText(kLanHostGuide);
+    m_pHistory->GotoTextStart();
+}
+
 //-----------------------------------------------------------------------------
 // Purpose: normal text print
 //-----------------------------------------------------------------------------

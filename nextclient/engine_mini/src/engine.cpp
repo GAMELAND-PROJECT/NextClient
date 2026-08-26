@@ -850,6 +850,11 @@ public:
     {
         return g_pMatchmakingServers && g_pMatchmakingServers->IsPinnedServer(ip, port);
     }
+
+    bool IsListenServerActive() const override
+    {
+        return Host_IsServerActive() && !g_bIsDedicatedServer;
+    }
     
     void SetNclmVerificator(NclmVerificatorInterface* handler) override
     {
