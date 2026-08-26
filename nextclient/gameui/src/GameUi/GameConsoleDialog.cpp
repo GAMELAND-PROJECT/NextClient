@@ -285,7 +285,10 @@ void CGameConsoleDialog::ShowLanHostGuide(bool show)
         "warm  Start warmup mode\n"
         "1v1   Aim-map duel mode\n"
         "r     Restart current round\n"
-        "lv    Countdown and go LIVE\n";
+        "lv    Countdown and go LIVE\n"
+        "\n"
+        "ff0 / ff1    Friendly fire OFF / ON\n"
+        "fr0 - fr12   Set freeze time (seconds)\n";
 
     m_pHistory->SetMaximumCharCount(sizeof(kLanHostGuide));
     m_pHistory->SetText(kLanHostGuide);
