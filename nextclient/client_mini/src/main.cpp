@@ -4,10 +4,6 @@
 #include <next_client_mini/client_mini.h>
 #include <parsemsg.h>
 
-#ifdef _WIN32
-#include <Windows.h>
-#endif
-
 #include "camera.h"
 #include "studiorenderer.h"
 #include "view.h"
@@ -43,72 +39,15 @@ static std::vector<std::shared_ptr<nitroapi::Unsubscriber>> g_Unsub;
 static bool g_MouseCaptureKnown = false;
 static bool g_MouseCaptured = false;
 
-#ifdef _WIN32
 namespace
 {
-    enum class InputFocusState
-    {
-        Unknown,
-        Background,
-        Foreground,
-    };
-
-    InputFocusState g_InputFocusState = InputFocusState::Unknown;
-    ULONGLONG g_NextFocusPollMs = 0;
-
-    bool IsProcessForeground()
-    {
-        const HWND foreground_window = GetForegroundWindow();
-        if (foreground_window == nullptr)
-            return false;
-
-        DWORD foreground_process_id = 0;
-        GetWindowThreadProcessId(foreground_window, &foreground_process_id);
-        static const DWORD current_process_id = GetCurrentProcessId();
-        return foreground_process_id == current_process_id;
-    }
-
-    void UpdateInputFocusState()
-    {
-        const InputFocusState current_state = IsProcessForeground()
-            ? InputFocusState::Foreground
-            : InputFocusState::Background;
-
-        if (g_InputFocusState == InputFocusState::Unknown)
-        {
-            g_InputFocusState = current_state;
-            return;
-        }
-
-        if (current_state == g_InputFocusState)
-            return;
-
-        g_InputFocusState = current_state;
-
-        // Clear transitions once on both focus edges so held movement,
-        // attack states and stale mouse deltas cannot survive Alt+Tab.
-        IN_ClearStates();
-        ResetInvertMouse();
-    }
-
-    void PollInputFocusState()
-    {
-        const ULONGLONG now_ms = GetTickCount64();
-        if (now_ms < g_NextFocusPollMs)
-            return;
-
-        // Focus changes do not need frame-rate polling. Ten checks per second
-        // keep Alt+Tab handling responsive without doing Win32 queries every frame.
-        g_NextFocusPollMs = now_ms + 100;
-        UpdateInputFocusState();
-    }
+    bool g_InputBackground = false;
 
     bool IsInputBackground()
     {
-        return g_InputFocusState == InputFocusState::Background;
+        return g_InputBackground;
     }
 }
-#endif
 
 cvar_t* hud_draw;
 
@@ -311,7 +250,6 @@ static int UserMsg_TextMsgHandler(const char* name, int size, void* data, UserMs
 
 static void CL_CreateMoveHandler(float frametime, usercmd_t* cmd, int active, CL_CreateMoveNext next)
 {
-#ifdef _WIN32
     if (IsInputBackground())
     {
         // Let the original client advance its command clock, but prevent a
@@ -328,8 +266,6 @@ static void CL_CreateMoveHandler(float frametime, usercmd_t* cmd, int active, CL
         }
         return;
     }
-#endif
-
     CL_CreateMove_InvertMousePre(frametime, cmd, active);
 
     next->Invoke(frametime, cmd, active);
@@ -389,6 +325,7 @@ public:
             {
                 g_MouseCaptureKnown = true;
                 g_MouseCaptured = true;
+                g_InputBackground = false;
                 IN_ClearStates();
                 ResetInvertMouse();
             }
@@ -399,16 +336,11 @@ public:
             {
                 g_MouseCaptureKnown = true;
                 g_MouseCaptured = false;
+                g_InputBackground = true;
                 IN_ClearStates();
                 ResetInvertMouse();
             }
         });
-
-#ifdef _WIN32
-        g_InputFocusState = InputFocusState::Unknown;
-        g_NextFocusPollMs = 0;
-        g_Unsub.emplace_back(eng()->Host_FrameInternal += [](float) { PollInputFocusState(); });
-#endif
 
         g_GameHud = std::make_unique<GameHud>(nitro_api);
         g_Unsub.emplace_back(client_data->HUD_Shutdown += [] { g_GameHud.reset(); });
@@ -426,9 +358,7 @@ public:
         g_MouseCaptureKnown = false;
         g_MouseCaptured = false;
 
-#ifdef _WIN32
-        g_InputFocusState = InputFocusState::Unknown;
-#endif
+        g_InputBackground = false;
 
         for (auto& unsubscriber: g_Unsub) {
             unsubscriber->Unsubscribe();

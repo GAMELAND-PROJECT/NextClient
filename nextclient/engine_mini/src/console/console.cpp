@@ -1,6 +1,5 @@
 #include "console.h"
 
-#include <fstream>
 #include <common.h>
 
 #include "../common/filesystem.h"
@@ -11,28 +10,17 @@ bool con_initialized;
 
 void Con_DebugLog(const char* file, const char* format, ...)
 {
-    // Never perform diagnostic disk I/O while actively playing, even when the
-    // process was launched with -condebug.
-    if (cls != nullptr && cls->state == ca_active)
-        return;
-
-    static char text[8192];
-
-    va_list params;
-    va_start(params, format);
-    V_vsnprintf(text, sizeof(text), format, params);
-    va_end(params);
-
-    std::ofstream stream(file, std::ios::app | std::ios::out);
-    if (stream.is_open())
-        stream.write(text, V_strlen(text));
+    // Production clients never create diagnostic log files. Keeping the
+    // symbol as a no-op preserves ABI/call sites without formatting or I/O.
+    (void)file;
+    (void)format;
 }
 
 void Con_Init()
 {
-    con_debuglog = COM_CheckParm("-condebug");
-    if (con_debuglog)
-        FS_RemoveFile("qconsole.log", nullptr);
+    // Ignore -condebug: accidental command-line flags must not enable disk
+    // logging in a latency-focused production build.
+    con_debuglog = false;
 
     con_initialized = true;
 }
@@ -61,9 +49,6 @@ void Con_DPrintf(ConLogType type, const char* format, ...)
     }
 
     Sys_Printf("%s%s", prefix, text);
-
-    if (con_debuglog && (cls == nullptr || cls->state != ca_active))
-        Con_DebugLog("qconsole.log", "%s%s", prefix, text);
 
     if (type == ConLogType::Info)
     {

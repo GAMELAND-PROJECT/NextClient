@@ -29,6 +29,14 @@ namespace
             name += Q_strlen("sound/");
         }
 
+        // Gunshots, movement, item and ambience sounds make up the hot path.
+        // Reject those by category before doing any case-insensitive substring
+        // scan for the one radio announcement we suppress.
+        if (name[0] != '!' && !HasSoundPrefix(name, "radio/"))
+        {
+            return false;
+        }
+
         // Suppress only Counter-Strike's automatic "Fire in the hole"
         // announcement. Do not mute the radio directory as a whole: other
         // radio commands, hostage speech, VOX and map ambience are gameplay

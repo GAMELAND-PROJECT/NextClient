@@ -204,5 +204,10 @@ void CGameConsole::SetParent(int parent)
 //-----------------------------------------------------------------------------
 void CGameConsole::OnCmdCondump()
 {
+    // Never write console dumps while a map is running. Disk diagnostics are
+    // intentionally kept out of live gameplay frames.
+    if (GameUI().IsInLevel())
+        return;
+
     g_GameConsole.m_pConsole->DumpConsoleTextToFile();
 }

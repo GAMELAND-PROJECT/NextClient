@@ -103,8 +103,6 @@ CDialogAddServer::CDialogAddServer(vgui2::Panel *parent) : Frame(parent, "Dialog
     m_OriginalHeight = m_pTabPanel->GetTall() + y + 50;
     SetTall(y);
 
-    ivgui()->AddTickSignal(GetVPanel());
-    
     m_appId = SteamUtils()->GetAppID();
 }
 
@@ -315,7 +313,8 @@ void CDialogAddServer::ApplySchemeSettings(IScheme *pScheme)
 
 void CDialogAddServer::OnTick(void)
 {
-    BaseClass::OnTick();
+    // This dialog is entirely event-driven. It intentionally owns no periodic
+    // tick, so closing the browser cannot leave idle UI wake-ups behind.
 }
 
 void CDialogAddServer::OnItemSelected(void)

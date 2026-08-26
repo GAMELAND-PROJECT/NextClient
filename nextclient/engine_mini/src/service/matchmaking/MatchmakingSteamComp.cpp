@@ -127,6 +127,13 @@ void MatchmakingSteamComp::CancelAllQueries()
     if (pinned_cancellation_token_)
         pinned_cancellation_token_->SetCanceled();
 
+    // A later, explicit browser refresh may start a fresh load. Do not retain
+    // a cancelled initialization state across a gameplay session.
+    pinned_cancellation_token_.reset();
+    pinned_cache_client_.reset();
+    pinned_http_client_.reset();
+    pinned_servers_initialized_ = false;
+
     // Callbacks may mutate request state, so iterate over a stable snapshot.
     std::vector<HServerListRequest> request_ids;
     request_ids.reserve(server_requests_.size());
@@ -144,6 +151,10 @@ HServerListRequest MatchmakingSteamComp::RequestInternetServerList(
     ISteamMatchmakingServerListResponse* response_callback
 )
 {
+    // Pinned-server network/cache work is user-driven. Engine startup and a
+    // direct +connect path must never start this background I/O.
+    InitializePinnedServers();
+
     auto request_id = (HServerListRequest)++server_list_request_counter_;
 
     auto ct = CancellationToken::Create();
@@ -196,6 +207,8 @@ HServerListRequest MatchmakingSteamComp::RequestFavoritesServerList(
     ISteamMatchmakingServerListResponse* response_callback
 )
 {
+    InitializePinnedServers();
+
     auto request_id = (HServerListRequest)++server_list_request_counter_;
 
     auto steam_response_proxy = new SteamMatchmakingServerListResponseProxy(response_callback, request_id);

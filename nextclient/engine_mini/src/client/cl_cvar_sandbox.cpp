@@ -14,6 +14,8 @@
 
 namespace
 {
+    // Older builds persisted the sandbox snapshot to this file. Keep only the
+    // one-time migration cleanup; live sessions are deliberately memory-only.
     constexpr char kCvarsBackupKvName[] = "CvarsBackup";
     constexpr char kCvarsBackupFolder[] = "backup/";
     constexpr char kCvarsBackupFile[] = "CvarsBackup.vdf";
@@ -90,24 +92,13 @@ namespace
 
     std::vector<std::shared_ptr<nitroapi::Unsubscriber>> g_Unsubs;
 
-    bool BackupCvars()
-    {
-        auto cvars_backup = KeyValues::AutoDelete(kCvarsBackupKvName);
-
-        for (const auto& [cvar_name, cvar_data] : g_SandboxedCvars)
-            cvars_backup->SetString(cvar_name.c_str(), cvar_data.original_value.c_str());
-
-        FS_CreateDirHierarchy(kCvarsBackupFolder, kCvarsPathId);
-        return cvars_backup->SaveToFile(g_pFileSystem, va("%s%s", kCvarsBackupFolder, kCvarsBackupFile), kCvarsPathId);
-    }
-
-    void RestoreCvarsBackup()
+    bool RestoreLegacyCvarsBackup()
     {
         auto cvars_backup = KeyValues::AutoDelete(kCvarsBackupKvName);
 
         bool loaded = cvars_backup->LoadFromFile(g_pFileSystem, va("%s%s", kCvarsBackupFolder, kCvarsBackupFile), kCvarsPathId);
         if (!loaded)
-            return;
+            return false;
 
         for (KeyValues* kv = cvars_backup->GetFirstSubKey(); kv != nullptr; kv = kv->GetNextKey())
         {
@@ -125,6 +116,19 @@ namespace
         }
 
         FS_RemoveFile(va("%s%s", kCvarsBackupFolder, kCvarsBackupFile), kCvarsPathId);
+        return true;
+    }
+
+    void RestoreSandboxedCvars()
+    {
+        // The snapshot lives only in memory. Restoring it at disconnect keeps
+        // server-forced values session-scoped without any gameplay disk I/O.
+        for (const auto& [cvar_name, cvar_data] : g_SandboxedCvars)
+        {
+            cvar_t* cvar = gEngfuncs.pfnGetCvarPointer(cvar_name.c_str());
+            if (cvar != nullptr && cvar_data.status == CvarStatus::Locked)
+                gEngfuncs.Cvar_Set(cvar_name.c_str(), cvar_data.original_value.c_str());
+        }
     }
 
     void InitSandbox()
@@ -140,10 +144,7 @@ namespace
             g_SandboxedCvars.emplace(cvar_name, CvarData{cvar->string, CvarStatus::Unlocked});
         }
 
-        g_CvarsSandboxAvailable = BackupCvars();
-
-        if (!g_CvarsSandboxAvailable)
-            g_SandboxedCvars.clear();
+        g_CvarsSandboxAvailable = true;
     }
 
     void OnSandboxConnect()
@@ -179,13 +180,7 @@ namespace
                 next->Invoke(name, value);
 
                 if (cvar_data.original_value != value)
-                {
                     cvar_data.original_value = value;
-
-                    g_CvarsSandboxAvailable = BackupCvars();
-                    if (!g_CvarsSandboxAvailable)
-                        CL_CvarsSandboxClear();
-                }
                 break;
 
             default:
@@ -262,8 +257,9 @@ namespace
 void CL_CvarsSandboxInit()
 {
     g_Unsubs.emplace_back(eng()->ForceReloadProfile += [] {
-        RestoreCvarsBackup();
-        Host_WriteConfiguration();
+        // Recover a snapshot left by an older build, once, before gameplay.
+        if (RestoreLegacyCvarsBackup())
+            Host_WriteConfiguration();
 
         g_ConfigReloaded = true;
 
@@ -282,7 +278,7 @@ void CL_CvarsSandboxInit()
 
 void CL_CvarsSandboxClear()
 {
-    RestoreCvarsBackup();
+    RestoreSandboxedCvars();
 
     g_SandboxedCvars.clear();
 }
