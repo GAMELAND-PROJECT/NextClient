@@ -66,6 +66,16 @@ bool CmdChecker::FilterSingleCmd(const std::string_view& cmd, CommandSource comm
         return false;
     }
 
+    // Do not persist a protected server cvar inside a key binding. Match the
+    // whole bind command name, but inspect its quoted payload case-insensitively
+    // so whitespace, casing and an arbitrary numeric value cannot bypass it.
+    const bool is_bind = first_cmd_token.token.size() == 4 &&
+        nitro_utils::contains(first_cmd_token.token, "bind", nitro_utils::CompareOptions::RegisterIndependent);
+    if (is_bind && nitro_utils::contains(cmd, "sv_clienttrace", nitro_utils::CompareOptions::RegisterIndependent))
+    {
+        return false;
+    }
+
     auto it = blocked_commands_.find(first_cmd_token.token);
     if (it == blocked_commands_.end())
     {

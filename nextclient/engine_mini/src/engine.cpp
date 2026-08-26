@@ -184,6 +184,9 @@ constexpr auto kLockedClientProfile = std::to_array<LockedCvar>({
     {"scoreboard_showavatars", "0"},
     {"developer", "0"},
     {"r_speeds", "0"},
+    // Values above 1 expand server-side hit traces and can be abused by a
+    // listen-server host through binds/aliases. Keep stock hit registration.
+    {"sv_clienttrace", "1"},
     // Lightweight 4v4/5v5 firing profile: cap accumulating cosmetic effects
     // while preserving muzzle flashes, tracers, bullet decals and smoke grenades.
     {"max_shells", "16"},
@@ -619,6 +622,21 @@ static void OnGameInitializing(void* mainwindow, HDC* pmaindc, HGLRC* pbaseRC, c
             next->Invoke(name, locked_value);
         else
             next->Invoke(name, value);
+    });
+
+    // Cover engine/game-DLL paths that bypass Cvar_Set and mutate the cvar
+    // object directly. This is the final enforcement boundary.
+    g_Unsubs.emplace_back(eng()->Cvar_DirectSet |= [](cvar_t* cvar, const char* value, const auto& next) {
+        if (cvar != nullptr && cvar->name != nullptr)
+        {
+            if (const char* locked_value = GetLockedClientCvarValue(cvar->name))
+            {
+                next->Invoke(cvar, locked_value);
+                return;
+            }
+        }
+
+        next->Invoke(cvar, value);
     });
 
     g_Unsubs.emplace_back(eng()->Cvar_Command |= [](const auto& next) -> qboolean {
