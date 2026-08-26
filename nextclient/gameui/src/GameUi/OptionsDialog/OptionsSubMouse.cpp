@@ -34,6 +34,8 @@ COptionsSubMouse::~COptionsSubMouse(void)
 void COptionsSubMouse::OnPageShow(void)
 {
     UpdateSensitivityLabel(m_pMouseSensitivitySlider->GetSliderValue());
+    m_pMouseSensitivityLabel->RequestFocus();
+    m_pMouseSensitivityLabel->SelectAllText(true);
 }
 
 void COptionsSubMouse::OnResetData(void)

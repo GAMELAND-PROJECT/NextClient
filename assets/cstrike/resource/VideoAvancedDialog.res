@@ -11,16 +11,6 @@
 		"settitlebarvisible" "1"
 		"title" "#GameUI_VideoAdvanced"
 	}
-	"Divider"
-	{
-		"ControlName" "Divider"
-		"fieldName" "Divider"
-		"xpos" "10"
-		"ypos" "30"
-		"wide" "420"
-		"tall" "2"
-		"visible" "1"
-	}
 	"FovFixCheckbox"
 	{
 		"ControlName" "CCvarToggleCheckButton"
