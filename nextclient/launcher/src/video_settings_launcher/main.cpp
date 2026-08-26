@@ -474,7 +474,7 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
             VideoSettings defaults = ReadSettings();
             defaults.windowed = 0;
             defaults.hdModels = 0;
-            defaults.videoLevel = 0;
+            defaults.videoLevel = 1;
             SetControls(defaults);
 
             SystemMouseSettings mouseDefaults = g_mouseAtLastApply;
@@ -484,7 +484,7 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
             mouseDefaults.acceleration[2] = 1;
             SetMouseControls(mouseDefaults);
             ApplyMousePreview();
-            SetStatus(L"Defaults selected: fullscreen, HD and high quality off, pointer speed 4 / 11, precision on.");
+            SetStatus(L"Defaults selected: fullscreen and high quality on, HD off, pointer speed 4 / 11, precision on.");
             return 0;
         }
         default:
