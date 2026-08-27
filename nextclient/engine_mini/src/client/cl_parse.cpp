@@ -402,9 +402,12 @@ void CL_ReadPackets()
     // the next frame instead of reading and discarding them.
     constexpr int kMaxActivePacketsPerFrame = 32;
     constexpr int kMaxInactivePacketsPerFrame = 250;
+    constexpr int kMaxActiveConnectionlessPacketsPerSecond = 8;
     constexpr auto kActivePacketBudget = std::chrono::microseconds(2000);
 
     int packets_count = 0;
+    static double connectionless_window_started = -1.0;
+    static int active_connectionless_packets = 0;
 
     if (cls->state == ca_dedicated)
         return;
@@ -413,6 +416,12 @@ void CL_ReadPackets()
     cl->time = cl->time + *host_frametime;
 
     const bool active_game = cls->state == ca_active;
+    if (!active_game)
+    {
+        connectionless_window_started = -1.0;
+        active_connectionless_packets = 0;
+    }
+
     const int packet_limit = active_game ? kMaxActivePacketsPerFrame : kMaxInactivePacketsPerFrame;
     const auto packet_work_started = std::chrono::steady_clock::now();
 
@@ -422,6 +431,27 @@ void CL_ReadPackets()
 
         if (*(int *) net_message->data == -1)
         {
+            if (active_game)
+            {
+                // Once connected, unrelated discovery/challenge traffic has no
+                // gameplay purpose. Drop it before tokenization or parsing.
+                if (!NET_CompareAdr(*net_from, cls->netchan.remote_address))
+                    continue;
+
+                const double now = *realtime;
+                if (connectionless_window_started < 0.0 || now < connectionless_window_started ||
+                    now - connectionless_window_started >= 1.0)
+                {
+                    connectionless_window_started = now;
+                    active_connectionless_packets = 0;
+                }
+
+                if (active_connectionless_packets >= kMaxActiveConnectionlessPacketsPerSecond)
+                    continue;
+
+                ++active_connectionless_packets;
+            }
+
             CL_ConnectionlessPacket();
             continue;
         }

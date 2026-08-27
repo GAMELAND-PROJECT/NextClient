@@ -38,10 +38,78 @@ std::unique_ptr<GameHud> g_GameHud;
 static std::vector<std::shared_ptr<nitroapi::Unsubscriber>> g_Unsub;
 static bool g_MouseCaptureKnown = false;
 static bool g_MouseCaptured = false;
+static dlight_t* (*g_OriginalAllocDlight)(int) = nullptr;
+static dlight_t* (*g_OriginalAllocElight)(int) = nullptr;
 
 namespace
 {
     bool g_InputBackground = false;
+    dlight_t g_SuppressedDlight{};
+    double g_AnonymousDlightWindowStarted = -1.0;
+    unsigned int g_AnonymousDlightsInWindow = 0;
+
+    dlight_t* GuardedAllocLight(int key, dlight_t* (*original)(int))
+    {
+        if (original == nullptr || key != 0)
+            return original != nullptr ? original(key) : &g_SuppressedDlight;
+
+        constexpr unsigned int kMaxAnonymousDlightsPerFrameWindow = 32;
+        constexpr double kDlightFrameWindow = 0.010;
+
+        const double now = gEngfuncs.GetClientTime();
+        if (g_AnonymousDlightWindowStarted < 0.0 || now < g_AnonymousDlightWindowStarted ||
+            now - g_AnonymousDlightWindowStarted >= kDlightFrameWindow)
+        {
+            g_AnonymousDlightWindowStarted = now;
+            g_AnonymousDlightsInWindow = 0;
+        }
+
+        if (g_AnonymousDlightsInWindow >= kMaxAnonymousDlightsPerFrameWindow)
+        {
+            Q_memset(&g_SuppressedDlight, 0, sizeof(g_SuppressedDlight));
+            return &g_SuppressedDlight;
+        }
+
+        ++g_AnonymousDlightsInWindow;
+        return original(key);
+    }
+
+    dlight_t* GuardedAllocDlight(int key)
+    {
+        return GuardedAllocLight(key, g_OriginalAllocDlight);
+    }
+
+    dlight_t* GuardedAllocElight(int key)
+    {
+        return GuardedAllocLight(key, g_OriginalAllocElight);
+    }
+
+    void InstallDynamicLightGuard()
+    {
+        if (gEngfuncs.pEfxAPI == nullptr || g_OriginalAllocDlight != nullptr)
+            return;
+
+        g_OriginalAllocDlight = gEngfuncs.pEfxAPI->CL_AllocDlight;
+        g_OriginalAllocElight = gEngfuncs.pEfxAPI->CL_AllocElight;
+        gEngfuncs.pEfxAPI->CL_AllocDlight = GuardedAllocDlight;
+        gEngfuncs.pEfxAPI->CL_AllocElight = GuardedAllocElight;
+    }
+
+    void RemoveDynamicLightGuard()
+    {
+        if (gEngfuncs.pEfxAPI != nullptr)
+        {
+            if (g_OriginalAllocDlight != nullptr && gEngfuncs.pEfxAPI->CL_AllocDlight == GuardedAllocDlight)
+                gEngfuncs.pEfxAPI->CL_AllocDlight = g_OriginalAllocDlight;
+            if (g_OriginalAllocElight != nullptr && gEngfuncs.pEfxAPI->CL_AllocElight == GuardedAllocElight)
+                gEngfuncs.pEfxAPI->CL_AllocElight = g_OriginalAllocElight;
+        }
+
+        g_OriginalAllocDlight = nullptr;
+        g_OriginalAllocElight = nullptr;
+        g_AnonymousDlightWindowStarted = -1.0;
+        g_AnonymousDlightsInWindow = 0;
+    }
 
     bool IsInputBackground()
     {
@@ -90,6 +158,7 @@ static void HUD_InitPost()
     std::memcpy(&gEngfuncs, g_NitroApi->GetEngineData()->cl_enginefunc, sizeof(gEngfuncs));
     std::memcpy(&g_engfuncs, g_NitroApi->GetEngineData()->enginefuncs, sizeof(g_engfuncs));
     gHUD = g_NitroApi->GetClientData()->gHUD;
+    InstallDynamicLightGuard();
 
     // Apply safe defaults once. These remain ordinary archived cvars and can
     // still be changed later in-game or by the planned external launcher.
@@ -286,6 +355,54 @@ static void HUD_ProcessPlayerStateHandler(entity_state_s* dst, const entity_stat
     next->Invoke(dst, src);
 }
 
+static void HUD_TempEntUpdateHandler(
+    double frametime,
+    double client_time,
+    double cl_gravity,
+    TEMPENTITY** ppTempEntFree,
+    TEMPENTITY** ppTempEntActive,
+    int (*Callback_AddVisibleEntity)(cl_entity_t*),
+    void (*Callback_TempEntPlaySound)(TEMPENTITY*, float),
+    HUD_TempEntUpdateNext next)
+{
+    // Spark showers repeatedly simulate gravity/collision and emit secondary
+    // particles. Keep the normal impact feedback, but bound pathological
+    // accumulation from sustained fire or effect-heavy servers. The original
+    // updater remains solely responsible for unlinking and recycling entries.
+    constexpr int kMaxActiveSparkShowers = 24;
+    constexpr double kMaxSparkShowerLifetime = 0.35;
+    constexpr int kMaxTempEntitiesToInspect = 2048;
+
+    if (ppTempEntActive != nullptr)
+    {
+        int active_spark_showers = 0;
+        int inspected = 0;
+
+        for (TEMPENTITY* temp = *ppTempEntActive;
+             temp != nullptr && inspected < kMaxTempEntitiesToInspect;
+             temp = temp->next, ++inspected)
+        {
+            if ((temp->flags & FTENT_SPARKSHOWER) == 0)
+                continue;
+
+            ++active_spark_showers;
+            if (active_spark_showers > kMaxActiveSparkShowers)
+            {
+                temp->flags &= ~(FTENT_SPARKSHOWER | FTENT_HITSOUND);
+                temp->die = static_cast<float>(client_time - 0.001);
+                continue;
+            }
+
+            const float latest_die = static_cast<float>(client_time + kMaxSparkShowerLifetime);
+            if (temp->die > latest_die)
+                temp->die = latest_die;
+        }
+    }
+
+    next->Invoke(frametime, client_time, cl_gravity, ppTempEntFree, ppTempEntActive,
+                 Callback_AddVisibleEntity, Callback_TempEntPlaySound);
+}
+
 class ClientMini : public ClientMiniInterface
 {
 public:
@@ -311,6 +428,7 @@ public:
         g_Unsub.emplace_back(client_data->HUD_PlayerMoveInit += HUD_PlayerMoveInitPost);
         g_Unsub.emplace_back(client_data->UserMsg_SetFOV |= UserMsg_SetFOVHandler);
         g_Unsub.emplace_back(client_data->HUD_ProcessPlayerState |= HUD_ProcessPlayerStateHandler);
+        g_Unsub.emplace_back(client_data->HUD_TempEntUpdate |= HUD_TempEntUpdateHandler);
         g_Unsub.emplace_back(client_data->UserMsg_CurWeapon += UserMsg_CurWeaponPost);
         g_Unsub.emplace_back(client_data->UserMsg_InitHUD += UserMsg_InitHUDPost);
         g_Unsub.emplace_back(client_data->UserMsg_TextMsg |= UserMsg_TextMsgHandler);
@@ -354,6 +472,7 @@ public:
 
     void Uninitialize() override
     {
+        RemoveDynamicLightGuard();
         ResetInvertMouse();
         g_MouseCaptureKnown = false;
         g_MouseCaptured = false;

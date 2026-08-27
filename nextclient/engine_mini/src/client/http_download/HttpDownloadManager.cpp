@@ -11,6 +11,16 @@
 using namespace std::chrono;
 using namespace nitro_utils;
 
+namespace
+{
+    std::string NormalizeResourcePath(std::string path)
+    {
+        nitro_utils::replace_all(path, "\\", "/");
+        nitro_utils::to_lower(path);
+        return path;
+    }
+}
+
 HttpDownloadManager::HttpDownloadManager(IGameUI* game_ui,
                                          vgui2::ILocalize* localize,
                                          std::shared_ptr<DownloadFileLoggerInterface> download_logger,
@@ -72,6 +82,10 @@ void HttpDownloadManager::Queue(const ResourceDescriptor& file_resource)
         return;
     }
 
+    std::string normalized_save_path = NormalizeResourcePath(file_resource.get_save_path());
+    if (!pending_save_paths_.emplace(std::move(normalized_save_path)).second)
+        return;
+
     total_bytes_to_download_ += resource_size;
     total_files_to_download_++;
 
@@ -81,6 +95,7 @@ void HttpDownloadManager::Queue(const ResourceDescriptor& file_resource)
 void HttpDownloadManager::Stop()
 {
     std::queue<QueuedRequest>().swap(files_to_download_);
+    pending_save_paths_.clear();
 
     for (const auto &request : requests_)
     {
@@ -180,11 +195,12 @@ void HttpDownloadManager::PruneCompletedRequests()
             }
 
             completed_requests_bytes_downloaded_ += response_result.downloaded_bytes;
+            pending_save_paths_.erase(NormalizeResourcePath(resource_descriptor.get_save_path()));
 
         }
         else
         {
-            if (request.get_retry() <= GetMaxRequestsRetries())
+            if (request.get_retry() < GetMaxRequestsRetries())
             {
                 files_to_download_.emplace(resource_descriptor, request.get_retry() + 1);
             }
@@ -196,6 +212,7 @@ void HttpDownloadManager::PruneCompletedRequests()
 
                 auto log_file_type = response_result.status_code == 404 ? LogFileTypeError::FileMissingHTTP : LogFileTypeError::FileErrorHTTP;
                 download_logger_->AddLogFileError(resource_descriptor.get_download_path().c_str(), log_file_type, (int)response_result.error.code, response_result.status_code);
+                pending_save_paths_.erase(NormalizeResourcePath(resource_descriptor.get_save_path()));
             }
         }
 

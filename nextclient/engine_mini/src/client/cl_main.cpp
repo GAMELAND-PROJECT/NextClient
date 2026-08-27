@@ -558,6 +558,35 @@ void CL_Send_CvarValue()
 
     const char* cvar_name = MSG_ReadString();
 
+    static double request_window_started = -1.0;
+    static unsigned int requests_in_window = 0;
+
+    // Sign-on and compatibility checks remain unrestricted. During active
+    // gameplay, bound response generation so a server cannot turn CVAR queries
+    // into continuous command-buffer and outgoing-network work.
+    if (cls->state == ca_active)
+    {
+        constexpr unsigned int kMaxActiveCvarRequests = 32;
+        constexpr double kActiveCvarRequestWindow = 5.0;
+        const double now = *realtime;
+        if (request_window_started < 0.0 || now < request_window_started ||
+            now - request_window_started >= kActiveCvarRequestWindow)
+        {
+            request_window_started = now;
+            requests_in_window = 0;
+        }
+
+        if (requests_in_window >= kMaxActiveCvarRequests)
+            return;
+
+        ++requests_in_window;
+    }
+    else
+    {
+        request_window_started = -1.0;
+        requests_in_window = 0;
+    }
+
     MSG_WriteByte(&cls->netchan.message, clc_cvarvalue);
     if (V_strlen(cvar_name) >= 255)
     {

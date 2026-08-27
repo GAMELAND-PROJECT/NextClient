@@ -18,6 +18,7 @@
 #include "TransferStatistics.h"
 #include "RequestContext.hpp"
 #include "QueuedRequest.hpp"
+#include <unordered_set>
 
 class HttpDownloadManager : public HttpDownloadManagerInterface
 {
@@ -45,6 +46,7 @@ class HttpDownloadManager : public HttpDownloadManagerInterface
 
     std::queue<QueuedRequest> files_to_download_;
     std::vector<RequestContext> requests_;
+    std::unordered_set<std::string> pending_save_paths_;
 
     bool is_download_active_ = false;
     bool is_slow_speed_ = false;

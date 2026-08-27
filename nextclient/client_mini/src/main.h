@@ -12,6 +12,8 @@ using HUD_VidInitNext = nitroapi::NextHandlerInterface<int>*;
 using HUD_RedrawNext = nitroapi::NextHandlerInterface<int, float, int>*;
 using UserMsg_TextMsgNext = nitroapi::NextHandlerInterface<int, const char*, int, void*>*;
 using CL_CreateMoveNext = nitroapi::NextHandlerInterface<void, float, usercmd_s*, int>*;
+using HUD_TempEntUpdateNext = nitroapi::NextHandlerInterface<void, double, double, double,
+    TEMPENTITY**, TEMPENTITY**, int (*)(cl_entity_t*), void (*)(TEMPENTITY*, float)>*;
 
 extern nitroapi::NitroApiInterface* g_NitroApi;
 nitroapi::EngineData* eng();
