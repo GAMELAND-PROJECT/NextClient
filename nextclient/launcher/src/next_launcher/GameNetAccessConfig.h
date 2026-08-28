@@ -7,6 +7,6 @@
 // CMake reads this value from the repository-root client_tags.txt file.
 inline constexpr char kGameNetTag[] = NEXTCLIENT_GAME_NET_TAG;
 
-// Plain-text subscription list. Format: tag | Jalali expiry (YYYY/MM/DD).
+// Subscription list format: build tag | player name tag | expiry (YYYY/MM/DD).
 // Blank lines and lines beginning with '#' are ignored.
 inline constexpr wchar_t kGameNetAccessUrl[] = L"https://gameland.cam/client_tags.txt";

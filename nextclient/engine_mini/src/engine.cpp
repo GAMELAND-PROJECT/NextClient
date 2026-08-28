@@ -1,7 +1,10 @@
 #include "engine.h"
 
+#include <algorithm>
 #include <array>
+#include <cctype>
 #include <cstdlib>
+#include <string_view>
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
@@ -160,16 +163,28 @@ static std::vector<std::shared_ptr<nitroapi::Unsubscriber>> g_Unsubs;
 
 namespace
 {
+constexpr size_t kMaxPlayerNameBytes = 31;
+
+enum class ConnectTargetKind
+{
+    Denied,
+    Lan,
+    ManagedOnline,
+};
+
+bool g_OnlinePlayerNameTagActive = false;
+std::string g_OriginalPlayerName;
+
 bool LauncherAllowsOnlineAccess()
 {
     const char* value = std::getenv("NEXTCLIENT_ONLINE_ACCESS");
     return value != nullptr && value[0] == '1' && value[1] == '\0';
 }
 
-bool IsConnectTargetAllowed(const char* target)
+ConnectTargetKind ClassifyConnectTarget(const char* target)
 {
     if (!target || !target[0])
-        return false;
+        return ConnectTargetKind::Denied;
 
     std::string endpoint(target);
     if (endpoint.find(':') == std::string::npos)
@@ -178,18 +193,92 @@ bool IsConnectTargetAllowed(const char* target)
     netadr_t address;
     address.SetFromString(endpoint.c_str(), true);
     if (!address.IsValid())
-        return false;
+        return ConnectTargetKind::Denied;
 
     // Preserve listen-server and cafe LAN play without requiring an online
     // subscription or a managed pin.
     if (address.IsLocalhost() || address.IsLoopback() || address.IsReservedAdr())
-        return true;
+        return ConnectTargetKind::Lan;
 
     // Public endpoints require both an active launcher entitlement and an
     // exact IP:port entry from the remotely managed pinned-server list.
-    return LauncherAllowsOnlineAccess() && g_pMatchmakingServers &&
+    if (LauncherAllowsOnlineAccess() && g_pMatchmakingServers &&
         g_pMatchmakingServers->IsPinnedServer(
-            address.GetIPHostByteOrder(), address.GetPortHostByteOrder());
+            address.GetIPHostByteOrder(), address.GetPortHostByteOrder()))
+    {
+        return ConnectTargetKind::ManagedOnline;
+    }
+
+    return ConnectTargetKind::Denied;
+}
+
+std::string OnlineNamePrefix()
+{
+    const char* value = std::getenv("NEXTCLIENT_PLAYER_NAME_TAG");
+    if (!value)
+        return {};
+
+    const std::string_view tag(value);
+    if (tag.empty() || tag.size() > 12 ||
+        !std::ranges::all_of(tag, [](unsigned char character)
+        {
+            return std::isalnum(character) || character == '_' || character == '-';
+        }))
+    {
+        return {};
+    }
+
+    return std::string("[") + std::string(tag) + "] ";
+}
+
+std::string RemoveOwnOnlineNamePrefix(std::string_view name)
+{
+    const std::string prefix = OnlineNamePrefix();
+    if (name.starts_with(prefix))
+        name.remove_prefix(prefix.size());
+    return std::string(name);
+}
+
+std::string BuildOnlinePlayerName(std::string_view original_name)
+{
+    const std::string prefix = OnlineNamePrefix();
+    std::string result = prefix;
+    const size_t available = kMaxPlayerNameBytes > prefix.size()
+        ? kMaxPlayerNameBytes - prefix.size() : 0;
+    result.append(original_name.substr(0, available));
+    return result;
+}
+
+void EnableOnlinePlayerNameTag()
+{
+    if (OnlineNamePrefix().empty())
+        return;
+
+    cvar_t* name = Cvar_FindVar("name");
+    if (!name || !name->string)
+        return;
+
+    g_OriginalPlayerName = RemoveOwnOnlineNamePrefix(name->string);
+    g_OnlinePlayerNameTagActive = true;
+    Cvar_Set("name", g_OriginalPlayerName.c_str());
+}
+
+void RestoreOriginalPlayerName()
+{
+    cvar_t* name = Cvar_FindVar("name");
+    if (!name || !name->string)
+    {
+        g_OnlinePlayerNameTagActive = false;
+        g_OriginalPlayerName.clear();
+        return;
+    }
+
+    const std::string restored_name = g_OnlinePlayerNameTagActive
+        ? g_OriginalPlayerName : RemoveOwnOnlineNamePrefix(name->string);
+    g_OnlinePlayerNameTagActive = false;
+    if (restored_name != name->string)
+        Cvar_Set("name", restored_name.c_str());
+    g_OriginalPlayerName.clear();
 }
 }
 
@@ -510,7 +599,10 @@ static void OnGameInitializing(void* mainwindow, HDC* pmaindc, HGLRC* pbaseRC, c
     g_Unsubs.emplace_back(eng()->CL_StartResourceDownloading |= [](const char* msg, int custom, const auto& next)                      { CL_StartResourceDownloading(msg, custom); });
     g_Unsubs.emplace_back(eng()->CL_ReadPackets              |= [](const auto& next)                                                   { CL_ReadPackets(); });
     g_Unsubs.emplace_back(eng()->CL_RequestMissingResources  |= [](const auto& next)                                                   { return CL_RequestMissingResources(); });
-    g_Unsubs.emplace_back(eng()->CL_Disconnect               |= [](const auto& next)                                                   { return CL_Disconnect(); });
+    g_Unsubs.emplace_back(eng()->CL_Disconnect |= [](const auto& next) {
+        RestoreOriginalPlayerName();
+        return CL_Disconnect();
+    });
     g_Unsubs.emplace_back(eng()->CL_Connect_f |= [](const auto& next) {
         // Hook the command implementation itself so console input, aliases,
         // cfg files and command-line +connect all share the same policy.
@@ -520,19 +612,30 @@ static void OnGameInitializing(void* mainwindow, HDC* pmaindc, HGLRC* pbaseRC, c
             return;
         }
 
-        if (!IsConnectTargetAllowed(Cmd_Argv(1)))
+        const ConnectTargetKind target_kind = ClassifyConnectTarget(Cmd_Argv(1));
+        if (target_kind == ConnectTargetKind::Denied)
         {
             Con_Printf("Connection blocked: use a managed Online server or a LAN address.\n");
             return;
         }
 
+        if (target_kind == ConnectTargetKind::Lan)
+            RestoreOriginalPlayerName();
+
         next->Invoke();
+
+        // GoldSrc's original connect command disconnects the previous session
+        // internally. Apply the online tag afterwards so that cleanup cannot
+        // immediately restore and remove it before the handshake begins.
+        if (target_kind == ConnectTargetKind::ManagedOnline)
+            EnableOnlinePlayerNameTag();
     });
     g_Unsubs.emplace_back(eng()->Host_Map_f |= [](const auto& next) {
         // New Game turns this process into a listen server. Browser discovery
         // must not keep UDP queries or callbacks alive during map startup.
         if (g_pMatchmakingServers)
             g_pMatchmakingServers->CancelAllQueries();
+        RestoreOriginalPlayerName();
         Host_Map_f();
     });
     g_Unsubs.emplace_back(eng()->Host_FilterTime             |= [](float delay, const auto& next)                                      { return Host_FilterTime(delay); });
@@ -636,6 +739,14 @@ static void OnGameInitializing(void* mainwindow, HDC* pmaindc, HGLRC* pbaseRC, c
     // Enforce the clean-client profile at the mutation point. This covers
     // console commands, configs and server stuffcmds without per-frame polling.
     g_Unsubs.emplace_back(eng()->Cvar_Set |= [](const char* name, const char* value, const auto& next) {
+        if (!Q_stricmp(name, "name") && g_OnlinePlayerNameTagActive)
+        {
+            g_OriginalPlayerName = RemoveOwnOnlineNamePrefix(value ? value : "");
+            const std::string tagged_name = BuildOnlinePlayerName(g_OriginalPlayerName);
+            next->Invoke(name, tagged_name.c_str());
+            return;
+        }
+
         // Keep enough queued audio to prevent underruns during weapon, movement
         // and voice bursts. Configs and server commands cannot lower it.
         if (!Q_stricmp(name, "_snd_mixahead"))
@@ -655,6 +766,18 @@ static void OnGameInitializing(void* mainwindow, HDC* pmaindc, HGLRC* pbaseRC, c
     g_Unsubs.emplace_back(eng()->Cvar_DirectSet |= [](cvar_t* cvar, const char* value, const auto& next) {
         if (cvar != nullptr && cvar->name != nullptr)
         {
+            // Some engine and game-DLL paths update the player name through
+            // Cvar_DirectSet instead of Cvar_Set. Keep the remotely assigned
+            // game-net prefix on those paths as well, otherwise it can vanish
+            // during the online connection handshake.
+            if (!Q_stricmp(cvar->name, "name") && g_OnlinePlayerNameTagActive)
+            {
+                g_OriginalPlayerName = RemoveOwnOnlineNamePrefix(value ? value : "");
+                const std::string tagged_name = BuildOnlinePlayerName(g_OriginalPlayerName);
+                next->Invoke(cvar, tagged_name.c_str());
+                return;
+            }
+
             if (const char* locked_value = GetLockedClientCvarValue(cvar->name))
             {
                 next->Invoke(cvar, locked_value);
@@ -851,6 +974,7 @@ public:
 
     void Uninitialize() override
     {
+        RestoreOriginalPlayerName();
         g_pMatchmakingServers = nullptr;
 
         for (auto &unsubscriber : unsubs_)

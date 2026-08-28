@@ -132,6 +132,8 @@ void ClientLauncher::Run()
     // only this result and never performs network work during gameplay.
     const GameNetAccessStatus online_access = QueryGameNetOnlineAccess();
     SetEnvironmentVariableA("NEXTCLIENT_ONLINE_ACCESS", online_access.allowed() ? "1" : "0");
+    SetEnvironmentVariableA("NEXTCLIENT_PLAYER_NAME_TAG",
+        online_access.player_name_tag.c_str());
     if (!online_access.allowed())
     {
         MessageBoxA(nullptr,

@@ -195,9 +195,19 @@ int DaysRemaining(const CalendarDate& today, const CalendarDate& expiry)
         GregorianDayNumber(today_gregorian));
 }
 
+bool IsValidPlayerNameTag(std::string_view value)
+{
+    value = Trim(value);
+    return !value.empty() && value.size() <= 12 &&
+        std::ranges::all_of(value, [](unsigned char character)
+        {
+            return std::isalnum(character) || character == '_' || character == '-';
+        });
+}
+
 GameNetAccessStatus ResponseAccessStatus(const std::string& response, const CalendarDate& today)
 {
-    GameNetAccessStatus status{GameNetAccessState::TagMissing, kGameNetTag, {}, -1};
+    GameNetAccessStatus status{GameNetAccessState::TagMissing, kGameNetTag, {}, {}, -1};
     size_t begin = 0;
     while (begin <= response.size())
     {
@@ -206,22 +216,41 @@ GameNetAccessStatus ResponseAccessStatus(const std::string& response, const Cale
             begin, end == std::string::npos ? response.size() - begin : end - begin));
         if (!line.empty() && line.front() != '#')
         {
-            const size_t separator = line.find('|');
-            if (separator != std::string_view::npos && EqualsTag(Trim(line.substr(0, separator))))
+            const size_t first_separator = line.find('|');
+            if (first_separator != std::string_view::npos &&
+                EqualsTag(Trim(line.substr(0, first_separator))))
             {
-                status.expiry_date = std::string(Trim(line.substr(separator + 1)));
-                CalendarDate expiry;
-                if (ParseJalaliDate(line.substr(separator + 1), expiry) &&
-                    IsValidJalaliDate(expiry))
+                const size_t second_separator = line.find('|', first_separator + 1);
+                if (second_separator != std::string_view::npos &&
+                    line.find('|', second_separator + 1) != std::string_view::npos)
                 {
-                    status.days_remaining = DaysRemaining(today, expiry);
-                    if (DateKey(today) <= DateKey(expiry))
-                        return {GameNetAccessState::Active, kGameNetTag,
-                            status.expiry_date, status.days_remaining};
-                    status.state = GameNetAccessState::Expired;
+                    status.state = GameNetAccessState::InvalidEntry;
                 }
                 else
-                    status.state = GameNetAccessState::InvalidEntry;
+                {
+                    // Accept the previous "build tag | expiry" format during
+                    // migration. It enables Online without a player-name tag.
+                    const auto player_name_tag = second_separator == std::string_view::npos
+                        ? std::string_view{} : Trim(line.substr(
+                            first_separator + 1, second_separator - first_separator - 1));
+                    const auto expiry_text = second_separator == std::string_view::npos
+                        ? Trim(line.substr(first_separator + 1))
+                        : Trim(line.substr(second_separator + 1));
+                    status.player_name_tag = std::string(player_name_tag);
+                    status.expiry_date = std::string(expiry_text);
+                    CalendarDate expiry;
+                    if ((player_name_tag.empty() || IsValidPlayerNameTag(player_name_tag)) &&
+                        ParseJalaliDate(expiry_text, expiry) && IsValidJalaliDate(expiry))
+                    {
+                        status.days_remaining = DaysRemaining(today, expiry);
+                        if (DateKey(today) <= DateKey(expiry))
+                            return {GameNetAccessState::Active, kGameNetTag, status.player_name_tag,
+                                status.expiry_date, status.days_remaining};
+                        status.state = GameNetAccessState::Expired;
+                    }
+                    else
+                        status.state = GameNetAccessState::InvalidEntry;
+                }
             }
         }
         if (end == std::string::npos)
@@ -265,7 +294,8 @@ GameNetAccessStatus QueryGameNetOnlineAccess()
 {
     const auto unavailable = []
     {
-        return GameNetAccessStatus{GameNetAccessState::ServiceUnavailable, kGameNetTag, {}, -1};
+        return GameNetAccessStatus{
+            GameNetAccessState::ServiceUnavailable, kGameNetTag, {}, {}, -1};
     };
 
     URL_COMPONENTS parts{};

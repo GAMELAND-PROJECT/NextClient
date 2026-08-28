@@ -15,6 +15,7 @@ struct GameNetAccessStatus
 {
     GameNetAccessState state = GameNetAccessState::ServiceUnavailable;
     std::string tag;
+    std::string player_name_tag;
     std::string expiry_date;
     int days_remaining = -1;
 
