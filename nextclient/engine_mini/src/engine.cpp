@@ -738,6 +738,12 @@ static void OnGameInitialized()
     CL_NclEntitySyncOverlayInit();
     PROTECTOR_Init(g_SettingGuard);
 
+    // Prime pinned servers as early as the original working implementation did,
+    // giving cache/HTTP loading a head start before Favorites builds its Steam
+    // snapshot. This is a single initialization, not a per-frame update.
+    if (g_pMatchmakingServers)
+        g_pMatchmakingServers->InitializePinnedServers();
+
     // Conservative low-latency defaults. Keep the engine's 100 FPS limit to
     // preserve GoldSrc movement/physics behavior, and leave VSync under user
     // control so the Video settings can select latency or tear-free output.

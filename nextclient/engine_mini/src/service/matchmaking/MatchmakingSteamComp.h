@@ -77,6 +77,8 @@ void InitializePinnedServers();
         );
         void InitEmptyGameServerItem(gameserveritem_t& gameserver, uint32_t ip, uint16_t port);
         void ApplyPinnedServers(const std::vector<netadr_t>& addresses);
+        std::vector<gameserveritem_t> BuildFavoriteServerList();
+        void RestartFavoriteRequests();
         static uint64_t MakePinnedServerKey(uint32 ip, uint16 port);
     };
 }

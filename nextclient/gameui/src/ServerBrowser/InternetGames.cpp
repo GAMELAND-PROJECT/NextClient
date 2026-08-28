@@ -36,6 +36,17 @@ CInternetGames::~CInternetGames()
 
 void CInternetGames::OnPageShow()
 {
+    if (!ServerBrowserDialog().IsVisible())
+        return;
+
+    // Restore the last known-good browser lifecycle: the first visit creates
+    // a real Internet request, while later visits refresh only when explicitly
+    // configured to do so. Without this, the page can open with no request and
+    // the Refresh button has no valid server-list handle to operate on.
+    if (m_pGameList->GetItemCount() == 0)
+        GetNewServerList();
+    else if (auto_refresh_)
+        StartRefresh();
 }
 
 void CInternetGames::OnPageHide()
@@ -162,8 +173,8 @@ void CInternetGames::StartRefresh()
 
     if (m_pGameList->GetItemCount() == 0)
         GetNewServerList();
-    else
-        m_Servers.StartRefresh();
+    else if (!m_Servers.StartRefresh())
+        GetNewServerList();
 }
 
 void CInternetGames::StopRefresh(CancelQueryReason reason)

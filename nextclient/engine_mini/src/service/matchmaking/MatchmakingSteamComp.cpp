@@ -3,6 +3,7 @@
 #include "master/FileMasterClient.h"
 #include "master/HttpMasterClient.h"
 
+#include <algorithm>
 #include <cassert>
 #include <optick.h>
 #include <strtools.h>
@@ -14,7 +15,7 @@ using namespace taskcoro;
 namespace
 {
 constexpr char kPinnedServersUrl[] =
-    "https://raw.githubusercontent.com/GAMELAND-PROJECT/NextClient/refs/heads/%D8%B4%D8%B1%D9%88%D8%B9-%D9%82%D8%B3%D9%85%D8%AA-%DA%A9%D9%84%D8%A7%DB%8C%D9%86%D8%AA-%D8%A8%D8%B1%D8%A7%DB%8C-%D8%A8%D9%82%DB%8C%D9%87-%D9%BE%DB%8C%D9%85%D9%86%D8%AA-%D9%87%D8%A7/pinned_servers.txt";
+    "https://gameland.cam/pinned_servers.txt";
 constexpr wchar_t kPinnedServersCacheFile[] = L"pinned_servers.dat";
 constexpr size_t kMaxPinnedServers = 64;
 }
@@ -101,20 +102,90 @@ void MatchmakingSteamComp::ApplyPinnedServers(const std::vector<netadr_t>& addre
         const auto ip = address.GetIPHostByteOrder();
         const auto port = address.GetPortHostByteOrder();
         updated_servers.emplace(MakePinnedServerKey(ip, port));
-        SteamMatchmaking()->AddFavoriteGame(SteamUtils()->GetAppID(), ip, port, port, k_unFavoriteFlagFavorite, 0);
-    }
-
-    for (const auto old_server : pinned_servers_)
-    {
-        if (updated_servers.contains(old_server))
-            continue;
-
-        const auto ip = static_cast<uint32>(old_server >> 16);
-        const auto port = static_cast<uint16>(old_server & 0xFFFFu);
-        SteamMatchmaking()->RemoveFavoriteGame(SteamUtils()->GetAppID(), ip, port, port, k_unFavoriteFlagFavorite);
     }
 
     pinned_servers_ = std::move(updated_servers);
+    RestartFavoriteRequests();
+}
+
+std::vector<gameserveritem_t> MatchmakingSteamComp::BuildFavoriteServerList()
+{
+    std::vector<gameserveritem_t> servers;
+    std::unordered_set<uint64_t> endpoints;
+
+    const auto app_id = SteamUtils()->GetAppID();
+    const int favorite_count = SteamMatchmaking()->GetFavoriteGameCount();
+    servers.reserve(static_cast<size_t>(std::max(favorite_count, 0)) + pinned_servers_.size());
+
+    for (int i = 0; i < favorite_count; ++i)
+    {
+        AppId_t favorite_app_id{};
+        uint32 ip{};
+        uint16 connection_port{};
+        uint16 query_port{};
+        uint32 flags{};
+        uint32 last_played{};
+        if (!SteamMatchmaking()->GetFavoriteGame(
+                i, &favorite_app_id, &ip, &connection_port, &query_port, &flags, &last_played) ||
+            favorite_app_id != app_id || !(flags & k_unFavoriteFlagFavorite))
+        {
+            continue;
+        }
+
+        if (!endpoints.emplace(MakePinnedServerKey(ip, connection_port)).second)
+            continue;
+
+        gameserveritem_t server{};
+        InitEmptyGameServerItem(server, ip, connection_port);
+        server.m_NetAdr.Init(ip, query_port, connection_port);
+        server.m_ulTimeLastPlayed = last_played;
+        servers.push_back(server);
+    }
+
+    // Managed pins are part of the request itself, not a timing-dependent
+    // Steam snapshot. This keeps every configured endpoint across refreshes.
+    std::vector<uint64_t> pinned_endpoints(pinned_servers_.begin(), pinned_servers_.end());
+    std::ranges::sort(pinned_endpoints);
+    for (const auto endpoint : pinned_endpoints)
+    {
+        const auto ip = static_cast<uint32>(endpoint >> 16);
+        const auto port = static_cast<uint16>(endpoint & 0xFFFFu);
+        if (!endpoints.emplace(endpoint).second)
+            continue;
+
+        gameserveritem_t server{};
+        InitEmptyGameServerItem(server, ip, port);
+        servers.push_back(server);
+    }
+
+    return servers;
+}
+
+void MatchmakingSteamComp::RestartFavoriteRequests()
+{
+    for (auto& [request_id, request] : server_requests_)
+    {
+        if (!std::holds_alternative<ServerListRequestData>(request))
+            continue;
+
+        auto& request_data = std::get<ServerListRequestData>(request);
+        if (!request_data.favorites_request)
+            continue;
+
+        request_data.cancellation_token->SetCanceled();
+        request_data.cancellation_token = CancellationToken::Create();
+        request_data.servers = BuildFavoriteServerList();
+        request_data.in_progress = true;
+
+        const auto response_callback = request_data.response_callback;
+        const auto cancellation_token = request_data.cancellation_token;
+        const auto servers = request_data.servers;
+        TaskCoro::RunInMainThread([this, request_id, servers, response_callback, cancellation_token]() -> result<void>
+        {
+            cancellation_token->ThrowIfCancelled();
+            co_await RefreshServerList(request_id, servers, response_callback, cancellation_token);
+        });
+    }
 }
 
 uint64_t MatchmakingSteamComp::MakePinnedServerKey(uint32 ip, uint16 port)
@@ -124,16 +195,6 @@ uint64_t MatchmakingSteamComp::MakePinnedServerKey(uint32 ip, uint16 port)
 
 void MatchmakingSteamComp::CancelAllQueries()
 {
-    if (pinned_cancellation_token_)
-        pinned_cancellation_token_->SetCanceled();
-
-    // A later, explicit browser refresh may start a fresh load. Do not retain
-    // a cancelled initialization state across a gameplay session.
-    pinned_cancellation_token_.reset();
-    pinned_cache_client_.reset();
-    pinned_http_client_.reset();
-    pinned_servers_initialized_ = false;
-
     // Callbacks may mutate request state, so iterate over a stable snapshot.
     std::vector<HServerListRequest> request_ids;
     request_ids.reserve(server_requests_.size());
@@ -151,10 +212,6 @@ HServerListRequest MatchmakingSteamComp::RequestInternetServerList(
     ISteamMatchmakingServerListResponse* response_callback
 )
 {
-    // Pinned-server network/cache work is user-driven. Engine startup and a
-    // direct +connect path must never start this background I/O.
-    InitializePinnedServers();
-
     auto request_id = (HServerListRequest)++server_list_request_counter_;
 
     auto ct = CancellationToken::Create();
@@ -207,14 +264,20 @@ HServerListRequest MatchmakingSteamComp::RequestFavoritesServerList(
     ISteamMatchmakingServerListResponse* response_callback
 )
 {
-    InitializePinnedServers();
-
     auto request_id = (HServerListRequest)++server_list_request_counter_;
 
-    auto steam_response_proxy = new SteamMatchmakingServerListResponseProxy(response_callback, request_id);
-    auto steam_request_id = SteamMatchmakingServers()->RequestFavoritesServerList(iApp, ppchFilters, nFilters, steam_response_proxy);
+    auto ct = CancellationToken::Create();
+    auto request_data = ServerListRequestData(request_id, response_callback, ct);
+    request_data.favorites_request = true;
+    request_data.servers = BuildFavoriteServerList();
+    auto servers = request_data.servers;
+    server_requests_.emplace(request_id, std::move(request_data));
 
-    server_requests_.emplace(request_id, SteamServersListRequestData(request_id, response_callback, steam_request_id, steam_response_proxy));
+    TaskCoro::RunInMainThread([this, request_id, servers = std::move(servers), response_callback, ct]() -> result<void>
+    {
+        ct->ThrowIfCancelled();
+        co_await RefreshServerList(request_id, servers, response_callback, ct);
+    });
 
     return request_id;
 }

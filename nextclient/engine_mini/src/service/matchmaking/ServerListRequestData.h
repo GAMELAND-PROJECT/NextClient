@@ -10,6 +10,7 @@ namespace service::matchmaking
 
         std::shared_ptr<taskcoro::CancellationToken> cancellation_token{};
         bool in_progress = true;
+        bool favorites_request = false;
 
         std::vector<gameserveritem_t> servers{};
 

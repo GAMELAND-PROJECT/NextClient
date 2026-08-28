@@ -87,12 +87,13 @@ void CServerList::StartRefreshServer(int iServer)
     EngineMini()->GetSteamMatchmakingServers()->RefreshServer(server_list_request_, iServer);
 }
 
-void CServerList::StartRefresh()
+bool CServerList::StartRefresh()
 {
     if (server_list_request_ == nullptr)
-        return;
+        return false;
 
     EngineMini()->GetSteamMatchmakingServers()->RefreshQuery(server_list_request_);
+    return true;
 }
 
 void CServerList::StopRefresh(IGameList::CancelQueryReason reason)

@@ -38,6 +38,9 @@ void CFavoriteGames::OnPageShow()
     if (m_ColumnsMap.contains(GameListColumnType::Players))
         m_pGameList->SetSortColumnEx(m_ColumnsMap[GameListColumnType::Players], -1, true);
 
+    // Match the known-good f5addc2 lifecycle: every page activation creates a
+    // fresh Favorites request instead of reusing a cancelled/stale snapshot.
+    GetNewServerList();
 }
 
 void CFavoriteGames::OnPageHide()
@@ -70,9 +73,16 @@ bool CFavoriteGames::SupportsItem(InterfaceItem item)
 void CFavoriteGames::StartRefresh()
 {
     StopRefresh(CancelQueryReason::NewQuery);
-    SetRefreshing(true);
 
-    m_Servers.StartRefresh();
+    // A quick refresh only works while the page still owns a valid request.
+    // Rebuild the list after first open, cancellation, or request release.
+    if (!m_Servers.StartRefresh())
+    {
+        GetNewServerList();
+        return;
+    }
+
+    SetRefreshing(true);
 }
 
 void CFavoriteGames::GetNewServerList()

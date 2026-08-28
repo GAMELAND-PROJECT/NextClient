@@ -33,7 +33,9 @@ public:
     serveritem_t &GetServer(int iServer);
     unsigned int ServerCount();
     void StartRefreshServer(int iServer);
-    void StartRefresh();
+    // Returns false when there is no live request to refresh.  Callers can
+    // then create a new list instead of leaving the UI stuck in Refreshing.
+    bool StartRefresh();
     void StopRefresh(IGameList::CancelQueryReason reason);
     void Clear();
     bool IsRefreshing();
