@@ -11,6 +11,8 @@
 #include <string>
 #include <vector>
 
+#include "../next_launcher/GameNetAccess.h"
+
 namespace
 {
 constexpr wchar_t kWindowClass[] = L"NextClientLauncherWindow";
@@ -32,6 +34,8 @@ enum ControlId
     IdPointerSpeed,
     IdEnhancePointer,
     IdPointerSpeedValue,
+    IdSubscriptionState,
+    IdSubscriptionDetails,
 };
 
 struct Resolution
@@ -101,8 +105,11 @@ HWND g_pointerSpeed{};
 HWND g_pointerSpeedValue{};
 HWND g_enhancePointer{};
 HWND g_status{};
+HWND g_subscriptionState{};
+HWND g_subscriptionDetails{};
 std::vector<Resolution> g_resolutions;
 bool g_launchRequested{};
+GameNetAccessStatus g_accessStatus;
 SystemMouseSettings g_mouseAtLastApply{};
 bool g_mousePreviewChanged{};
 
@@ -287,6 +294,47 @@ void SetStatus(const wchar_t* text, bool error = false)
         MessageBeep(MB_ICONERROR);
 }
 
+std::wstring WidenAscii(const std::string& value)
+{
+    return std::wstring(value.begin(), value.end());
+}
+
+void PopulateSubscriptionStatus()
+{
+    std::wstring stateText;
+    std::wstring detailText;
+    const std::wstring tag = WidenAscii(g_accessStatus.tag);
+    const std::wstring expiry = WidenAscii(g_accessStatus.expiry_date);
+
+    switch (g_accessStatus.state)
+    {
+    case GameNetAccessState::Active:
+        stateText = L"ACTIVE SUBSCRIPTION";
+        detailText = L"Game net: " + tag + L"     Expires: " + expiry + L" (Jalali)";
+        break;
+    case GameNetAccessState::Expired:
+        stateText = L"SUBSCRIPTION EXPIRED";
+        detailText = L"Game net: " + tag + L"     Expired: " + expiry + L" (Jalali)";
+        break;
+    case GameNetAccessState::TagMissing:
+        stateText = L"SUBSCRIPTION INACTIVE";
+        detailText = L"No active subscription was found for game net: " + tag;
+        break;
+    case GameNetAccessState::InvalidEntry:
+        stateText = L"SUBSCRIPTION DATA INVALID";
+        detailText = L"The subscription record for " + tag + L" has an invalid expiration date.";
+        break;
+    case GameNetAccessState::ServiceUnavailable:
+    default:
+        stateText = L"STATUS UNAVAILABLE";
+        detailText = L"Subscription could not be verified. Online is disabled; LAN remains available.";
+        break;
+    }
+
+    SetWindowTextW(g_subscriptionState, stateText.c_str());
+    SetWindowTextW(g_subscriptionDetails, detailText.c_str());
+}
+
 void PopulateResolutions(const VideoSettings& current)
 {
     std::set<Resolution> unique;
@@ -467,11 +515,18 @@ void CreateControls(HWND window)
     AddControl(window, L"STATIC", L"This changes the current Windows user setting.",
                SS_LEFT, 310, 284, 260, 22);
 
-    AddControl(window, L"BUTTON", L"Restore", BS_PUSHBUTTON | WS_TABSTOP, 18, 338, 112, 32, IdRestore);
-    AddControl(window, L"BUTTON", L"Cancel", BS_PUSHBUTTON | WS_TABSTOP, 140, 338, 100, 32, IdCancel);
+    AddControl(window, L"BUTTON", L"Online subscription", BS_GROUPBOX, 18, 330, 578, 88);
+    g_subscriptionState = AddControl(window, L"STATIC", L"Checking subscription...",
+                                     SS_LEFT, 38, 354, 536, 22, IdSubscriptionState);
+    g_subscriptionDetails = AddControl(window, L"STATIC", L"",
+                                       SS_LEFT, 38, 382, 536, 22, IdSubscriptionDetails);
+    PopulateSubscriptionStatus();
+
+    AddControl(window, L"BUTTON", L"Restore", BS_PUSHBUTTON | WS_TABSTOP, 18, 436, 112, 32, IdRestore);
+    AddControl(window, L"BUTTON", L"Cancel", BS_PUSHBUTTON | WS_TABSTOP, 140, 436, 100, 32, IdCancel);
     AddControl(window, L"BUTTON", L"Launch Game", BS_DEFPUSHBUTTON | WS_TABSTOP,
-               460, 338, 136, 32, IdLaunch);
-    g_status = AddControl(window, L"STATIC", L"Ready", SS_LEFT, 20, 388, 576, 36, IdStatus);
+               460, 436, 136, 32, IdLaunch);
+    g_status = AddControl(window, L"STATIC", L"Ready", SS_LEFT, 20, 486, 576, 36, IdStatus);
 
     const VideoSettings current = ReadSettings();
     PopulateResolutions(current);
@@ -543,6 +598,13 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
 
     case WM_CTLCOLORSTATIC:
         SetBkMode(reinterpret_cast<HDC>(wParam), TRANSPARENT);
+        if (reinterpret_cast<HWND>(lParam) == g_subscriptionState)
+        {
+            const bool active = g_accessStatus.state == GameNetAccessState::Active;
+            SetTextColor(reinterpret_cast<HDC>(wParam), active ? RGB(24, 132, 76) : RGB(190, 48, 48));
+        }
+        else if (reinterpret_cast<HWND>(lParam) == g_subscriptionDetails)
+            SetTextColor(reinterpret_cast<HDC>(wParam), RGB(80, 80, 80));
         return reinterpret_cast<LRESULT>(GetSysColorBrush(COLOR_WINDOW));
 
     case WM_DESTROY:
@@ -557,10 +619,11 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
 }
 } // namespace
 
-bool ShowVideoSettingsDialog(HINSTANCE instance)
+bool ShowVideoSettingsDialog(HINSTANCE instance, const GameNetAccessStatus& access_status)
 {
     g_instance = instance;
     g_launchRequested = false;
+    g_accessStatus = access_status;
     INITCOMMONCONTROLSEX controls{sizeof(controls), ICC_STANDARD_CLASSES};
     InitCommonControlsEx(&controls);
 
@@ -583,7 +646,7 @@ bool ShowVideoSettingsDialog(HINSTANCE instance)
             return false;
     }
 
-    RECT rect{0, 0, 616, 444};
+    RECT rect{0, 0, 616, 542};
     AdjustWindowRectEx(&rect, WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX, FALSE, 0);
     const int width = rect.right - rect.left;
     const int height = rect.bottom - rect.top;

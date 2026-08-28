@@ -172,8 +172,9 @@ int DateKey(const CalendarDate& date)
     return (date.year * 10000) + (date.month * 100) + date.day;
 }
 
-bool ResponseContainsActiveTag(const std::string& response, const CalendarDate& today)
+GameNetAccessStatus ResponseAccessStatus(const std::string& response, const CalendarDate& today)
 {
+    GameNetAccessStatus status{GameNetAccessState::TagMissing, kGameNetTag, {}};
     size_t begin = 0;
     while (begin <= response.size())
     {
@@ -185,19 +186,24 @@ bool ResponseContainsActiveTag(const std::string& response, const CalendarDate& 
             const size_t separator = line.find('|');
             if (separator != std::string_view::npos && EqualsTag(Trim(line.substr(0, separator))))
             {
+                status.expiry_date = std::string(Trim(line.substr(separator + 1)));
                 CalendarDate expiry;
                 if (ParseJalaliDate(line.substr(separator + 1), expiry) &&
-                    IsValidJalaliDate(expiry) && DateKey(today) <= DateKey(expiry))
+                    IsValidJalaliDate(expiry))
                 {
-                    return true;
+                    if (DateKey(today) <= DateKey(expiry))
+                        return {GameNetAccessState::Active, kGameNetTag, status.expiry_date};
+                    status.state = GameNetAccessState::Expired;
                 }
+                else
+                    status.state = GameNetAccessState::InvalidEntry;
             }
         }
         if (end == std::string::npos)
             break;
         begin = end + 1;
     }
-    return false;
+    return status;
 }
 
 bool GetIranDateFromResponse(HINTERNET request, CalendarDate& date)
@@ -230,8 +236,13 @@ bool GetIranDateFromResponse(HINTERNET request, CalendarDate& date)
 }
 }
 
-bool IsGameNetOnlineAccessAllowed()
+GameNetAccessStatus QueryGameNetOnlineAccess()
 {
+    const auto unavailable = []
+    {
+        return GameNetAccessStatus{GameNetAccessState::ServiceUnavailable, kGameNetTag, {}};
+    };
+
     URL_COMPONENTS parts{};
     parts.dwStructSize = sizeof(parts);
     parts.dwSchemeLength = static_cast<DWORD>(-1);
@@ -239,7 +250,7 @@ bool IsGameNetOnlineAccessAllowed()
     parts.dwUrlPathLength = static_cast<DWORD>(-1);
     parts.dwExtraInfoLength = static_cast<DWORD>(-1);
     if (!WinHttpCrackUrl(kGameNetAccessUrl, 0, 0, &parts) || parts.nScheme != INTERNET_SCHEME_HTTPS)
-        return false;
+        return unavailable();
 
     const std::wstring host(parts.lpszHostName, parts.dwHostNameLength);
     std::wstring path(parts.lpszUrlPath, parts.dwUrlPathLength);
@@ -250,12 +261,12 @@ bool IsGameNetOnlineAccessAllowed()
         L"Allclient-Access/1.0", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
         WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0));
     if (!session.get())
-        return false;
+        return unavailable();
 
     WinHttpSetTimeouts(session.get(), 3000, 3000, 5000, 5000);
     WinHttpHandle connection(WinHttpConnect(session.get(), host.c_str(), parts.nPort, 0));
     if (!connection.get())
-        return false;
+        return unavailable();
 
     WinHttpHandle request(WinHttpOpenRequest(
         connection.get(), L"GET", path.c_str(), nullptr, WINHTTP_NO_REFERER,
@@ -265,7 +276,7 @@ bool IsGameNetOnlineAccessAllowed()
             WINHTTP_NO_REQUEST_DATA, 0, 0, 0) ||
         !WinHttpReceiveResponse(request.get(), nullptr))
     {
-        return false;
+        return unavailable();
     }
 
     DWORD status_code = 0;
@@ -274,31 +285,31 @@ bool IsGameNetOnlineAccessAllowed()
             WINHTTP_HEADER_NAME_BY_INDEX, &status_code, &status_size, WINHTTP_NO_HEADER_INDEX) ||
         status_code != HTTP_STATUS_OK)
     {
-        return false;
+        return unavailable();
     }
 
     CalendarDate today;
     if (!GetIranDateFromResponse(request.get(), today))
-        return false;
+        return unavailable();
 
     std::string response;
     for (;;)
     {
         DWORD available = 0;
         if (!WinHttpQueryDataAvailable(request.get(), &available))
-            return false;
+            return unavailable();
         if (available == 0)
             break;
         if (response.size() + available > 64 * 1024)
-            return false;
+            return unavailable();
 
         const size_t offset = response.size();
         response.resize(offset + available);
         DWORD read = 0;
         if (!WinHttpReadData(request.get(), response.data() + offset, available, &read))
-            return false;
+            return unavailable();
         response.resize(offset + read);
     }
 
-    return ResponseContainsActiveTag(response, today);
+    return ResponseAccessStatus(response, today);
 }

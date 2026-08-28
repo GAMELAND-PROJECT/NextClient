@@ -130,9 +130,9 @@ void ClientLauncher::Run()
 
     // Resolve the package entitlement once per launcher start. GameUI reads
     // only this result and never performs network work during gameplay.
-    const bool online_access_allowed = IsGameNetOnlineAccessAllowed();
-    SetEnvironmentVariableA("NEXTCLIENT_ONLINE_ACCESS", online_access_allowed ? "1" : "0");
-    if (!online_access_allowed)
+    const GameNetAccessStatus online_access = QueryGameNetOnlineAccess();
+    SetEnvironmentVariableA("NEXTCLIENT_ONLINE_ACCESS", online_access.allowed() ? "1" : "0");
+    if (!online_access.allowed())
     {
         MessageBoxA(nullptr,
             "Online access is currently unavailable for this installation. LAN play remains available.",
@@ -155,7 +155,8 @@ void ClientLauncher::Run()
 
     // Video-mode changes are applied before the engine starts, avoiding the
     // fragile in-game restart path. Internal engine restarts skip this page.
-    if (!is_relaunch_ && !cmd_line_->CheckParm("-novideosettings") && !ShowVideoSettingsDialog(module_instance_))
+    if (!is_relaunch_ && !cmd_line_->CheckParm("-novideosettings") &&
+        !ShowVideoSettingsDialog(module_instance_, online_access))
         return;
 
     [[maybe_unused]] auto cleanup = ncl_utils::MakeScopeExit([this]
