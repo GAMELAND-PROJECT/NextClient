@@ -16,6 +16,7 @@ struct GameNetAccessStatus
     GameNetAccessState state = GameNetAccessState::ServiceUnavailable;
     std::string tag;
     std::string expiry_date;
+    int days_remaining = -1;
 
     [[nodiscard]] bool allowed() const { return state == GameNetAccessState::Active; }
 };

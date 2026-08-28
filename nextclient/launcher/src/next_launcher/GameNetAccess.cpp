@@ -9,6 +9,7 @@
 #include <array>
 #include <cctype>
 #include <charconv>
+#include <cstdint>
 #include <string>
 #include <string_view>
 
@@ -172,9 +173,31 @@ int DateKey(const CalendarDate& date)
     return (date.year * 10000) + (date.month * 100) + date.day;
 }
 
+int64_t GregorianDayNumber(CalendarDate date)
+{
+    date.year -= date.month <= 2;
+    const int era = date.year >= 0 ? date.year / 400 : (date.year - 399) / 400;
+    const unsigned year_of_era = static_cast<unsigned>(date.year - era * 400);
+    const unsigned month_position = static_cast<unsigned>(
+        date.month + (date.month > 2 ? -3 : 9));
+    const unsigned day_of_year = (153 * month_position + 2) / 5 +
+        static_cast<unsigned>(date.day - 1);
+    const unsigned day_of_era = year_of_era * 365 + year_of_era / 4 -
+        year_of_era / 100 + day_of_year;
+    return static_cast<int64_t>(era) * 146097 + day_of_era;
+}
+
+int DaysRemaining(const CalendarDate& today, const CalendarDate& expiry)
+{
+    const auto today_gregorian = JalaliToGregorian(today.year, today.month, today.day);
+    const auto expiry_gregorian = JalaliToGregorian(expiry.year, expiry.month, expiry.day);
+    return static_cast<int>(GregorianDayNumber(expiry_gregorian) -
+        GregorianDayNumber(today_gregorian));
+}
+
 GameNetAccessStatus ResponseAccessStatus(const std::string& response, const CalendarDate& today)
 {
-    GameNetAccessStatus status{GameNetAccessState::TagMissing, kGameNetTag, {}};
+    GameNetAccessStatus status{GameNetAccessState::TagMissing, kGameNetTag, {}, -1};
     size_t begin = 0;
     while (begin <= response.size())
     {
@@ -191,8 +214,10 @@ GameNetAccessStatus ResponseAccessStatus(const std::string& response, const Cale
                 if (ParseJalaliDate(line.substr(separator + 1), expiry) &&
                     IsValidJalaliDate(expiry))
                 {
+                    status.days_remaining = DaysRemaining(today, expiry);
                     if (DateKey(today) <= DateKey(expiry))
-                        return {GameNetAccessState::Active, kGameNetTag, status.expiry_date};
+                        return {GameNetAccessState::Active, kGameNetTag,
+                            status.expiry_date, status.days_remaining};
                     status.state = GameNetAccessState::Expired;
                 }
                 else
@@ -240,7 +265,7 @@ GameNetAccessStatus QueryGameNetOnlineAccess()
 {
     const auto unavailable = []
     {
-        return GameNetAccessStatus{GameNetAccessState::ServiceUnavailable, kGameNetTag, {}};
+        return GameNetAccessStatus{GameNetAccessState::ServiceUnavailable, kGameNetTag, {}, -1};
     };
 
     URL_COMPONENTS parts{};

@@ -35,7 +35,9 @@ enum ControlId
     IdEnhancePointer,
     IdPointerSpeedValue,
     IdSubscriptionState,
+    IdSubscriptionTag,
     IdSubscriptionDetails,
+    IdSubscriptionRemaining,
 };
 
 struct Resolution
@@ -97,6 +99,7 @@ std::wstring PointerPositionText(int position)
 
 HINSTANCE g_instance{};
 HFONT g_font{};
+HFONT g_emphasisFont{};
 HWND g_resolution{};
 HWND g_fullscreen{};
 HWND g_hdModels{};
@@ -106,7 +109,9 @@ HWND g_pointerSpeedValue{};
 HWND g_enhancePointer{};
 HWND g_status{};
 HWND g_subscriptionState{};
+HWND g_subscriptionTag{};
 HWND g_subscriptionDetails{};
+HWND g_subscriptionRemaining{};
 std::vector<Resolution> g_resolutions;
 bool g_launchRequested{};
 GameNetAccessStatus g_accessStatus;
@@ -303,26 +308,34 @@ void PopulateSubscriptionStatus()
 {
     std::wstring stateText;
     std::wstring detailText;
-    const std::wstring tag = WidenAscii(g_accessStatus.tag);
+    std::wstring remainingText;
     const std::wstring expiry = WidenAscii(g_accessStatus.expiry_date);
 
     switch (g_accessStatus.state)
     {
     case GameNetAccessState::Active:
         stateText = L"ACTIVE SUBSCRIPTION";
-        detailText = L"Game net: " + tag + L"     Expires: " + expiry + L" (Jalali)";
+        detailText = L"Expires: " + expiry;
+        if (g_accessStatus.days_remaining == 0)
+            remainingText = L"Expires today";
+        else if (g_accessStatus.days_remaining > 0)
+            remainingText = std::to_wstring(g_accessStatus.days_remaining) +
+                L" days remaining";
         break;
     case GameNetAccessState::Expired:
         stateText = L"SUBSCRIPTION EXPIRED";
-        detailText = L"Game net: " + tag + L"     Expired: " + expiry + L" (Jalali)";
+        detailText = L"Expired: " + expiry;
+        if (g_accessStatus.days_remaining < 0)
+            remainingText = std::to_wstring(-g_accessStatus.days_remaining) +
+                L" days ago";
         break;
     case GameNetAccessState::TagMissing:
         stateText = L"SUBSCRIPTION INACTIVE";
-        detailText = L"No active subscription was found for game net: " + tag;
+        detailText = L"No active subscription was found.";
         break;
     case GameNetAccessState::InvalidEntry:
         stateText = L"SUBSCRIPTION DATA INVALID";
-        detailText = L"The subscription record for " + tag + L" has an invalid expiration date.";
+        detailText = L"The subscription record has an invalid expiration date.";
         break;
     case GameNetAccessState::ServiceUnavailable:
     default:
@@ -332,7 +345,10 @@ void PopulateSubscriptionStatus()
     }
 
     SetWindowTextW(g_subscriptionState, stateText.c_str());
+    const std::wstring tag = WidenAscii(g_accessStatus.tag);
+    SetWindowTextW(g_subscriptionTag, tag.c_str());
     SetWindowTextW(g_subscriptionDetails, detailText.c_str());
+    SetWindowTextW(g_subscriptionRemaining, remainingText.c_str());
 }
 
 void PopulateResolutions(const VideoSettings& current)
@@ -515,18 +531,26 @@ void CreateControls(HWND window)
     AddControl(window, L"STATIC", L"This changes the current Windows user setting.",
                SS_LEFT, 310, 284, 260, 22);
 
-    AddControl(window, L"BUTTON", L"Online subscription", BS_GROUPBOX, 18, 330, 578, 88);
+    AddControl(window, L"BUTTON", L"Online subscription", BS_GROUPBOX, 18, 330, 578, 104);
     g_subscriptionState = AddControl(window, L"STATIC", L"Checking subscription...",
                                      SS_LEFT, 38, 354, 536, 22, IdSubscriptionState);
+    g_subscriptionTag = AddControl(window, L"STATIC", L"",
+                                   SS_LEFT, 38, 382, 188, 24, IdSubscriptionTag);
+    SendMessageW(g_subscriptionTag, WM_SETFONT,
+                 reinterpret_cast<WPARAM>(g_emphasisFont), TRUE);
     g_subscriptionDetails = AddControl(window, L"STATIC", L"",
-                                       SS_LEFT, 38, 382, 536, 22, IdSubscriptionDetails);
+                                       SS_LEFT, 238, 378, 336, 22, IdSubscriptionDetails);
+    g_subscriptionRemaining = AddControl(window, L"STATIC", L"",
+                                         SS_LEFT, 238, 402, 336, 22, IdSubscriptionRemaining);
+    SendMessageW(g_subscriptionRemaining, WM_SETFONT,
+                 reinterpret_cast<WPARAM>(g_emphasisFont), TRUE);
     PopulateSubscriptionStatus();
 
-    AddControl(window, L"BUTTON", L"Restore", BS_PUSHBUTTON | WS_TABSTOP, 18, 436, 112, 32, IdRestore);
-    AddControl(window, L"BUTTON", L"Cancel", BS_PUSHBUTTON | WS_TABSTOP, 140, 436, 100, 32, IdCancel);
+    AddControl(window, L"BUTTON", L"Restore", BS_PUSHBUTTON | WS_TABSTOP, 18, 452, 112, 32, IdRestore);
+    AddControl(window, L"BUTTON", L"Cancel", BS_PUSHBUTTON | WS_TABSTOP, 140, 452, 100, 32, IdCancel);
     AddControl(window, L"BUTTON", L"Launch Game", BS_DEFPUSHBUTTON | WS_TABSTOP,
-               460, 436, 136, 32, IdLaunch);
-    g_status = AddControl(window, L"STATIC", L"Ready", SS_LEFT, 20, 486, 576, 36, IdStatus);
+               460, 452, 136, 32, IdLaunch);
+    g_status = AddControl(window, L"STATIC", L"Ready", SS_LEFT, 20, 502, 576, 36, IdStatus);
 
     const VideoSettings current = ReadSettings();
     PopulateResolutions(current);
@@ -603,8 +627,15 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
             const bool active = g_accessStatus.state == GameNetAccessState::Active;
             SetTextColor(reinterpret_cast<HDC>(wParam), active ? RGB(24, 132, 76) : RGB(190, 48, 48));
         }
+        else if (reinterpret_cast<HWND>(lParam) == g_subscriptionTag)
+            SetTextColor(reinterpret_cast<HDC>(wParam), RGB(28, 73, 128));
         else if (reinterpret_cast<HWND>(lParam) == g_subscriptionDetails)
             SetTextColor(reinterpret_cast<HDC>(wParam), RGB(80, 80, 80));
+        else if (reinterpret_cast<HWND>(lParam) == g_subscriptionRemaining)
+        {
+            const bool active = g_accessStatus.state == GameNetAccessState::Active;
+            SetTextColor(reinterpret_cast<HDC>(wParam), active ? RGB(24, 132, 76) : RGB(190, 48, 48));
+        }
         return reinterpret_cast<LRESULT>(GetSysColorBrush(COLOR_WINDOW));
 
     case WM_DESTROY:
@@ -630,6 +661,9 @@ bool ShowVideoSettingsDialog(HINSTANCE instance, const GameNetAccessStatus& acce
     NONCLIENTMETRICSW metrics{sizeof(metrics)};
     SystemParametersInfoW(SPI_GETNONCLIENTMETRICS, sizeof(metrics), &metrics, 0);
     g_font = CreateFontIndirectW(&metrics.lfMessageFont);
+    LOGFONTW emphasisFont = metrics.lfMessageFont;
+    emphasisFont.lfWeight = FW_BOLD;
+    g_emphasisFont = CreateFontIndirectW(&emphasisFont);
 
     WNDCLASSEXW windowClass{sizeof(windowClass)};
     windowClass.style = CS_HREDRAW | CS_VREDRAW;
@@ -646,7 +680,7 @@ bool ShowVideoSettingsDialog(HINSTANCE instance, const GameNetAccessStatus& acce
             return false;
     }
 
-    RECT rect{0, 0, 616, 542};
+    RECT rect{0, 0, 616, 558};
     AdjustWindowRectEx(&rect, WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX, FALSE, 0);
     const int width = rect.right - rect.left;
     const int height = rect.bottom - rect.top;
@@ -671,5 +705,7 @@ bool ShowVideoSettingsDialog(HINSTANCE instance, const GameNetAccessStatus& acce
 
     if (g_font)
         DeleteObject(g_font);
+    if (g_emphasisFont)
+        DeleteObject(g_emphasisFont);
     return g_launchRequested;
 }
