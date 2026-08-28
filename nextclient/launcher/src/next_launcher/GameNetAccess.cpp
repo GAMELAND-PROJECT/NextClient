@@ -288,6 +288,72 @@ bool GetIranDateFromResponse(HINTERNET request, CalendarDate& date)
     date = GregorianToJalali(local_time.wYear, local_time.wMonth, local_time.wDay);
     return true;
 }
+
+bool DownloadSmallHttpsText(const wchar_t* url, size_t maximum_size, std::string& response)
+{
+    URL_COMPONENTS parts{};
+    parts.dwStructSize = sizeof(parts);
+    parts.dwSchemeLength = static_cast<DWORD>(-1);
+    parts.dwHostNameLength = static_cast<DWORD>(-1);
+    parts.dwUrlPathLength = static_cast<DWORD>(-1);
+    parts.dwExtraInfoLength = static_cast<DWORD>(-1);
+    if (!WinHttpCrackUrl(url, 0, 0, &parts) || parts.nScheme != INTERNET_SCHEME_HTTPS)
+        return false;
+
+    const std::wstring host(parts.lpszHostName, parts.dwHostNameLength);
+    std::wstring path(parts.lpszUrlPath, parts.dwUrlPathLength);
+    if (parts.dwExtraInfoLength)
+        path.append(parts.lpszExtraInfo, parts.dwExtraInfoLength);
+
+    WinHttpHandle session(WinHttpOpen(
+        L"Allclient-Access/1.0", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
+        WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0));
+    if (!session.get())
+        return false;
+    WinHttpSetTimeouts(session.get(), 3000, 3000, 5000, 5000);
+
+    WinHttpHandle connection(WinHttpConnect(session.get(), host.c_str(), parts.nPort, 0));
+    if (!connection.get())
+        return false;
+    WinHttpHandle request(WinHttpOpenRequest(
+        connection.get(), L"GET", path.c_str(), nullptr, WINHTTP_NO_REFERER,
+        WINHTTP_DEFAULT_ACCEPT_TYPES, WINHTTP_FLAG_SECURE));
+    if (!request.get() ||
+        !WinHttpSendRequest(request.get(), WINHTTP_NO_ADDITIONAL_HEADERS, 0,
+            WINHTTP_NO_REQUEST_DATA, 0, 0, 0) ||
+        !WinHttpReceiveResponse(request.get(), nullptr))
+    {
+        return false;
+    }
+
+    DWORD status_code = 0;
+    DWORD status_size = sizeof(status_code);
+    if (!WinHttpQueryHeaders(request.get(), WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
+            WINHTTP_HEADER_NAME_BY_INDEX, &status_code, &status_size, WINHTTP_NO_HEADER_INDEX) ||
+        status_code != HTTP_STATUS_OK)
+    {
+        return false;
+    }
+
+    response.clear();
+    for (;;)
+    {
+        DWORD available = 0;
+        if (!WinHttpQueryDataAvailable(request.get(), &available))
+            return false;
+        if (available == 0)
+            return true;
+        if (response.size() + available > maximum_size)
+            return false;
+
+        const size_t offset = response.size();
+        response.resize(offset + available);
+        DWORD read = 0;
+        if (!WinHttpReadData(request.get(), response.data() + offset, available, &read))
+            return false;
+        response.resize(offset + read);
+    }
+}
 }
 
 GameNetAccessStatus QueryGameNetOnlineAccess()
@@ -367,4 +433,28 @@ GameNetAccessStatus QueryGameNetOnlineAccess()
     }
 
     return ResponseAccessStatus(response, today);
+}
+
+std::string QueryGameNetServerPassword()
+{
+    std::string response;
+    if (!DownloadSmallHttpsText(kGameNetServerPasswordUrl, 256, response))
+        return {};
+
+    const std::string_view password = Trim(response);
+    if (password.empty() || password.size() > 31)
+        return {};
+
+    // GoldSrc userinfo uses backslash as a separator. Reject control bytes and
+    // command-string metacharacters even though the value is set via Cvar_Set.
+    if (!std::ranges::all_of(password, [](unsigned char character)
+        {
+            return character >= 33 && character <= 126 &&
+                character != '\\' && character != '"' && character != ';';
+        }))
+    {
+        return {};
+    }
+
+    return std::string(password);
 }

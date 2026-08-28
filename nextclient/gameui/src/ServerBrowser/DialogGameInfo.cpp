@@ -18,6 +18,7 @@
 #include <vgui_controls/RadioButton.h>
 
 #include <cstdio>
+#include <cstdlib>
 #include <steam/steam_api.h>
 
 using namespace vgui2;
@@ -450,6 +451,17 @@ void CDialogGameInfo::ApplyConnectCommand(const gameserveritem_t &server)
 
 bool CDialogGameInfo::ConnectToServer()
 {
+    if (server_item_.m_bPassword && !m_szPassword[0] && EngineMini() &&
+        EngineMini()->IsPinnedServer(
+            server_item_.m_NetAdr.GetIP(), server_item_.m_NetAdr.GetConnectionPort()))
+    {
+        if (const char* managed_password = std::getenv("NEXTCLIENT_SERVER_PASSWORD");
+            managed_password && managed_password[0])
+        {
+            Q_strncpy(m_szPassword, managed_password, sizeof(m_szPassword));
+        }
+    }
+
     if (server_item_.m_bPassword && !m_szPassword[0])
     {
         auto *box = new CDialogServerPassword(this);

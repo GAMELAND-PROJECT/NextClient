@@ -134,6 +134,9 @@ void ClientLauncher::Run()
     SetEnvironmentVariableA("NEXTCLIENT_ONLINE_ACCESS", online_access.allowed() ? "1" : "0");
     SetEnvironmentVariableA("NEXTCLIENT_PLAYER_NAME_TAG",
         online_access.player_name_tag.c_str());
+    const std::string server_password = online_access.allowed()
+        ? QueryGameNetServerPassword() : std::string{};
+    SetEnvironmentVariableA("NEXTCLIENT_SERVER_PASSWORD", server_password.c_str());
     if (!online_access.allowed())
     {
         MessageBoxA(nullptr,

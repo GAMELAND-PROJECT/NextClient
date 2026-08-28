@@ -231,6 +231,25 @@ std::string OnlineNamePrefix()
     return std::string("[") + std::string(tag) + "] ";
 }
 
+const char* ManagedServerPassword()
+{
+    const char* value = std::getenv("NEXTCLIENT_SERVER_PASSWORD");
+    if (!value)
+        return nullptr;
+
+    const std::string_view password(value);
+    if (password.empty() || password.size() > 31 ||
+        !std::ranges::all_of(password, [](unsigned char character)
+        {
+            return character >= 33 && character <= 126 &&
+                character != '\\' && character != '"' && character != ';';
+        }))
+    {
+        return nullptr;
+    }
+    return value;
+}
+
 std::string RemoveOwnOnlineNamePrefix(std::string_view name)
 {
     const std::string prefix = OnlineNamePrefix();
@@ -621,6 +640,8 @@ static void OnGameInitializing(void* mainwindow, HDC* pmaindc, HGLRC* pbaseRC, c
 
         if (target_kind == ConnectTargetKind::Lan)
             RestoreOriginalPlayerName();
+        else if (const char* password = ManagedServerPassword())
+            Cvar_Set("password", password);
 
         next->Invoke();
 
