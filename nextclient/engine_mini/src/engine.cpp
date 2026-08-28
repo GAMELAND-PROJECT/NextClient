@@ -157,6 +157,42 @@ static std::unique_ptr<service::matchmaking::MatchmakingSteamComp> g_pMatchmakin
 
 static std::shared_ptr<taskcoro::TaskCoroImpl> g_pTaskCoroImpl;
 static std::vector<std::shared_ptr<nitroapi::Unsubscriber>> g_Unsubs;
+
+namespace
+{
+bool LauncherAllowsOnlineAccess()
+{
+    const char* value = std::getenv("NEXTCLIENT_ONLINE_ACCESS");
+    return value != nullptr && value[0] == '1' && value[1] == '\0';
+}
+
+bool IsConnectTargetAllowed(const char* target)
+{
+    if (!target || !target[0])
+        return false;
+
+    std::string endpoint(target);
+    if (endpoint.find(':') == std::string::npos)
+        endpoint += ":27015";
+
+    netadr_t address;
+    address.SetFromString(endpoint.c_str(), true);
+    if (!address.IsValid())
+        return false;
+
+    // Preserve listen-server and cafe LAN play without requiring an online
+    // subscription or a managed pin.
+    if (address.IsLocalhost() || address.IsLoopback() || address.IsReservedAdr())
+        return true;
+
+    // Public endpoints require both an active launcher entitlement and an
+    // exact IP:port entry from the remotely managed pinned-server list.
+    return LauncherAllowsOnlineAccess() && g_pMatchmakingServers &&
+        g_pMatchmakingServers->IsPinnedServer(
+            address.GetIPHostByteOrder(), address.GetPortHostByteOrder());
+}
+}
+
 // Process-lifetime guard: video/resolution changes can initialize the engine
 // again without starting a new game process.
 namespace
@@ -475,6 +511,23 @@ static void OnGameInitializing(void* mainwindow, HDC* pmaindc, HGLRC* pbaseRC, c
     g_Unsubs.emplace_back(eng()->CL_ReadPackets              |= [](const auto& next)                                                   { CL_ReadPackets(); });
     g_Unsubs.emplace_back(eng()->CL_RequestMissingResources  |= [](const auto& next)                                                   { return CL_RequestMissingResources(); });
     g_Unsubs.emplace_back(eng()->CL_Disconnect               |= [](const auto& next)                                                   { return CL_Disconnect(); });
+    g_Unsubs.emplace_back(eng()->CL_Connect_f |= [](const auto& next) {
+        // Hook the command implementation itself so console input, aliases,
+        // cfg files and command-line +connect all share the same policy.
+        if (Cmd_Argc() < 2)
+        {
+            next->Invoke();
+            return;
+        }
+
+        if (!IsConnectTargetAllowed(Cmd_Argv(1)))
+        {
+            Con_Printf("Connection blocked: use a managed Online server or a LAN address.\n");
+            return;
+        }
+
+        next->Invoke();
+    });
     g_Unsubs.emplace_back(eng()->Host_Map_f |= [](const auto& next) {
         // New Game turns this process into a listen server. Browser discovery
         // must not keep UDP queries or callbacks alive during map startup.

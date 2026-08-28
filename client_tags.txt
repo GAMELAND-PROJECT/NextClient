@@ -1,4 +1,1 @@
-# Upload this file as: https://gameland.cam/client_tags.txt
-# Format: game-net tag | Jalali expiration date (YYYY/MM/DD)
-# Access remains active through the expiration day in Iran time.
-im | 1405/12/29
+IMORTAL_GONBAD

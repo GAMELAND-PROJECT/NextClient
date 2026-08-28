@@ -29,6 +29,47 @@ add_executable(${TARGET_NAME} WIN32
         ${LAUNCHER_SOURCES}
 )
 
+# Per-game-net package identity. The root file intentionally contains only
+# one tag, making a new customer build a one-line edit with no C++ changes.
+get_filename_component(NEXTCLIENT_REPOSITORY_ROOT
+        "${CMAKE_CURRENT_LIST_DIR}/../../../.." ABSOLUTE)
+set(NEXTCLIENT_GAME_NET_TAG_FILE
+        "${NEXTCLIENT_REPOSITORY_ROOT}/client_tags.txt")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+        "${NEXTCLIENT_GAME_NET_TAG_FILE}")
+
+if (NOT EXISTS "${NEXTCLIENT_GAME_NET_TAG_FILE}")
+    message(FATAL_ERROR
+            "Missing game-net build tag file: ${NEXTCLIENT_GAME_NET_TAG_FILE}")
+endif ()
+
+file(STRINGS "${NEXTCLIENT_GAME_NET_TAG_FILE}" NEXTCLIENT_GAME_NET_TAG_LINES)
+set(NEXTCLIENT_GAME_NET_TAG "")
+foreach (NEXTCLIENT_GAME_NET_TAG_LINE IN LISTS NEXTCLIENT_GAME_NET_TAG_LINES)
+    string(STRIP "${NEXTCLIENT_GAME_NET_TAG_LINE}" NEXTCLIENT_GAME_NET_TAG_LINE)
+    if (NOT NEXTCLIENT_GAME_NET_TAG_LINE STREQUAL "" AND
+        NOT NEXTCLIENT_GAME_NET_TAG_LINE MATCHES "^#")
+        if (NOT NEXTCLIENT_GAME_NET_TAG STREQUAL "")
+            message(FATAL_ERROR
+                    "client_tags.txt must contain exactly one build tag")
+        endif ()
+        set(NEXTCLIENT_GAME_NET_TAG "${NEXTCLIENT_GAME_NET_TAG_LINE}")
+    endif ()
+endforeach ()
+
+if (NEXTCLIENT_GAME_NET_TAG STREQUAL "" OR
+    NOT NEXTCLIENT_GAME_NET_TAG MATCHES "^[A-Za-z0-9_-]+$")
+    message(FATAL_ERROR
+            "client_tags.txt must contain one tag using only letters, numbers, _ or -")
+endif ()
+
+string(LENGTH "${NEXTCLIENT_GAME_NET_TAG}" NEXTCLIENT_GAME_NET_TAG_LENGTH)
+if (NEXTCLIENT_GAME_NET_TAG_LENGTH GREATER 64)
+    message(FATAL_ERROR "The game-net build tag cannot exceed 64 characters")
+endif ()
+
+message(STATUS "NextClient game-net build tag: ${NEXTCLIENT_GAME_NET_TAG}")
+
 target_include_directories(${TARGET_NAME} PRIVATE
         ${NEXT_LAUNCHER_SOURCE_DIR}/include
 )
@@ -53,6 +94,7 @@ target_link_libraries(${TARGET_NAME} PRIVATE
 
 target_compile_definitions(${TARGET_NAME} PRIVATE
         MAX_LOGFILE_SIZE=524288 #bytes
+        NEXTCLIENT_GAME_NET_TAG="${NEXTCLIENT_GAME_NET_TAG}"
 )
 
 set_target_properties(${TARGET_NAME} PROPERTIES

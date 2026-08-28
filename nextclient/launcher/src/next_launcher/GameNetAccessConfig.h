@@ -1,8 +1,11 @@
 #pragma once
 
-// Change only this value before building a package for another game net.
-// Keep tags short, lowercase, and unique (for example: im, gl, px).
-inline constexpr char kGameNetTag[] = "im";
+#ifndef NEXTCLIENT_GAME_NET_TAG
+#define NEXTCLIENT_GAME_NET_TAG "im"
+#endif
+
+// CMake reads this value from the repository-root client_tags.txt file.
+inline constexpr char kGameNetTag[] = NEXTCLIENT_GAME_NET_TAG;
 
 // Plain-text subscription list. Format: tag | Jalali expiry (YYYY/MM/DD).
 // Blank lines and lines beginning with '#' are ignored.
