@@ -90,6 +90,7 @@ private:
     vgui2::Label *m_pStatusLabel;
 
     vgui2::PropertySheet *m_pTabPanel;
+    vgui2::Panel *m_pOnlinePage;
     CFavoriteGames *m_pFavorites;
     CLanGames *m_pLanGames;
 

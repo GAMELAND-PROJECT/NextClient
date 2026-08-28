@@ -1,4 +1,5 @@
 
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -48,6 +49,60 @@ bool IsOnlineAccessAllowed()
     const char* value = std::getenv("NEXTCLIENT_ONLINE_ACCESS");
     return value != nullptr && value[0] == '1' && value[1] == '\0';
 }
+
+class COnlineAccessPage final : public vgui2::EditablePanel
+{
+    DECLARE_CLASS_SIMPLE(COnlineAccessPage, vgui2::EditablePanel);
+
+public:
+    explicit COnlineAccessPage(vgui2::Panel* parent) : BaseClass(parent, "OnlineAccessPage")
+    {
+        card_ = new vgui2::Panel(this, "AccessCard");
+        title_ = new vgui2::Label(card_, "AccessTitle", "Online access unavailable");
+        status_ = new vgui2::Label(card_, "AccessStatus", "SUBSCRIPTION INACTIVE");
+        description_ = new vgui2::Label(card_, "AccessDescription",
+            "This installation is not currently authorized for Online play.\nLAN play remains available from the LAN tab.");
+        title_->SetContentAlignment(vgui2::Label::a_center);
+        status_->SetContentAlignment(vgui2::Label::a_center);
+        description_->SetContentAlignment(vgui2::Label::a_center);
+        description_->SetWrap(true);
+    }
+
+protected:
+    void ApplySchemeSettings(vgui2::IScheme* scheme) override
+    {
+        BaseClass::ApplySchemeSettings(scheme);
+        SetBgColor(GetSchemeColor("Frame.ClientBG", Color(28, 31, 36, 255), scheme));
+        card_->SetBgColor(Color(38, 43, 50, 255));
+        card_->SetPaintBackgroundEnabled(true);
+        card_->SetBorder(scheme->GetBorder("BaseBorder"));
+        title_->SetFont(scheme->GetFont("DefaultLarge", IsProportional()));
+        title_->SetFgColor(Color(235, 238, 242, 255));
+        status_->SetFgColor(Color(232, 172, 72, 255));
+        description_->SetFgColor(Color(174, 181, 191, 255));
+    }
+
+    void PerformLayout() override
+    {
+        BaseClass::PerformLayout();
+        int wide = 0;
+        int tall = 0;
+        GetSize(wide, tall);
+        const int card_wide = std::min(560, std::max(360, wide - 100));
+        constexpr int card_tall = 190;
+        card_->SetBounds((wide - card_wide) / 2, (tall - card_tall) / 2, card_wide, card_tall);
+        title_->SetBounds(24, 25, card_wide - 48, 34);
+        status_->SetBounds(24, 69, card_wide - 48, 24);
+        description_->SetBounds(42, 112, card_wide - 84, 54);
+    }
+
+private:
+    vgui2::Panel* card_{};
+    vgui2::Label* title_{};
+    vgui2::Label* status_{};
+    vgui2::Label* description_{};
+};
+
 }
 
 static CServerBrowserDialog *s_InternetDlg = NULL;
@@ -70,6 +125,7 @@ CServerBrowserDialog::CServerBrowserDialog(vgui2::Panel *parent) : Frame(parent,
     m_szModDir[0] = 0;
     m_pSavedData = nullptr;
     m_pFilterData = nullptr;
+    m_pOnlinePage = nullptr;
     m_pFavorites = nullptr;
     LoadUserData();
 
@@ -81,15 +137,15 @@ CServerBrowserDialog::CServerBrowserDialog(vgui2::Panel *parent) : Frame(parent,
     SetVisible(false);
 
     const bool online_allowed = IsOnlineAccessAllowed();
-    m_pGameList = online_allowed ? static_cast<IGameList*>(m_pFavorites) : static_cast<IGameList*>(m_pLanGames);
+    m_pOnlinePage = online_allowed ? static_cast<vgui2::Panel*>(m_pFavorites) : new COnlineAccessPage(this);
+    m_pGameList = online_allowed ? static_cast<IGameList*>(m_pFavorites) : nullptr;
     m_pContextMenu = new CServerContextMenu(this);
     m_pContextMenu->SetVisible(false);
 
     m_pTabPanel = new PropertySheet(this, "GameTabs");
     m_pTabPanel->SetTabWidth(72);
 
-    if (online_allowed)
-        m_pTabPanel->AddPage(m_pFavorites, "Online");
+    m_pTabPanel->AddPage(m_pOnlinePage, "Online");
     m_pTabPanel->AddPage(m_pLanGames, "#ServerBrowser_LanTab");
     m_pTabPanel->AddActionSignalTarget(this);
 
@@ -99,7 +155,7 @@ CServerBrowserDialog::CServerBrowserDialog(vgui2::Panel *parent) : Frame(parent,
 
     m_pStatusLabel->SetText("");
 
-    m_pTabPanel->SetActivePage(online_allowed ? static_cast<vgui2::Panel*>(m_pFavorites) : static_cast<vgui2::Panel*>(m_pLanGames));
+    m_pTabPanel->SetActivePage(m_pOnlinePage);
 }
 
 CServerBrowserDialog::~CServerBrowserDialog()
@@ -188,10 +244,10 @@ void CServerBrowserDialog::LoadUserData()
 
 void CServerBrowserDialog::ActivateTab(ServerBrowserTab tab)
 {
-    if (tab == ServerBrowserTab::LAN || !IsOnlineAccessAllowed())
+    if (tab == ServerBrowserTab::LAN)
         m_pTabPanel->SetActivePage(m_pLanGames);
     else
-        m_pTabPanel->SetActivePage(m_pFavorites);
+        m_pTabPanel->SetActivePage(m_pOnlinePage);
 }
 
 void CServerBrowserDialog::SaveUserData()
