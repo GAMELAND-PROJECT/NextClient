@@ -58,6 +58,7 @@ Filename: "{app}\platform\steam\games\SmartEmu\SSELauncher.exe"; Parameters: "-a
 const
   AccessApiUrl = 'https://script.google.com/macros/s/AKfycbyPOh-kYDfyANzHK3_D6L1_W9Km-RT1oqGp3makI6T-Z97ksgsPZXug2ld18nF3vi1X/exec';
   OfflineCode = 'amir1394';
+  AllclientUninstallKey = 'Software\Microsoft\Windows\CurrentVersion\Uninstall\{D9E46BD1-52F8-470F-8639-FF31FE7C5E48}_is1';
 
 var
   PreparationPage: TWizardPage;
@@ -72,6 +73,10 @@ var
   OnlineServiceUnavailable: Boolean;
   BundledChromiumPath: String;
   OnlineVerificationMessage: String;
+  AccessApproved: Boolean;
+  PreviousInstallCleanupDone: Boolean;
+  PreviousInstallDirectoryPendingCleanup: String;
+  DestinationCleanupDone: Boolean;
 
 procedure SetAccessStatus(const Caption: String; Color: TColor);
 begin
@@ -488,6 +493,201 @@ begin
   RefreshAccessButton.OnClick := @RefreshAccessStatus;
 end;
 
+function ReadPreviousInstallFromRoot(RootKey: Integer;
+  var InstallDirectory, InstalledVersion: String): Boolean;
+begin
+  Result := False;
+  InstallDirectory := '';
+  InstalledVersion := '';
+
+  if not RegQueryStringValue(RootKey, AllclientUninstallKey,
+    'InstallLocation', InstallDirectory) then
+    Exit;
+
+  InstallDirectory := RemoveBackslashUnlessRoot(Trim(InstallDirectory));
+  RegQueryStringValue(RootKey, AllclientUninstallKey,
+    'DisplayVersion', InstalledVersion);
+  Result := InstallDirectory <> '';
+end;
+
+function FindPreviousAllclient(var InstallDirectory,
+  InstalledVersion: String): Boolean;
+begin
+  Result := ReadPreviousInstallFromRoot(HKCU, InstallDirectory,
+    InstalledVersion);
+  if not Result and IsWin64 then
+    Result := ReadPreviousInstallFromRoot(HKLM64, InstallDirectory,
+      InstalledVersion);
+  if not Result then
+    Result := ReadPreviousInstallFromRoot(HKLM32, InstallDirectory,
+      InstalledVersion);
+end;
+
+function PreviousInstallPathIsSafe(const InstallDirectory: String): Boolean;
+var
+  NormalInstallDirectory: String;
+begin
+  NormalInstallDirectory := RemoveBackslashUnlessRoot(
+    ExpandFileName(InstallDirectory));
+
+  Result := (Length(NormalInstallDirectory) > 3) and
+    (CompareText(NormalInstallDirectory,
+      RemoveBackslashUnlessRoot(ExpandConstant('{win}'))) <> 0) and
+    (CompareText(NormalInstallDirectory,
+      RemoveBackslashUnlessRoot(ExpandConstant('{sys}'))) <> 0) and
+    (CompareText(NormalInstallDirectory,
+      RemoveBackslashUnlessRoot(ExpandConstant('{tmp}'))) <> 0) and
+    (CompareText(NormalInstallDirectory,
+      RemoveBackslashUnlessRoot(ExpandConstant('{localappdata}'))) <> 0) and
+    (CompareText(NormalInstallDirectory,
+      RemoveBackslashUnlessRoot(ExpandConstant('{userappdata}'))) <> 0);
+end;
+
+procedure RemovePreviousRegistrationAndShortcuts;
+begin
+  RegDeleteKeyIncludingSubkeys(HKCU, AllclientUninstallKey);
+  if IsWin64 then
+    RegDeleteKeyIncludingSubkeys(HKLM64, AllclientUninstallKey);
+  RegDeleteKeyIncludingSubkeys(HKLM32, AllclientUninstallKey);
+
+  DeleteFile(ExpandConstant('{autodesktop}\Allclient - Voice Enabled.lnk'));
+  DeleteFile(ExpandConstant('{autodesktop}\Allclient - No Voice.lnk'));
+  DelTree(ExpandConstant('{group}'), True, True, True);
+end;
+
+function RemovePreviousAllclient(var ErrorMessage: String): Boolean;
+var
+  InstallDirectory, InstalledVersion: String;
+begin
+  Result := False;
+  ErrorMessage := '';
+
+  { If a locked file prevented direct cleanup, retry only the directory that
+    was previously read from Allclient's own registered installation record. }
+  if PreviousInstallDirectoryPendingCleanup <> '' then
+  begin
+    if (not DirExists(PreviousInstallDirectoryPendingCleanup)) or
+       DelTree(PreviousInstallDirectoryPendingCleanup, True, True, True) then
+    begin
+      RemovePreviousRegistrationAndShortcuts;
+      PreviousInstallDirectoryPendingCleanup := '';
+      Result := True;
+    end
+    else
+      ErrorMessage :=
+        'Some files from the previous Allclient installation are still in use. Close the game and launcher, then try again.';
+    Exit;
+  end;
+
+  if not FindPreviousAllclient(InstallDirectory, InstalledVersion) then
+  begin
+    Result := True;
+    Exit;
+  end;
+
+  if not PreviousInstallPathIsSafe(InstallDirectory) then
+  begin
+    ErrorMessage :=
+      'A previous Allclient installation was detected, but its registered directory is unsafe to remove automatically.';
+    Exit;
+  end;
+
+  SetAccessStatus('Cleaning the previous Allclient installation...', clGray);
+  PreviousInstallDirectoryPendingCleanup := InstallDirectory;
+  if DirExists(InstallDirectory) and
+     not DelTree(InstallDirectory, True, True, True) then
+  begin
+    ErrorMessage :=
+      'Some files from the previous Allclient installation are still in use. Close the game and launcher, then try again.';
+    Exit;
+  end;
+
+  RemovePreviousRegistrationAndShortcuts;
+  PreviousInstallDirectoryPendingCleanup := '';
+  Result := True;
+end;
+
+function DirectoryHasEntries(const Directory: String): Boolean;
+var
+  FindRec: TFindRec;
+begin
+  Result := False;
+  if FindFirst(AddBackslash(Directory) + '*', FindRec) then
+  begin
+    try
+      repeat
+        if (FindRec.Name <> '.') and (FindRec.Name <> '..') then
+        begin
+          Result := True;
+          Exit;
+        end;
+      until not FindNext(FindRec);
+    finally
+      FindClose(FindRec);
+    end;
+  end;
+end;
+
+function DirectoryLooksLikeAllclient(const Directory: String): Boolean;
+begin
+  Result :=
+    FileExists(AddBackslash(Directory) + 'cstrike.exe') or
+    FileExists(AddBackslash(Directory) + 'unins000.exe') or
+    DirExists(AddBackslash(Directory) + 'platform\steam\games\SmartEmu') or
+    DirExists(AddBackslash(Directory) + 'platform\steam\games\SmartEmu2');
+end;
+
+function CleanSelectedInstallDirectory(var ErrorMessage: String): Boolean;
+var
+  InstallDirectory, BuildSourceDirectory: String;
+begin
+  Result := False;
+  ErrorMessage := '';
+  InstallDirectory := RemoveBackslashUnlessRoot(
+    ExpandFileName(ExpandConstant('{app}')));
+  BuildSourceDirectory := RemoveBackslashUnlessRoot(
+    ExpandFileName('{#SourceRoot}'));
+
+  if not PreviousInstallPathIsSafe(InstallDirectory) then
+  begin
+    ErrorMessage :=
+      'The selected installation directory is unsafe to clean automatically.';
+    Exit;
+  end;
+
+  { Protect the developer/source payload if Setup is tested on the build PC. }
+  if CompareText(InstallDirectory, BuildSourceDirectory) = 0 then
+  begin
+    ErrorMessage :=
+      'The selected directory is the installer source directory and cannot be cleaned.';
+    Exit;
+  end;
+
+  if not DirExists(InstallDirectory) then
+  begin
+    Result := True;
+    Exit;
+  end;
+
+  if DirectoryHasEntries(InstallDirectory) and
+     not DirectoryLooksLikeAllclient(InstallDirectory) then
+  begin
+    ErrorMessage :=
+      'The selected directory contains unrelated files and was not removed. Choose an empty directory or the existing Allclient directory.';
+    Exit;
+  end;
+
+  SetAccessStatus('Cleaning the selected Allclient directory...', clGray);
+  if not DelTree(InstallDirectory, True, True, True) then
+  begin
+    ErrorMessage :=
+      'The existing Allclient directory could not be removed completely. Close the game and launcher, then try again.';
+    Exit;
+  end;
+
+  Result := True;
+end;
+
 function NextButtonClick(CurPageID: Integer): Boolean;
 begin
   Result := True;
@@ -505,9 +705,13 @@ begin
       end;
 
       if Result then
+      begin
+        AccessApproved := True;
         SetAccessStatus(OnlineVerificationMessage, clGreen)
+      end
       else
       begin
+        AccessApproved := False;
         if OnlineVerificationMessage = '' then
           OnlineVerificationMessage := 'The installation code was not accepted.';
         SetAccessStatus(OnlineVerificationMessage, clRed);
@@ -517,6 +721,32 @@ begin
     finally
       WizardForm.NextButton.Enabled := True;
     end;
+  end;
+end;
+
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+begin
+  Result := '';
+
+  if not AccessApproved then
+  begin
+    Result := 'Installation access must be verified before setup can continue.';
+    Exit;
+  end;
+
+  if PreviousInstallCleanupDone then
+  begin
+    if not DestinationCleanupDone and
+       CleanSelectedInstallDirectory(Result) then
+      DestinationCleanupDone := True;
+    Exit;
+  end;
+
+  if RemovePreviousAllclient(Result) then
+  begin
+    PreviousInstallCleanupDone := True;
+    if CleanSelectedInstallDirectory(Result) then
+      DestinationCleanupDone := True;
   end;
 end;
 
