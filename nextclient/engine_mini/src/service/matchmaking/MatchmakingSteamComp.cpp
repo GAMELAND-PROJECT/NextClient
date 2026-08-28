@@ -111,47 +111,16 @@ void MatchmakingSteamComp::ApplyPinnedServers(const std::vector<netadr_t>& addre
 std::vector<gameserveritem_t> MatchmakingSteamComp::BuildFavoriteServerList()
 {
     std::vector<gameserveritem_t> servers;
-    std::unordered_set<uint64_t> endpoints;
+    servers.reserve(pinned_servers_.size());
 
-    const auto app_id = SteamUtils()->GetAppID();
-    const int favorite_count = SteamMatchmaking()->GetFavoriteGameCount();
-    servers.reserve(static_cast<size_t>(std::max(favorite_count, 0)) + pinned_servers_.size());
-
-    for (int i = 0; i < favorite_count; ++i)
-    {
-        AppId_t favorite_app_id{};
-        uint32 ip{};
-        uint16 connection_port{};
-        uint16 query_port{};
-        uint32 flags{};
-        uint32 last_played{};
-        if (!SteamMatchmaking()->GetFavoriteGame(
-                i, &favorite_app_id, &ip, &connection_port, &query_port, &flags, &last_played) ||
-            favorite_app_id != app_id || !(flags & k_unFavoriteFlagFavorite))
-        {
-            continue;
-        }
-
-        if (!endpoints.emplace(MakePinnedServerKey(ip, connection_port)).second)
-            continue;
-
-        gameserveritem_t server{};
-        InitEmptyGameServerItem(server, ip, connection_port);
-        server.m_NetAdr.Init(ip, query_port, connection_port);
-        server.m_ulTimeLastPlayed = last_played;
-        servers.push_back(server);
-    }
-
-    // Managed pins are part of the request itself, not a timing-dependent
-    // Steam snapshot. This keeps every configured endpoint across refreshes.
+    // Online/Favorites is an administratively managed list. Steam's local
+    // user favorites are deliberately excluded so only remote pins appear.
     std::vector<uint64_t> pinned_endpoints(pinned_servers_.begin(), pinned_servers_.end());
     std::ranges::sort(pinned_endpoints);
     for (const auto endpoint : pinned_endpoints)
     {
         const auto ip = static_cast<uint32>(endpoint >> 16);
         const auto port = static_cast<uint16>(endpoint & 0xFFFFu);
-        if (!endpoints.emplace(endpoint).second)
-            continue;
 
         gameserveritem_t server{};
         InitEmptyGameServerItem(server, ip, port);

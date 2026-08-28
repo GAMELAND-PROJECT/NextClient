@@ -106,19 +106,14 @@ bool CExtensionMatchmakingListingsHandler::Execute(
 		}
 	}
 	else if(arguments.size() > 0) {
-		uint32_t ip; uint16_t port;
-	
 		if(name == "addFavoriteServer") {
-			nitro_utils::ParseAddress(arguments[0]->GetStringValue(), ip, port, true);
-			TaskCoro::RunInMainThread([ip, port] {
-				SteamMatchmaking()->AddFavoriteGame(SteamUtils()->GetAppID(), ip, port, port, k_unFavoriteFlagFavorite, 0);
-			});
+			// Favorites are supplied exclusively by the managed pinned list.
+			// Keep the API as a no-op for compatibility with existing pages.
+			return true;
 		}
 		else if(name == "removeFavoriteServer") {
-			nitro_utils::ParseAddress(arguments[0]->GetStringValue(), ip, port, true);
-			TaskCoro::RunInMainThread([ip, port] {
-				SteamMatchmaking()->RemoveFavoriteGame(SteamUtils()->GetAppID(), ip, port, port, k_unFavoriteFlagFavorite);
-			});
+			// Managed pins cannot be changed by browser-side scripts.
+			return true;
 		}
 	}
 

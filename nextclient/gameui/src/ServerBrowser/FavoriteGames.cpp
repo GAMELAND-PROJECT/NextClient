@@ -62,9 +62,7 @@ bool CFavoriteGames::SupportsItem(InterfaceItem item)
 {
     switch (item)
     {
-        case InterfaceItem::Filters:
-        case InterfaceItem::AddServer:
-        case InterfaceItem::AddCurrentServer: return true;
+        case InterfaceItem::Filters: return true;
     }
 
     return false;
@@ -113,17 +111,15 @@ GuiConnectionSource CFavoriteGames::GetConnectionSource()
 
 void CFavoriteGames::AddNewServer(uint32_t ip, uint16_t port)
 {
-    bool result = SteamMatchmaking()->AddFavoriteGame(SteamUtils()->GetAppID(), ip, port, port, k_unFavoriteFlagFavorite, 0);
-
-    if (result && IsVisible())
-        GetNewServerList();
+    // Preserve this legacy entry point as a guarded no-op. Only the managed
+    // pinned-server source may populate the Online/Favorites page.
+    (void)ip;
+    (void)port;
 }
 
 void CFavoriteGames::OnAddCurrentServer()
 {
-    servernetadr_t &addr = ServerBrowserDialog().GetCurrentConnectedServer();
-
-    AddNewServer(addr.GetIP(), addr.GetConnectionPort());
+    // Intentionally disabled for the managed Online list.
 }
 
 void CFavoriteGames::RefreshComplete()
@@ -150,17 +146,9 @@ void CFavoriteGames::OnOpenContextMenu(int itemID)
         int serverID = m_pGameList->GetItemUserData(m_pGameList->GetSelectedItem(0));
 
         menu->ShowMenu(this, serverID, true, true, true, false);
-        if (m_Servers.IsServerExists(serverID))
-        {
-            const auto& server = m_Servers.GetServer(serverID).gs;
-            if (!EngineMini()->IsPinnedServer(server.m_NetAdr.GetIP(), server.m_NetAdr.GetConnectionPort()))
-                menu->AddMenuItem("RemoveServer", "#ServerBrowser_RemoveServerFromFavorites", new KeyValues("RemoveFromFavorites"), this);
-        }
     }
     else
         menu->ShowMenu(this, (unsigned int)-1, false, false, false, false);
-
-    menu->AddMenuItem("AddServerByName", "#ServerBrowser_AddServerByIP", new KeyValues("AddServerByName"), this);
 }
 
 void CFavoriteGames::OnRefreshServer(int serverID)
@@ -173,61 +161,20 @@ void CFavoriteGames::OnRefreshServer(int serverID)
 
 void CFavoriteGames::OnRemoveFromFavorites()
 {
-    while (m_pGameList->GetSelectedItemsCount() > 0)
-    {
-        int itemID = m_pGameList->GetSelectedItem(0);
-        const auto* itemData = m_pGameList->GetItemData(itemID);
-        if (!itemData)
-        {
-            m_pGameList->RemoveItem(itemID);
-            continue;
-        }
-
-        unsigned int serverID = itemData->userData;
-
-        if (serverID >= m_Servers.ServerCount())
-        {
-            m_pGameList->RemoveItem(itemID);
-            continue;
-        }
-
-        serveritem_t &server = m_Servers.GetServer(serverID);
-
-        uint32_t ip = server.gs.m_NetAdr.GetIP();
-        uint16_t port = server.gs.m_NetAdr.GetConnectionPort();
-
-        if (EngineMini()->IsPinnedServer(ip, port))
-            return;
-
-        SteamMatchmaking()->RemoveFavoriteGame(SteamUtils()->GetAppID(), ip, port, port, k_unFavoriteFlagFavorite);
-
-        if (m_pGameList->IsValidItemID(server.listEntryID))
-        {
-            m_pGameList->RemoveItem(server.listEntryID);
-            server.listEntryID = GetInvalidServerListID();
-        }
-    }
-
-    UpdateRefreshStatusText();
-
-    InvalidateLayout();
-    Repaint();
+    // Managed pins cannot be removed locally.
 }
 
 void CFavoriteGames::OnAddServerByName()
 {
-    auto *dlg = new CDialogAddServer(&ServerBrowserDialog());
-    dlg->MoveToCenterOfScreen();
-    dlg->DoModal();
+    // Intentionally disabled for the managed Online list.
 }
 
 void CFavoriteGames::OnCommand(const char *command)
 {
-    if (!Q_stricmp(command, "AddServerByName"))
-        OnAddServerByName();
-    else if (!Q_stricmp(command, "AddCurrentServer"))
-        OnAddCurrentServer();
-    else
-        BaseClass::OnCommand(command);
+    if (!Q_stricmp(command, "AddServerByName") ||
+        !Q_stricmp(command, "AddCurrentServer"))
+        return;
+
+    BaseClass::OnCommand(command);
 }
 
