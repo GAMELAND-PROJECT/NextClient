@@ -47,6 +47,7 @@ target_link_libraries(${TARGET_NAME} PRIVATE
         TaskCoro::TaskCoro
         Dbghelp.lib
         Winmm.lib
+        Winhttp.lib
         Comctl32.lib
 )
 

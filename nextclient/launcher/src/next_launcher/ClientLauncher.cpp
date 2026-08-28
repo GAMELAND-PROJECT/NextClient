@@ -32,6 +32,7 @@
 #include "DefaultUserInfo.h"
 #include "RegistryUserStorage.h"
 #include "EngineCommons.h"
+#include "GameNetAccess.h"
 #include "exception_handler.h"
 #include "taskbar_icon.h"
 #include "VideoSettingsDialog.h"
@@ -126,6 +127,17 @@ ClientLauncher::~ClientLauncher()
 void ClientLauncher::Run()
 {
     LOG(INFO) << "Branch: " << user_info_client_->GetUpdateBranch();
+
+    // Resolve the package entitlement once per launcher start. GameUI reads
+    // only this result and never performs network work during gameplay.
+    const bool online_access_allowed = IsGameNetOnlineAccessAllowed();
+    SetEnvironmentVariableA("NEXTCLIENT_ONLINE_ACCESS", online_access_allowed ? "1" : "0");
+    if (!online_access_allowed)
+    {
+        MessageBoxA(nullptr,
+            "Online access is currently unavailable for this installation. LAN play remains available.",
+            kErrorTitle, MB_OK | MB_ICONWARNING | MB_DEFAULT_DESKTOP_ONLY);
+    }
 
     if (config_provider_->get_value_int("create_console_window", 0))
         CreateConsoleWindowAndRedirectOutput();

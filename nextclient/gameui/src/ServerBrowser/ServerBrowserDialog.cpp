@@ -1,5 +1,6 @@
 
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <cstdarg>
 #include <cassert>
@@ -40,6 +41,15 @@
 
 using namespace vgui2;
 
+namespace
+{
+bool IsOnlineAccessAllowed()
+{
+    const char* value = std::getenv("NEXTCLIENT_ONLINE_ACCESS");
+    return value != nullptr && value[0] == '1' && value[1] == '\0';
+}
+}
+
 static CServerBrowserDialog *s_InternetDlg = NULL;
 
 CServerBrowserDialog &ServerBrowserDialog()
@@ -70,14 +80,16 @@ CServerBrowserDialog::CServerBrowserDialog(vgui2::Panel *parent) : Frame(parent,
     SetSize(960, 640);
     SetVisible(false);
 
-    m_pGameList = m_pFavorites;
+    const bool online_allowed = IsOnlineAccessAllowed();
+    m_pGameList = online_allowed ? static_cast<IGameList*>(m_pFavorites) : static_cast<IGameList*>(m_pLanGames);
     m_pContextMenu = new CServerContextMenu(this);
     m_pContextMenu->SetVisible(false);
 
     m_pTabPanel = new PropertySheet(this, "GameTabs");
     m_pTabPanel->SetTabWidth(72);
 
-    m_pTabPanel->AddPage(m_pFavorites, "Online");
+    if (online_allowed)
+        m_pTabPanel->AddPage(m_pFavorites, "Online");
     m_pTabPanel->AddPage(m_pLanGames, "#ServerBrowser_LanTab");
     m_pTabPanel->AddActionSignalTarget(this);
 
@@ -87,7 +99,7 @@ CServerBrowserDialog::CServerBrowserDialog(vgui2::Panel *parent) : Frame(parent,
 
     m_pStatusLabel->SetText("");
 
-    m_pTabPanel->SetActivePage(m_pFavorites);
+    m_pTabPanel->SetActivePage(online_allowed ? static_cast<vgui2::Panel*>(m_pFavorites) : static_cast<vgui2::Panel*>(m_pLanGames));
 }
 
 CServerBrowserDialog::~CServerBrowserDialog()
@@ -176,7 +188,7 @@ void CServerBrowserDialog::LoadUserData()
 
 void CServerBrowserDialog::ActivateTab(ServerBrowserTab tab)
 {
-    if (tab == ServerBrowserTab::LAN)
+    if (tab == ServerBrowserTab::LAN || !IsOnlineAccessAllowed())
         m_pTabPanel->SetActivePage(m_pLanGames);
     else
         m_pTabPanel->SetActivePage(m_pFavorites);

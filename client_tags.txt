@@ -1,0 +1,4 @@
+# Upload this file as: https://gameland.cam/client_tags.txt
+# One enabled game-net build tag per line.
+im
+
