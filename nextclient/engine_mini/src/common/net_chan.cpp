@@ -12,6 +12,39 @@
 
 #include <cstdint>
 
+namespace
+{
+constexpr int kMaxNormalFragmentCount = 64;
+constexpr int kMaxFileFragmentCount = 25000;
+
+bool IsIncomingFragmentChainValid(const fragbuf_t* fragment, int max_fragments, uint64_t max_bytes)
+{
+    uint64_t total_bytes = 0;
+    int fragment_count = 0;
+
+    while (fragment)
+    {
+        if (++fragment_count > max_fragments ||
+            fragment->frag_message.data == nullptr ||
+            fragment->frag_message.cursize < 0 ||
+            fragment->frag_message.maxsize < 0 ||
+            fragment->frag_message.cursize > fragment->frag_message.maxsize ||
+            fragment->frag_message.cursize > static_cast<int>(sizeof(fragment->frag_message_buf)))
+        {
+            return false;
+        }
+
+        total_bytes += static_cast<uint32_t>(fragment->frag_message.cursize);
+        if (total_bytes > max_bytes)
+            return false;
+
+        fragment = fragment->next;
+    }
+
+    return fragment_count > 0;
+}
+}
+
 void Netchan_Setup(
     netsrc_t socketnumber,
     netchan_t *chan,
@@ -49,6 +82,15 @@ qboolean Netchan_CopyFileFragments(netchan_t *chan)
     {
         Con_Printf("%s:  Called with no fragments readied\n", __func__);
         chan->incomingready[FRAG_FILE_STREAM] = FALSE;
+        return FALSE;
+    }
+
+    // File transfers have no place on the active gameplay path. Reject the
+    // stream before reading filenames, constructing descriptors or touching
+    // the download logger, so a server cannot turn fragments into disk I/O.
+    if (cls->state == ca_active)
+    {
+        Netchan_FlushIncoming(chan, FRAG_FILE_STREAM);
         return FALSE;
     }
 
@@ -125,9 +167,15 @@ qboolean Netchan_CopyFileFragments(netchan_t *chan)
     }
 
     uint64_t assembledSize = 0;
+    int fragmentCount = 0;
     while (p)
     {
-        if (p->frag_message.cursize < 0)
+        if (++fragmentCount > kMaxFileFragmentCount ||
+            p->frag_message.data == nullptr ||
+            p->frag_message.cursize < 0 ||
+            p->frag_message.maxsize < 0 ||
+            p->frag_message.cursize > p->frag_message.maxsize ||
+            p->frag_message.cursize > static_cast<int>(sizeof(p->frag_message_buf)))
         {
             Netchan_FlushIncoming(chan, FRAG_FILE_STREAM);
             return FALSE;
@@ -154,14 +202,6 @@ qboolean Netchan_CopyFileFragments(netchan_t *chan)
     }
 
     if (assembledSize == 0)
-    {
-        Netchan_FlushIncoming(chan, FRAG_FILE_STREAM);
-        return FALSE;
-    }
-
-    // Never assemble, decompress or write a server file on the gameplay path.
-    // Required resources are still handled normally while connecting.
-    if (cls->state == ca_active)
     {
         Netchan_FlushIncoming(chan, FRAG_FILE_STREAM);
         return FALSE;
@@ -302,6 +342,21 @@ qboolean Netchan_CopyFileFragments(netchan_t *chan)
 qboolean Netchan_CopyNormalFragments(netchan_t *chan)
 {
     OPTICK_EVENT();
+
+    if (!chan || !chan->incomingready[FRAG_NORMAL_STREAM])
+        return FALSE;
+
+    // A normal reliable message must fit the engine message buffer. Validate
+    // the chain before the stock assembler copies it, preventing oversized,
+    // cyclic-by-count and corrupt fragment chains from monopolizing a frame.
+    if (!IsIncomingFragmentChainValid(
+            chan->incomingbufs[FRAG_NORMAL_STREAM],
+            kMaxNormalFragmentCount,
+            static_cast<uint64_t>(MAX_MSGLEN)))
+    {
+        Netchan_FlushIncoming(chan, FRAG_NORMAL_STREAM);
+        return FALSE;
+    }
 
     return eng()->Netchan_CopyNormalFragments.InvokeChained(chan);
 }

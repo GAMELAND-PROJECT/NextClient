@@ -1,6 +1,8 @@
 #include "engine.h"
 
 #include <chrono>
+#include <cstdint>
+#include <cstring>
 #include <optick.h>
 #include <common/filesystem.h>
 #include <md5.h>
@@ -23,6 +25,106 @@
 #include "common/common.h"
 #include "common/model.h"
 #include "graphics/gl_local.h"
+
+namespace
+{
+constexpr int kMaxVoiceCodecNameBytes = 32;
+constexpr int kMaxVoicePayloadBytes = 4096;
+constexpr int kMaxVoiceMessagesPerWindow = 64;
+constexpr int kMaxVoiceBytesPerWindow = 16 * 1024;
+constexpr double kVoiceWindowSeconds = 0.1;
+
+bool IsSupportedVoiceCodec(const char* codec)
+{
+    return codec[0] == '\0' ||
+           Q_stricmp(codec, "voice_speex") == 0 ||
+           Q_stricmp(codec, "voice_miles") == 0;
+}
+}
+
+bool CL_ShouldProcessVoiceInit()
+{
+    if (!net_message || !net_message->data || !pMsg_readcount)
+        return false;
+
+    const int start = *pMsg_readcount;
+    if (start < 0 || start >= net_message->cursize)
+        return false;
+
+    const int available = net_message->cursize - start;
+    const int codec_scan_bytes = available < kMaxVoiceCodecNameBytes ? available : kMaxVoiceCodecNameBytes;
+    const void* terminator = std::memchr(net_message->data + start, '\0', static_cast<size_t>(codec_scan_bytes));
+    if (!terminator)
+    {
+        *pMsg_readcount = net_message->cursize;
+        return false;
+    }
+
+    const auto* codec_end = static_cast<const byte*>(terminator);
+    const int payload_end = static_cast<int>(codec_end - net_message->data) + 2; // NUL + quality byte
+    if (payload_end > net_message->cursize)
+    {
+        *pMsg_readcount = net_message->cursize;
+        return false;
+    }
+
+    if (!IsSupportedVoiceCodec(reinterpret_cast<const char*>(net_message->data + start)))
+    {
+        // Skip only this complete message so following server messages remain parseable.
+        *pMsg_readcount = payload_end;
+        return false;
+    }
+
+    return true;
+}
+
+bool CL_ShouldProcessVoiceData()
+{
+    if (!net_message || !net_message->data || !pMsg_readcount)
+        return false;
+
+    const int start = *pMsg_readcount;
+    const int remaining = net_message->cursize - start;
+    if (start < 0 || remaining < 3)
+    {
+        *pMsg_readcount = net_message->cursize;
+        return false;
+    }
+
+    const int player_index = net_message->data[start];
+    const int payload_bytes = static_cast<int>(net_message->data[start + 1]) |
+                              (static_cast<int>(net_message->data[start + 2]) << 8);
+    const int payload_end = start + 3 + payload_bytes;
+    if (payload_bytes > kMaxVoicePayloadBytes ||
+        payload_end > net_message->cursize ||
+        player_index >= cl->maxclients)
+    {
+        *pMsg_readcount = net_message->cursize;
+        return false;
+    }
+
+    static double window_started = -1.0;
+    static int messages_in_window = 0;
+    static int bytes_in_window = 0;
+    const double now = *realtime;
+    if (window_started < 0.0 || now < window_started || now - window_started >= kVoiceWindowSeconds)
+    {
+        window_started = now;
+        messages_in_window = 0;
+        bytes_in_window = 0;
+    }
+
+    if (messages_in_window >= kMaxVoiceMessagesPerWindow ||
+        payload_bytes > kMaxVoiceBytesPerWindow - bytes_in_window)
+    {
+        *pMsg_readcount = payload_end;
+        return false;
+    }
+
+    ++messages_in_window;
+    bytes_in_window += payload_bytes;
+    return true;
+}
 
 void CL_SendConsistencyInfo(sizebuf_t *msg)
 {
@@ -432,11 +534,13 @@ void CL_ReadPackets()
     // affect abnormal bursts while leaving packets queued in the socket for
     // the next frame instead of reading and discarding them.
     constexpr int kMaxActivePacketsPerFrame = 32;
+    constexpr int kMaxActiveDatagramsScannedPerFrame = 64;
     constexpr int kMaxInactivePacketsPerFrame = 250;
     constexpr int kMaxActiveConnectionlessPacketsPerSecond = 8;
     constexpr auto kActivePacketBudget = std::chrono::microseconds(2000);
 
     int packets_count = 0;
+    int datagrams_scanned = 0;
     static double connectionless_window_started = -1.0;
     static int active_connectionless_packets = 0;
 
@@ -456,11 +560,26 @@ void CL_ReadPackets()
     const int packet_limit = active_game ? kMaxActivePacketsPerFrame : kMaxInactivePacketsPerFrame;
     const auto packet_work_started = std::chrono::steady_clock::now();
 
-    while (packets_count < packet_limit && NET_GetPacket_0())
+    const int scan_limit = active_game ? kMaxActiveDatagramsScannedPerFrame : kMaxInactivePacketsPerFrame;
+    while (packets_count < packet_limit &&
+           datagrams_scanned < scan_limit &&
+           (!active_game || datagrams_scanned == 0 ||
+            std::chrono::steady_clock::now() - packet_work_started < kActivePacketBudget) &&
+           NET_GetPacket_0())
     {
-        ++packets_count;
+        ++datagrams_scanned;
 
-        if (*(int *) net_message->data == -1)
+        // Validate the receive buffer before reading its connectionless header.
+        // This also avoids an unaligned integer load on stricter platforms.
+        if (!net_message || !net_message->data || net_message->cursize < static_cast<int>(sizeof(int32_t)) ||
+            net_message->maxsize < 0 || net_message->cursize > net_message->maxsize)
+        {
+            continue;
+        }
+
+        int32_t packet_header = 0;
+        Q_memcpy(&packet_header, net_message->data, sizeof(packet_header));
+        if (packet_header == -1)
         {
             if (active_game)
             {
@@ -483,6 +602,7 @@ void CL_ReadPackets()
                 ++active_connectionless_packets;
             }
 
+            ++packets_count;
             CL_ConnectionlessPacket();
             continue;
         }
@@ -504,6 +624,8 @@ void CL_ReadPackets()
             continue;
         }
 
+        ++packets_count;
+
         if (cls->demoplayback)
         {
             MSG_BeginReading();
@@ -522,15 +644,11 @@ void CL_ReadPackets()
             CL_ParseServerMessage(TRUE);
         }
 
-        // Always finish the packet already read, then yield the main thread.
-        // The unread datagrams stay in the OS socket queue and are processed
-        // in sequence on the following frame.
-        if (active_game &&
-            std::chrono::steady_clock::now() - packet_work_started >= kActivePacketBudget)
-        {
-            break;
-        }
     }
+
+    // The loop budget is checked before each receive. A datagram already
+    // removed from the OS queue is therefore always handled, while unread
+    // sequenced packets remain queued in their original order.
 
     CL_SetSolidEntities();
 

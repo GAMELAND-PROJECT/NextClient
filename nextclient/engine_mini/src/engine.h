@@ -31,6 +31,9 @@ extern double* realtime;
 extern double* host_frametime;
 extern qboolean* gfExtendedError;
 const int kDownloadFileSize = 256;
+
+bool CL_ShouldProcessVoiceInit();
+bool CL_ShouldProcessVoiceData();
 extern char* gDownloadFile;
 const int kDisconnectReasonSize = 256;
 extern char* gszDisconnectReason;

@@ -773,6 +773,16 @@ static void OnGameInitializing(void* mainwindow, HDC* pmaindc, HGLRC* pbaseRC, c
         next->Invoke();
     });
 
+    g_Unsubs.emplace_back(eng()->SVC_VoiceInit |= [](const auto& next) {
+        if (CL_ShouldProcessVoiceInit())
+            next->Invoke();
+    });
+
+    g_Unsubs.emplace_back(eng()->SVC_VoiceData |= [](const auto& next) {
+        if (CL_ShouldProcessVoiceData())
+            next->Invoke();
+    });
+
     g_Unsubs.emplace_back(eng()->CL_HTTPCancel_f += []() {
         CL_HTTPCancel_f();
     });
