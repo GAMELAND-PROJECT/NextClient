@@ -34,6 +34,7 @@ const int kDownloadFileSize = 256;
 
 bool CL_ShouldProcessVoiceInit();
 bool CL_ShouldProcessVoiceData();
+void CL_ResetVoiceValidation();
 extern char* gDownloadFile;
 const int kDisconnectReasonSize = 256;
 extern char* gszDisconnectReason;

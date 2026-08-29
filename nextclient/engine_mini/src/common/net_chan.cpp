@@ -14,7 +14,7 @@
 
 namespace
 {
-constexpr int kMaxNormalFragmentCount = 64;
+constexpr int kMaxNormalFragmentCount = NET_MAX_PAYLOAD / CLIENT_FRAGMENT_SIZE_ONCONNECT;
 constexpr int kMaxFileFragmentCount = 25000;
 
 bool IsIncomingFragmentChainValid(const fragbuf_t* fragment, int max_fragments, uint64_t max_bytes)
@@ -352,7 +352,7 @@ qboolean Netchan_CopyNormalFragments(netchan_t *chan)
     if (!IsIncomingFragmentChainValid(
             chan->incomingbufs[FRAG_NORMAL_STREAM],
             kMaxNormalFragmentCount,
-            static_cast<uint64_t>(MAX_MSGLEN)))
+            static_cast<uint64_t>(NET_MAX_PAYLOAD)))
     {
         Netchan_FlushIncoming(chan, FRAG_NORMAL_STREAM);
         return FALSE;

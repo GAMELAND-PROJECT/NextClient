@@ -33,6 +33,7 @@ constexpr int kMaxVoicePayloadBytes = 4096;
 constexpr int kMaxVoiceMessagesPerWindow = 64;
 constexpr int kMaxVoiceBytesPerWindow = 16 * 1024;
 constexpr double kVoiceWindowSeconds = 0.1;
+bool g_voice_decoder_ready = false;
 
 bool IsSupportedVoiceCodec(const char* codec)
 {
@@ -42,20 +43,32 @@ bool IsSupportedVoiceCodec(const char* codec)
 }
 }
 
+void CL_ResetVoiceValidation()
+{
+    g_voice_decoder_ready = false;
+}
+
 bool CL_ShouldProcessVoiceInit()
 {
     if (!net_message || !net_message->data || !pMsg_readcount)
+    {
+        g_voice_decoder_ready = false;
         return false;
+    }
 
     const int start = *pMsg_readcount;
     if (start < 0 || start >= net_message->cursize)
+    {
+        g_voice_decoder_ready = false;
         return false;
+    }
 
     const int available = net_message->cursize - start;
     const int codec_scan_bytes = available < kMaxVoiceCodecNameBytes ? available : kMaxVoiceCodecNameBytes;
     const void* terminator = std::memchr(net_message->data + start, '\0', static_cast<size_t>(codec_scan_bytes));
     if (!terminator)
     {
+        g_voice_decoder_ready = false;
         *pMsg_readcount = net_message->cursize;
         return false;
     }
@@ -64,17 +77,20 @@ bool CL_ShouldProcessVoiceInit()
     const int payload_end = static_cast<int>(codec_end - net_message->data) + 2; // NUL + quality byte
     if (payload_end > net_message->cursize)
     {
+        g_voice_decoder_ready = false;
         *pMsg_readcount = net_message->cursize;
         return false;
     }
 
     if (!IsSupportedVoiceCodec(reinterpret_cast<const char*>(net_message->data + start)))
     {
+        g_voice_decoder_ready = false;
         // Skip only this complete message so following server messages remain parseable.
         *pMsg_readcount = payload_end;
         return false;
     }
 
+    g_voice_decoder_ready = net_message->data[start] != '\0';
     return true;
 }
 
@@ -100,6 +116,12 @@ bool CL_ShouldProcessVoiceData()
         player_index >= cl->maxclients)
     {
         *pMsg_readcount = net_message->cursize;
+        return false;
+    }
+
+    if (!g_voice_decoder_ready)
+    {
+        *pMsg_readcount = payload_end;
         return false;
     }
 
