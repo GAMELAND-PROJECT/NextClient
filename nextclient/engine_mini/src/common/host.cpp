@@ -26,7 +26,6 @@ int Host_GetMaxClients()
 qboolean Host_FilterTime(float time)
 {
 	float fps;
-	static int command_line_ticrate = -1;
 
 	if (host_framerate->value > 0.0f)
 	{
@@ -41,13 +40,9 @@ qboolean Host_FilterTime(float time)
 	*realtime += sys_timescale->value * time;
 	if (g_bIsDedicatedServer)
 	{
-		if (command_line_ticrate == -1)
-			command_line_ticrate = COM_CheckParm("-sys_ticrate");
-
-		if (command_line_ticrate > 0)
-			fps = Q_atof(com_argv[command_line_ticrate + 1]);
-		else
-			fps = sys_ticrate->value;
+		// The validated, process-lifetime profile owns the dedicated scheduler.
+		// Do not let a stale shortcut or command line silently override it.
+		fps = sys_ticrate->value;
 
 		if (fps > 0.0f)
 		{

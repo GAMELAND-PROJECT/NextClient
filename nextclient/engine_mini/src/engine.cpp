@@ -326,6 +326,15 @@ constexpr auto kLockedClientProfile = std::to_array<LockedCvar>({
     {"scoreboard_showavatars", "0"},
     {"developer", "0"},
     {"r_speeds", "0"},
+    // Dedicated servers use this cvar as their scheduler ceiling. Listen
+    // servers intentionally remain tied to fps_max because simulation and
+    // rendering share one GoldSrc host loop in that mode.
+    {"sys_ticrate", "1000"},
+    // Disable all stock weather paths. cl_weather gates rain/snow particle
+    // creation; the fog controls prevent the remaining atmospheric pass.
+    {"cl_weather", "0"},
+    {"gl_fog", "0"},
+    {"cl_fog_density", "0"},
     // Values above 1 expand server-side hit traces and can be abused by a
     // listen-server host through binds/aliases. Keep stock hit registration.
     {"sv_clienttrace", "1"},
@@ -618,6 +627,15 @@ static void OnGameInitializing(void* mainwindow, HDC* pmaindc, HGLRC* pbaseRC, c
     g_Unsubs.emplace_back(eng()->CL_StartResourceDownloading |= [](const char* msg, int custom, const auto& next)                      { CL_StartResourceDownloading(msg, custom); });
     g_Unsubs.emplace_back(eng()->CL_ReadPackets              |= [](const auto& next)                                                   { CL_ReadPackets(); });
     g_Unsubs.emplace_back(eng()->CL_RequestMissingResources  |= [](const auto& next)                                                   { return CL_RequestMissingResources(); });
+    g_Unsubs.emplace_back(eng()->ClientDLL_Init += []() {
+        // Client-owned weather cvars are registered during ClientDLL_Init, so
+        // enforce the no-weather profile at the first safe point afterwards.
+        for (const auto* cvar_name : {"cl_weather", "gl_fog", "cl_fog_density"})
+        {
+            if (Cvar_FindVar(cvar_name) != nullptr)
+                Cvar_Set(cvar_name, "0");
+        }
+    });
     g_Unsubs.emplace_back(eng()->CL_Disconnect |= [](const auto& next) {
         RestoreOriginalPlayerName();
         return CL_Disconnect();
