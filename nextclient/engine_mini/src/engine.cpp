@@ -352,7 +352,7 @@ constexpr auto kLockedClientProfile = std::to_array<LockedCvar>({
     {"r_shadows", "0"},
     {"cl_shadows", "0"},
     {"r_traceglow", "0"},
-    {"violence_hblood", "0"},
+    {"violence_hblood", "1"},
     {"violence_hgibs", "0"},
     {"violence_ablood", "0"},
     {"violence_agibs", "0"},
