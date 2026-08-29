@@ -2,7 +2,6 @@
 
 #include <chrono>
 #include <cstdint>
-#include <cstring>
 #include <optick.h>
 #include <common/filesystem.h>
 #include <md5.h>
@@ -25,128 +24,6 @@
 #include "common/common.h"
 #include "common/model.h"
 #include "graphics/gl_local.h"
-
-namespace
-{
-constexpr int kMaxVoiceCodecNameBytes = 32;
-constexpr int kMaxVoicePayloadBytes = 4096;
-constexpr int kMaxVoiceMessagesPerWindow = 64;
-constexpr int kMaxVoiceBytesPerWindow = 16 * 1024;
-constexpr double kVoiceWindowSeconds = 0.1;
-bool g_voice_decoder_ready = false;
-
-bool IsSupportedVoiceCodec(const char* codec)
-{
-    return codec[0] == '\0' ||
-           Q_stricmp(codec, "voice_speex") == 0 ||
-           Q_stricmp(codec, "voice_miles") == 0;
-}
-}
-
-void CL_ResetVoiceValidation()
-{
-    g_voice_decoder_ready = false;
-}
-
-bool CL_ShouldProcessVoiceInit()
-{
-    if (!net_message || !net_message->data || !pMsg_readcount)
-    {
-        g_voice_decoder_ready = false;
-        return false;
-    }
-
-    const int start = *pMsg_readcount;
-    if (start < 0 || start >= net_message->cursize)
-    {
-        g_voice_decoder_ready = false;
-        return false;
-    }
-
-    const int available = net_message->cursize - start;
-    const int codec_scan_bytes = available < kMaxVoiceCodecNameBytes ? available : kMaxVoiceCodecNameBytes;
-    const void* terminator = std::memchr(net_message->data + start, '\0', static_cast<size_t>(codec_scan_bytes));
-    if (!terminator)
-    {
-        g_voice_decoder_ready = false;
-        *pMsg_readcount = net_message->cursize;
-        return false;
-    }
-
-    const auto* codec_end = static_cast<const byte*>(terminator);
-    const int payload_end = static_cast<int>(codec_end - net_message->data) + 2; // NUL + quality byte
-    if (payload_end > net_message->cursize)
-    {
-        g_voice_decoder_ready = false;
-        *pMsg_readcount = net_message->cursize;
-        return false;
-    }
-
-    if (!IsSupportedVoiceCodec(reinterpret_cast<const char*>(net_message->data + start)))
-    {
-        g_voice_decoder_ready = false;
-        // Skip only this complete message so following server messages remain parseable.
-        *pMsg_readcount = payload_end;
-        return false;
-    }
-
-    g_voice_decoder_ready = net_message->data[start] != '\0';
-    return true;
-}
-
-bool CL_ShouldProcessVoiceData()
-{
-    if (!net_message || !net_message->data || !pMsg_readcount)
-        return false;
-
-    const int start = *pMsg_readcount;
-    const int remaining = net_message->cursize - start;
-    if (start < 0 || remaining < 3)
-    {
-        *pMsg_readcount = net_message->cursize;
-        return false;
-    }
-
-    const int player_index = net_message->data[start];
-    const int payload_bytes = static_cast<int>(net_message->data[start + 1]) |
-                              (static_cast<int>(net_message->data[start + 2]) << 8);
-    const int payload_end = start + 3 + payload_bytes;
-    if (payload_bytes > kMaxVoicePayloadBytes ||
-        payload_end > net_message->cursize ||
-        player_index >= cl->maxclients)
-    {
-        *pMsg_readcount = net_message->cursize;
-        return false;
-    }
-
-    if (!g_voice_decoder_ready)
-    {
-        *pMsg_readcount = payload_end;
-        return false;
-    }
-
-    static double window_started = -1.0;
-    static int messages_in_window = 0;
-    static int bytes_in_window = 0;
-    const double now = *realtime;
-    if (window_started < 0.0 || now < window_started || now - window_started >= kVoiceWindowSeconds)
-    {
-        window_started = now;
-        messages_in_window = 0;
-        bytes_in_window = 0;
-    }
-
-    if (messages_in_window >= kMaxVoiceMessagesPerWindow ||
-        payload_bytes > kMaxVoiceBytesPerWindow - bytes_in_window)
-    {
-        *pMsg_readcount = payload_end;
-        return false;
-    }
-
-    ++messages_in_window;
-    bytes_in_window += payload_bytes;
-    return true;
-}
 
 void CL_SendConsistencyInfo(sizebuf_t *msg)
 {

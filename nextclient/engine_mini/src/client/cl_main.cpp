@@ -99,8 +99,6 @@ void CL_Disconnect()
 {
     OPTICK_EVENT();
 
-    CL_ResetVoiceValidation();
-
     cls->connect_time = -99999.0;
     cls->connect_retry = 0;
 
