@@ -88,11 +88,11 @@ namespace tex
         GLenum gl_internal_format
     )
     {
-        OPTICK_EVENT();
-
+        const bool grayscale = gl_format == GL_LUMINANCE;
+        const size_t bytes_per_pixel = grayscale ? 1u : 4u;
         if (data != work_buf)
         {
-            V_memcpy(work_buf, data, width * height * 4);
+            V_memcpy(work_buf, data, static_cast<size_t>(width) * height * bytes_per_pixel);
         }
 
         int mip_level = 0;
@@ -101,7 +101,10 @@ namespace tex
 
         while (mip_width > 1 || mip_height > 1)
         {
-            MipMapRGBA(work_buf, mip_width, mip_height, work_buf);
+            if (grayscale)
+                MipMapGrayscale(work_buf, mip_width, mip_height, work_buf);
+            else
+                MipMapRGBA(work_buf, mip_width, mip_height, work_buf);
 
             mip_width = std::max(1, mip_width >> 1);
             mip_height = std::max(1, mip_height >> 1);
@@ -117,7 +120,7 @@ namespace tex
 
         qglTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, filter_min);
         qglTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter_max);
-        qglTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY_EXT, gl_ansio.value);
+        GL_ApplyTextureAnisotropy();
     }
 
     static bool LoadTGA(const char* file, uint8_t* rgba_out, uint32_t size, int* width_out, int* height_out)
@@ -215,17 +218,24 @@ namespace tex
     {
         OPTICK_EVENT();
 
-        if ((int64_t)width * height > (int64_t)kTextureMaxSize * kTextureMaxSize)
+        if (!data || width <= 0 || height <= 0 ||
+            width > kTextureMaxSize || height > kTextureMaxSize ||
+            GetBytesPerElement(format) == 0)
         {
             Con_DPrintf(
                 ConLogType::Error,
-                "Texture %s is too big: %dx%d, max: %dx%d\n",
+                "Texture %s has invalid input: %dx%d, format=%d\n",
                 identifier.c_str(),
                 width,
                 height,
-                kTextureMaxSize,
-                kTextureMaxSize
+                static_cast<int>(format)
             );
+            return false;
+        }
+
+        if (IsIndexedTexture(format) && !palette)
+        {
+            Con_DPrintf(ConLogType::Error, "Texture %s has no palette\n", identifier.c_str());
             return false;
         }
 
@@ -275,16 +285,9 @@ namespace tex
                 height = pot_height;
             }
 
-            if (palette)
-            {
-                uint8_t gamma_palette[256 * 3];
-                ApplyGammaToPalette(palette, gamma_palette, sizeof(gamma_palette));
-                texture.palette = g_PaletteManagerGlob.Load(gamma_palette);
-            }
-            else
-            {
-                texture.palette = g_PaletteManagerGlob.Load(palette);
-            }
+            uint8_t gamma_palette[256 * 3];
+            ApplyGammaToPalette(palette, gamma_palette, sizeof(gamma_palette));
+            texture.palette = g_PaletteManagerGlob.Load(gamma_palette);
 
             qglTexImage2D(GL_TEXTURE_2D, 0, GL_COLOR_INDEX8_EXT, width, height, GL_FALSE, GL_COLOR_INDEX, GL_UNSIGNED_BYTE, data);
             SetTextureFilters(false, filter);

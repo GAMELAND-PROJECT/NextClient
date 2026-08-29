@@ -15,6 +15,7 @@
 
 #include "common/sys_dll.h"
 #include "graphics/texture_loader.h"
+#include "graphics/texture_processing.h"
 #include "graphics/gl_local.h"
 #include "resource/palette_manager/PaletteManager.h"
 
@@ -50,6 +51,11 @@ namespace tex
 
             // Free list singly-linked
             int32_t free_next = -1;
+
+            // Identifies the source pixels and upload-relevant settings. This prevents
+            // a cached texture from a previous map being reused solely because another
+            // map happens to use the same texture name.
+            uint64_t content_signature = 0;
 
             Texture texture{};
         };
@@ -91,10 +97,10 @@ namespace tex
     public:
         explicit TextureManager();
 
-        /// Loads or reuses a texture by identifier. If a texture with the same identifier
-        /// already exists (Active or Cached), returns the existing handle (reactivating Cached
-        /// slots). Otherwise allocates a new slot, uploads via tex::LoadTexture, and returns
-        /// the handle. Returns TextureHandle::Invalid() on upload failure.
+        /// Loads or reuses a texture by identifier. Active textures take the fast path.
+        /// Cached textures are reused only when their source content and upload settings
+        /// still match; otherwise they are replaced safely. Returns TextureHandle::Invalid()
+        /// on upload failure.
         TextureHandle Load(
             const TexIdentifierStr& identifier,
             TextureLifetime lifetime,
@@ -129,6 +135,16 @@ namespace tex
         void ClearSession();
 
     private:
+        static uint64_t ComputeContentSignature(
+            TextureFormat format,
+            int width,
+            int height,
+            const uint8_t* data,
+            bool mipmap,
+            const uint8_t* palette,
+            int filter
+        );
+
         uint32_t AllocateSlot(TextureLifetime lifetime);
         void FreeSlot(uint32_t index);
         void EvictOne();

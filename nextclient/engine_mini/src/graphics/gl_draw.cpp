@@ -3,6 +3,7 @@
 #include <SDL_video.h>
 #include <glad/glad.h>
 #include <optick.h>
+#include <algorithm>
 
 #include "common/host.h"
 #include "common/cmd.h"
@@ -41,6 +42,30 @@ cvar_t gl_round_down = {"gl_round_down", const_cast<char*>("0"), FCVAR_ARCHIVE};
 
 int gl_filter_min = GL_LINEAR_MIPMAP_LINEAR;
 int gl_filter_max = GL_LINEAR;
+
+namespace
+{
+float g_MaxSupportedAnisotropy = 1.0f;
+}
+
+void GL_ResetTextureAnisotropySupport(const char* extensions)
+{
+    g_MaxSupportedAnisotropy = 1.0f;
+    if (extensions && Q_strstr(extensions, "GL_EXT_texture_filter_anisotropic"))
+    {
+        qglGetFloatv(GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT, &g_MaxSupportedAnisotropy);
+        g_MaxSupportedAnisotropy = std::max(1.0f, g_MaxSupportedAnisotropy);
+    }
+}
+
+void GL_ApplyTextureAnisotropy()
+{
+    if (g_MaxSupportedAnisotropy <= 1.0f)
+        return;
+
+    const float requested = std::clamp(gl_ansio.value, 1.0f, g_MaxSupportedAnisotropy);
+    qglTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY_EXT, requested);
+}
 
 uint8_t texgammatable[256];
 int32_t lineargammatable[1024];
@@ -558,7 +583,7 @@ void Draw_TransPicTranslate(int x, int y, qpic_t* pic)
     qglTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, 64, 64, 0, GL_RGBA, GL_UNSIGNED_BYTE, trans);
     qglTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     qglTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    qglTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY_EXT, gl_ansio.value);
+    GL_ApplyTextureAnisotropy();
 
     float x_right = x + pic->width;
     float y_bottom = y + pic->height;
@@ -1156,7 +1181,7 @@ void gl_texturemode_hook_callback(cvar_t* cvar)
             GL_Bind(texture->texnum);
             qglTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, gl_filter_min);
             qglTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, gl_filter_max);
-            qglTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY_EXT, gl_ansio.value);
+            GL_ApplyTextureAnisotropy();
         }
     });
 }
@@ -1178,7 +1203,7 @@ void Draw_Init()
 
     if (registry->ReadInt("vid_level", 0) > 0)
     {
-        qglTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY_EXT, gl_ansio.value);
+        GL_ApplyTextureAnisotropy();
     }
 
     menu_wad = (cachewad_t*)Mem_ZeroMalloc(sizeof(cachewad_t));

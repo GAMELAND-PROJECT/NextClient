@@ -144,6 +144,7 @@ void GL_SetMode_Subscriber(void* mainwindow, HDC* pmaindc, HGLRC* pbaseRC, const
     QGL_Init();
 
     gl_extensions = (const char*)qglGetString(GL_EXTENSIONS);
+    GL_ResetTextureAnisotropySupport(gl_extensions);
 }
 
 void GL_Config()
@@ -338,7 +339,7 @@ void GL_Init()
     qglTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
     qglTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
 
-    qglTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY_EXT, gl_ansio.value);
+    GL_ApplyTextureAnisotropy();
     qglBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     qglTexEnvf(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_REPLACE);
 

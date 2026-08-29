@@ -8,6 +8,9 @@ extern cvar_t gl_picmip;
 extern cvar_t gl_max_size;
 extern cvar_t gl_round_down;
 
+void GL_ResetTextureAnisotropySupport(const char* extensions);
+void GL_ApplyTextureAnisotropy();
+
 extern cvar_t* v_dark_cvar;
 extern cvar_t* crosshair_cvar;
 extern cvar_t* gamma_cvar;

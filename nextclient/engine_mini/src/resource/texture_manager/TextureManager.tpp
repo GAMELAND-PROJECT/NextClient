@@ -2,6 +2,59 @@
 namespace tex
 {
     template <uint32_t PersistentCapacity, uint32_t SessionCapacity>
+    uint64_t TextureManager<PersistentCapacity, SessionCapacity>::ComputeContentSignature(
+        TextureFormat format,
+        int width,
+        int height,
+        const uint8_t* data,
+        bool mipmap,
+        const uint8_t* palette,
+        int filter
+    )
+    {
+        // FNV-1a is deliberately used here: it is compact, deterministic and only runs
+        // while a texture is being loaded, never from the render loop.
+        constexpr uint64_t kOffsetBasis = 14695981039346656037ull;
+        constexpr uint64_t kPrime = 1099511628211ull;
+        uint64_t hash = kOffsetBasis;
+
+        auto hash_bytes = [&hash](const void* source, size_t length)
+        {
+            constexpr uint64_t kFnvPrime = 1099511628211ull;
+            const auto* bytes = static_cast<const uint8_t*>(source);
+            for (size_t i = 0; i < length; ++i)
+            {
+                hash ^= bytes[i];
+                hash *= kFnvPrime;
+            }
+        };
+
+        hash_bytes(&format, sizeof(format));
+        hash_bytes(&width, sizeof(width));
+        hash_bytes(&height, sizeof(height));
+        hash_bytes(&mipmap, sizeof(mipmap));
+        hash_bytes(&filter, sizeof(filter));
+
+        const int bytes_per_element = GetBytesPerElement(format);
+        if (data && width > 0 && height > 0 &&
+            width <= kTextureMaxSize && height <= kTextureMaxSize &&
+            bytes_per_element > 0)
+        {
+            const size_t pixel_bytes = static_cast<size_t>(width) *
+                static_cast<size_t>(height) * static_cast<size_t>(bytes_per_element);
+            hash_bytes(data, pixel_bytes);
+        }
+
+        if (palette && IsIndexedTexture(format))
+        {
+            hash_bytes(palette, 256u * 3u);
+        }
+
+        // Keep zero reserved for a never-initialized slot.
+        return hash == 0 ? kPrime : hash;
+    }
+
+    template <uint32_t PersistentCapacity, uint32_t SessionCapacity>
     TextureManager<PersistentCapacity, SessionCapacity>::TextureManager() :
         persistent_slots_(slots_.data(), PersistentCapacity),
         session_slots_(slots_.data() + PersistentCapacity, SessionCapacity)
@@ -40,6 +93,8 @@ namespace tex
     {
         OPTICK_EVENT();
 
+        uint64_t content_signature = 0;
+
         auto it = identifier_to_index_.find(identifier);
         if (it != identifier_to_index_.end())
         {
@@ -48,19 +103,52 @@ namespace tex
 
             if (slot.state != SlotState::Free)
             {
+                // Active textures can still be referenced by the current BSP/model and
+                // must keep a stable texnum. Cached textures belong to an older session,
+                // so replace them when the actual source or upload settings changed.
                 if (slot.state == SlotState::Cached)
                 {
-                    slot.state = SlotState::Active;
-                }
+                    content_signature = ComputeContentSignature(
+                        format, width, height, data, mipmap, palette, filter
+                    );
 
-                if (slot.lifetime == TextureLifetime::Session)
+                    if (slot.content_signature != content_signature)
+                    {
+                        Destroy({index, slot.generation});
+                    }
+                    else
+                    {
+                        slot.state = SlotState::Active;
+
+                        if (slot.lifetime == TextureLifetime::Session)
+                        {
+                            LruRemove(index);
+                            LruPushBack(index);
+                        }
+
+                        return {index, slot.generation};
+                    }
+                }
+                else
                 {
-                    LruRemove(index);
-                    LruPushBack(index);
-                }
+                    // A duplicate request inside the active session is already resident;
+                    // avoid hashing the source again on this fastest path.
+                    if (slot.lifetime == TextureLifetime::Session)
+                    {
+                        LruRemove(index);
+                        LruPushBack(index);
+                    }
 
-                return {index, slot.generation};
+                    return {index, slot.generation};
+                }
             }
+        }
+
+        if (content_signature == 0)
+        {
+            content_signature = ComputeContentSignature(
+                format, width, height, data, mipmap, palette, filter
+            );
         }
 
         uint32_t index = AllocateSlot(lifetime);
@@ -96,6 +184,7 @@ namespace tex
         // );
 
         slot.state = SlotState::Active;
+        slot.content_signature = content_signature;
         gl_id_to_index_[slot.texture.texnum] = index;
         identifier_to_index_[slot.texture.identifier] = index;
 
@@ -220,6 +309,7 @@ namespace tex
         }
 
         slot.state = SlotState::Free;
+        slot.content_signature = 0;
         slot.generation++;
 
         FreeSlot(handle.index);
@@ -306,6 +396,7 @@ namespace tex
                 tex::UnloadTexture(slot.texture);
 
                 slot.state = SlotState::Free;
+                slot.content_signature = 0;
                 slot.generation++;
 
                 FreeSlot(node);

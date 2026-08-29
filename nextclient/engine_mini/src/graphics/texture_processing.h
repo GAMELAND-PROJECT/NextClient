@@ -37,6 +37,10 @@ namespace tex
     /// Returns the height of the produced mip level.
     int MipMapRGBA(const uint8_t* data, int width, int height, uint8_t* data_out);
 
+    /// Generates the next mipmap level for a one-byte grayscale texture.
+    /// data_out may alias data for in-place downsampling.
+    int MipMapGrayscale(const uint8_t* data, int width, int height, uint8_t* data_out);
+
     /// Computes the average RGB of opaque neighbors in a 3x3 kernel around (x, y),
     /// writing the result with alpha=0 to data_out. Fully transparent pixels are skipped.
     /// Returns the blue channel of the result.

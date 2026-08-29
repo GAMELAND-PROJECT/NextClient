@@ -198,25 +198,65 @@ namespace tex
 
     int MipMapRGBA(const uint8_t* data, int width, int height, uint8_t* data_out)
     {
-        OPTICK_EVENT();
+        if (!data || !data_out || width <= 0 || height <= 0)
+            return 0;
 
-        int row_bytes = width << 2;
-        int out_height = height >> 1;
+        const int out_width = std::max(1, width >> 1);
+        const int out_height = std::max(1, height >> 1);
 
-        for (int y = 0; y < out_height; ++y, data += row_bytes * 2)
+        // Clamp the second sample at one-pixel edges. Besides producing stable
+        // final mip levels, this avoids the old out-of-row read for 1xN/Nx1
+        // textures. Forward in-place compaction remains safe because every
+        // destination texel precedes the source texels needed by later output.
+        for (int y = 0; y < out_height; ++y)
         {
-            const uint8_t* in_row = data;
-            const uint8_t* next_row = data + row_bytes;
-
-            for (int x = 0; x < row_bytes; x += 8, in_row += 8, next_row += 8, data_out += 4)
+            const int source_y0 = std::min(y * 2, height - 1);
+            const int source_y1 = std::min(source_y0 + 1, height - 1);
+            for (int x = 0; x < out_width; ++x)
             {
-                data_out[0] = (in_row[0] + in_row[4] + next_row[0] + next_row[4]) >> 2;
-                data_out[1] = (in_row[1] + in_row[5] + next_row[1] + next_row[5]) >> 2;
-                data_out[2] = (in_row[2] + in_row[6] + next_row[2] + next_row[6]) >> 2;
-                data_out[3] = (in_row[3] + in_row[7] + next_row[3] + next_row[7]) >> 2;
+                const int source_x0 = std::min(x * 2, width - 1);
+                const int source_x1 = std::min(source_x0 + 1, width - 1);
+                const uint8_t* top_left = data + 4 * (source_y0 * width + source_x0);
+                const uint8_t* top_right = data + 4 * (source_y0 * width + source_x1);
+                const uint8_t* bottom_left = data + 4 * (source_y1 * width + source_x0);
+                const uint8_t* bottom_right = data + 4 * (source_y1 * width + source_x1);
+                uint8_t* destination = data_out + 4 * (y * out_width + x);
+
+                for (int channel = 0; channel < 4; ++channel)
+                {
+                    destination[channel] = static_cast<uint8_t>(
+                        (static_cast<unsigned int>(top_left[channel]) + top_right[channel] +
+                            bottom_left[channel] + bottom_right[channel]) >> 2);
+                }
             }
         }
 
+        return out_height;
+    }
+
+    int MipMapGrayscale(const uint8_t* data, int width, int height, uint8_t* data_out)
+    {
+        if (!data || !data_out || width <= 0 || height <= 0)
+            return 0;
+
+        const int out_width = std::max(1, width >> 1);
+        const int out_height = std::max(1, height >> 1);
+        for (int y = 0; y < out_height; ++y)
+        {
+            const int source_y0 = std::min(y * 2, height - 1);
+            const int source_y1 = std::min(source_y0 + 1, height - 1);
+            for (int x = 0; x < out_width; ++x)
+            {
+                const int source_x0 = std::min(x * 2, width - 1);
+                const int source_x1 = std::min(source_x0 + 1, width - 1);
+                const unsigned int sum =
+                    data[source_y0 * width + source_x0] +
+                    data[source_y0 * width + source_x1] +
+                    data[source_y1 * width + source_x0] +
+                    data[source_y1 * width + source_x1];
+                data_out[y * out_width + x] = static_cast<uint8_t>(sum >> 2);
+            }
+        }
         return out_height;
     }
 
