@@ -4,6 +4,9 @@
 #include <optick.h>
 #include <common/filesystem.h>
 #include <md5.h>
+#if defined(_WIN32) && defined(_MSC_VER)
+#include <Windows.h>
+#endif
 
 #include "download.h"
 #include "cl_spectator.h"
@@ -151,11 +154,39 @@ void CL_RegisterResources(sizebuf_t *msg)
     }
 }
 
+#if defined(_WIN32) && defined(_MSC_VER)
+namespace
+{
+    bool CL_ParseServerMessageGuarded(qboolean normal_message)
+    {
+        __try
+        {
+            eng()->CL_ParseServerMessage.InvokeChained(normal_message);
+            return true;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            return false;
+        }
+    }
+}
+#endif
+
 void CL_ParseServerMessage(qboolean normal_message)
 {
     OPTICK_EVENT();
-    
+
+#if defined(_WIN32) && defined(_MSC_VER)
+    // Server messages are untrusted input. In particular, legacy voice payloads can
+    // reach old codec code with invalid state. Contain the fault at the packet boundary
+    // instead of allowing it to crash the process and invoke a dump writer.
+    if (!CL_ParseServerMessageGuarded(normal_message))
+    {
+        CL_Disconnect();
+    }
+#else
     eng()->CL_ParseServerMessage.InvokeChained(normal_message);
+#endif
 }
 
 int CL_EstimateNeededResources()

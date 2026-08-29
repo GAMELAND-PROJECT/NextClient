@@ -282,13 +282,15 @@ S_API void SteamAPI_UnregisterCallResult(class CCallbackBase* pCallback, SteamAP
 
 S_API void SteamAPI_UseBreakpadCrashHandler(char const* pchVersion, char const* pchDate, char const* pchTime, bool bFullMemoryDumps, void* pvContext, PFNPreMinidumpCallback m_pfnPreMinidumpCallback)
 {
-    if (!IsInitialized())
-        Initialize();
+    (void)pchVersion;
+    (void)pchDate;
+    (void)pchTime;
+    (void)bFullMemoryDumps;
+    (void)pvContext;
+    (void)m_pfnPreMinidumpCallback;
 
-    if (!SteamAPI_UseBreakpadCrashHandler_func)
-        SteamAPI_UseBreakpadCrashHandler_func = reinterpret_cast<SteamAPI_UseBreakpadCrashHandler_Func>(GetProcAddress(g_ValueModule, "SteamAPI_UseBreakpadCrashHandler"));
-
-    SteamAPI_UseBreakpadCrashHandler_func(pchVersion, pchDate, pchTime, bFullMemoryDumps, pvContext, m_pfnPreMinidumpCallback);
+    // NextClient deliberately does not install Steam's disk-backed crash handler.
+    // Keep the exported ABI, but do not let Breakpad create *.mdmp files beside the game.
 }
 
 S_API void SteamAPI_SetBreakpadAppID(uint32 unAppID)
@@ -308,16 +310,12 @@ S_API void SteamAPI_SetBreakpadAppID(uint32 unAppID)
 
 S_API void SteamAPI_WriteMiniDump(uint32 uStructuredExceptionCode, void* pvExceptionInfo, uint32 uBuildID)
 {
-    if (!IsInitialized())
-        Initialize();
+    (void)uStructuredExceptionCode;
+    (void)pvExceptionInfo;
+    (void)uBuildID;
 
-    if (g_ExceptionCallback != nullptr)
-        g_ExceptionCallback(pvExceptionInfo);
-
-    if (!SteamAPI_WriteMiniDump_func)
-        SteamAPI_WriteMiniDump_func = reinterpret_cast<SteamAPI_WriteMiniDump_Func>(GetProcAddress(g_ValueModule, "SteamAPI_WriteMiniDump"));
-
-    SteamAPI_WriteMiniDump_func(uStructuredExceptionCode, pvExceptionInfo, uBuildID);
+    // Intentionally ignored. Network/voice faults are contained by the engine and must
+    // never trigger synchronous disk I/O or leave minidump files in the game directory.
 }
 
 S_API void SteamAPI_SetMiniDumpComment(const char* pchMsg)
