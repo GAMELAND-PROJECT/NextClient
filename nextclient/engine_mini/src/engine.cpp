@@ -335,6 +335,18 @@ constexpr auto kLockedClientProfile = std::to_array<LockedCvar>({
     {"cl_weather", "0"},
     {"gl_fog", "0"},
     {"cl_fog_density", "0"},
+    // Stable competitive texture profile: trilinear mip filtering removes
+    // distant shimmer, moderate anisotropy preserves angled-surface clarity,
+    // and the costly secondary detail-texture pass stays disabled.
+    {"gl_ansio", "4"},
+    {"gl_texturemode", "GL_LINEAR_MIPMAP_LINEAR"},
+    {"gl_picmip", "0"},
+    {"gl_max_size", "512"},
+    {"gl_round_down", "0"},
+    {"gl_playermip", "0"},
+    {"gl_dither", "0"},
+    {"gl_palette_tex", "0"},
+    {"r_detailtextures", "0"},
     // Values above 1 expand server-side hit traces and can be abused by a
     // listen-server host through binds/aliases. Keep stock hit registration.
     {"sv_clienttrace", "1"},

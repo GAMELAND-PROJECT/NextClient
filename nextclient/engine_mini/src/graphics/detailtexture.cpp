@@ -35,7 +35,7 @@ struct DetailMap
     unsigned int _oglDetailId = 0;
 };
 
-static cvar_t r_detailtextures{"r_detailtextures", const_cast<char*>("1"), FCVAR_ARCHIVE};
+static cvar_t r_detailtextures{"r_detailtextures", const_cast<char*>("0"), FCVAR_ARCHIVE};
 static cvar_t r_detailtexturessupported{"r_detailtexturessupported", const_cast<char*>("1"), FCVAR_SPONLY};
 
 static bool detTexSupported;

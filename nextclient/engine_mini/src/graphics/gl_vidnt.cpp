@@ -20,7 +20,7 @@ static const char* gl_renderer;
 static const char* gl_version;
 
 // Cvars mirrored from the engine's R_Init
-static cvar_t gl_dither_cvar_tmp{"gl_dither", const_cast<char*>("1"), FCVAR_ARCHIVE, 1.f};
+static cvar_t gl_dither_cvar_tmp{"gl_dither", const_cast<char*>("0"), FCVAR_ARCHIVE, 0.f};
 static cvar_t gl_spriteblend_cvar_tmp{"gl_spriteblend", const_cast<char*>("1"), FCVAR_ARCHIVE, 1.f};
 cvar_t* r_lightmap;
 cvar_t* gl_clear;
