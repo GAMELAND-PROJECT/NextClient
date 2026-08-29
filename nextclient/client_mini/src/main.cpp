@@ -53,7 +53,10 @@ namespace
         if (original == nullptr || key != 0)
             return original != nullptr ? original(key) : &g_SuppressedDlight;
 
-        constexpr unsigned int kMaxAnonymousDlightsPerFrameWindow = 32;
+        // The stock renderer has a small fixed light pool. Eight anonymous
+        // lights per 10 ms window retain simultaneous muzzle flashes while
+        // preventing effect-heavy servers from churning the whole pool.
+        constexpr unsigned int kMaxAnonymousDlightsPerFrameWindow = 8;
         constexpr double kDlightFrameWindow = 0.010;
 
         const double now = gEngfuncs.GetClientTime();
@@ -369,9 +372,11 @@ static void HUD_TempEntUpdateHandler(
     // particles. Keep the normal impact feedback, but bound pathological
     // accumulation from sustained fire or effect-heavy servers. The original
     // updater remains solely responsible for unlinking and recycling entries.
-    constexpr int kMaxActiveSparkShowers = 24;
-    constexpr double kMaxSparkShowerLifetime = 0.35;
-    constexpr int kMaxTempEntitiesToInspect = 2048;
+    constexpr int kMaxActiveSparkShowers = 4;
+    constexpr double kMaxSparkShowerLifetime = 0.15;
+    // Bound the guard itself: a malicious or broken effect stream must not make
+    // the client walk an unbounded linked list before the original update.
+    constexpr int kMaxTempEntitiesToInspect = 256;
 
     if (ppTempEntActive != nullptr)
     {

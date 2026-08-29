@@ -347,13 +347,26 @@ constexpr auto kLockedClientProfile = std::to_array<LockedCvar>({
     {"gl_dither", "0"},
     {"gl_palette_tex", "0"},
     {"r_detailtextures", "0"},
+    {"cl_smoke_fps_fix", "1"},
+    {"gunsmoke", "0"},
+    {"r_shadows", "0"},
+    {"cl_shadows", "0"},
+    {"r_traceglow", "0"},
+    {"violence_hblood", "0"},
+    {"violence_hgibs", "0"},
+    {"violence_ablood", "0"},
+    {"violence_agibs", "0"},
     // Values above 1 expand server-side hit traces and can be abused by a
     // listen-server host through binds/aliases. Keep stock hit registration.
     {"sv_clienttrace", "1"},
-    // Lightweight 4v4/5v5 firing profile: cap accumulating cosmetic effects
-    // while preserving muzzle flashes, tracers, bullet decals and smoke grenades.
-    {"max_shells", "16"},
-    {"max_smokepuffs", "16"},
+    // Minimal-effects 4v4/5v5 profile: remove accumulating cosmetic debris,
+    // weapon puffs and decals while retaining core models and grenade smoke.
+    {"max_shells", "0"},
+    {"max_smokepuffs", "0"},
+    {"r_decals", "0"},
+    {"mp_decals", "0"},
+    {"fastsprites", "2"},
+    {"cl_corpsestay", "0"},
 });
 
 const char* GetLockedClientCvarValue(const char* name)

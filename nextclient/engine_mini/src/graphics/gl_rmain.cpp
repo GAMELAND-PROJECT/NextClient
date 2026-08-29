@@ -14,7 +14,7 @@
 namespace
 {
 constexpr float kAdaptiveSmokeDistanceSq = 256.0f * 256.0f;
-constexpr int kFullQualityNearbySmokeLayers = 4;
+constexpr int kFullQualityNearbySmokeLayers = 2;
 
 bool ShouldSkipAdaptiveSmokeLayer(const cl_entity_t* ent, int& nearby_smoke_layers)
 {
@@ -31,11 +31,11 @@ bool ShouldSkipAdaptiveSmokeLayer(const cl_entity_t* ent, int& nearby_smoke_laye
         return false;
 
     ++nearby_smoke_layers;
-    // Preserve the first four nearby layers, then retain only one of every
-    // three additional layers. This keeps the grenade readable while bounding
+    // Preserve the first two nearby layers, then retain only one of every
+    // five additional layers. This keeps the grenade readable while bounding
     // fill-rate growth when several smokes overlap during a firefight.
     return nearby_smoke_layers > kFullQualityNearbySmokeLayers &&
-           ((nearby_smoke_layers - kFullQualityNearbySmokeLayers) % 3) != 0;
+           ((nearby_smoke_layers - kFullQualityNearbySmokeLayers) % 5) != 0;
 }
 }
 
@@ -57,6 +57,14 @@ float GlowBlend(cl_entity_t* pEntity)
 
 void R_AllowFog(qboolean allow)
 {
+    // Fog is disabled by the stable client profile. glIsEnabled is a driver
+    // query and can serialize CPU/GPU work, so keep it off the per-frame path.
+    if (!*p_g_bUserFogOn)
+    {
+        *p_isFogEnabled = false;
+        return;
+    }
+
     if (allow)
     {
         if (*p_isFogEnabled)
@@ -329,7 +337,8 @@ void R_DrawTEntitiesOnList(qboolean clientOnly)
             cl_entity_t* ent = (*p_transObjects)[i].pEnt;
             *p_currententity = ent;
 
-            qglDisable(GL_FOG);
+            if (*p_g_bUserFogOn)
+                qglDisable(GL_FOG);
             *p_r_blend = (GLfloat)CL_FxBlend(ent);
 
             if (*p_r_blend > 0.0)
@@ -492,7 +501,7 @@ void R_RenderScene()
     ClientDLL_DrawNormalTriangles();
     R_AllowFog(TRUE);
 
-    if (cl->waterlevel > 2 && !r_refdef->onlyClientDraws || !*p_g_bUserFogOn)
+    if (*p_g_bUserFogOn && cl->waterlevel > 2 && !r_refdef->onlyClientDraws)
         qglDisable(GL_FOG);
 
     R_DrawTEntitiesOnList(r_refdef->onlyClientDraws);

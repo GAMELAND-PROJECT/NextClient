@@ -82,6 +82,9 @@ static GLsizei scissor_height;
 static qboolean giScissorTest;
 
 static GLuint translate_texture;
+static unsigned int translated_pixels_cache[64 * 64];
+static unsigned int translated_pixels_work[64 * 64];
+static bool translated_pixels_uploaded;
 static uint8_t menuplyr_pixels[4096];
 
 static PaletteHandle g_CurrentPalette;
@@ -347,7 +350,9 @@ void GL_Bind(int texnum)
     // Given that this extension only works on older hardware, the situation worsens dramatically.
     // Perhaps it would be best to remove support for hardware palettes entirely.
 
-    if (!qglColorTableEXT)
+    // The competitive profile uses RGBA textures. Avoid a texture-manager lookup
+    // on every bind unless the legacy shared-palette path is explicitly active.
+    if (!qglColorTableEXT || gl_palette_tex.value == 0.0f)
     {
         return;
     }
@@ -577,13 +582,24 @@ void Draw_TransPicTranslate(int x, int y, qpic_t* pic)
 
     GL_Bind(translate_texture);
 
-    unsigned int trans[4096];
-    FillTranslatedPixels(trans, pic->width, pic->height);
+    FillTranslatedPixels(translated_pixels_work, pic->width, pic->height);
 
-    qglTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, 64, 64, 0, GL_RGBA, GL_UNSIGNED_BYTE, trans);
-    qglTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    qglTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    GL_ApplyTextureAnisotropy();
+    if (!translated_pixels_uploaded)
+    {
+        qglTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, 64, 64, 0, GL_RGBA, GL_UNSIGNED_BYTE, translated_pixels_work);
+        qglTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        qglTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        GL_ApplyTextureAnisotropy();
+        V_memcpy(translated_pixels_cache, translated_pixels_work, sizeof(translated_pixels_cache));
+        translated_pixels_uploaded = true;
+    }
+    else if (V_memcmp(translated_pixels_cache, translated_pixels_work, sizeof(translated_pixels_cache)) != 0)
+    {
+        // Preserve the GL object and its sampler state; only replace pixels when
+        // the translated preview genuinely changed.
+        qglTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 64, 64, GL_RGBA, GL_UNSIGNED_BYTE, translated_pixels_work);
+        V_memcpy(translated_pixels_cache, translated_pixels_work, sizeof(translated_pixels_cache));
+    }
 
     float x_right = x + pic->width;
     float y_bottom = y + pic->height;
@@ -1244,6 +1260,17 @@ void Draw_Shutdown()
     }
 
     g_DrawInitialized = false;
+
+    if (translate_texture)
+    {
+        qglDeleteTextures(1, &translate_texture);
+        translate_texture = 0;
+        translated_pixels_uploaded = false;
+        V_memset(translated_pixels_cache, 0, sizeof(translated_pixels_cache));
+        V_memset(translated_pixels_work, 0, sizeof(translated_pixels_work));
+        if (p_currenttexture)
+            *p_currenttexture = -1;
+    }
 
     Draw_FreeWad(menu_wad);
 
