@@ -14,17 +14,21 @@ header("Content-Security-Policy: default-src 'self'; style-src 'self'; script-sr
 header('Cache-Control: no-store, max-age=0');
 
 $configFile = __DIR__ . '/config.php';
-if (!is_file($configFile)) {
+$configExists = is_file($configFile);
+$loadedConfig = $configExists ? require $configFile : null;
+if ($configExists && !is_array($loadedConfig)) {
     http_response_code(503);
-    exit('Panel is not configured. See README.md.');
+    exit('Panel configuration is invalid.');
 }
-
-$config = require $configFile;
-if (!is_array($config) || empty($config['password_hash']) ||
-    $config['password_hash'] === 'REPLACE_WITH_PASSWORD_HASH') {
-    http_response_code(503);
-    exit('Panel password is not configured.');
-}
+$configured = is_array($loadedConfig) && !empty($loadedConfig['password_hash']) &&
+    $loadedConfig['password_hash'] !== 'REPLACE_WITH_PASSWORD_HASH';
+$config = $configured ? $loadedConfig : [
+    'password_hash' => '',
+    'data_dir' => dirname(__DIR__),
+    'session_name' => 'allclient_admin',
+    'session_idle_seconds' => 1800,
+    'backup_limit' => 30,
+];
 
 $dataDir = realpath((string)($config['data_dir'] ?? ''));
 if ($dataDir === false || !is_dir($dataDir) || !is_writable($dataDir)) {
@@ -61,6 +65,37 @@ function redirectHome(): never
 {
     header('Location: ./', true, 303);
     exit;
+}
+
+function savePanelConfig(string $passwordHash): void
+{
+    global $configFile;
+    $content = "<?php\ndeclare(strict_types=1);\n\nreturn [\n" .
+        "    'password_hash' => " . var_export($passwordHash, true) . ",\n" .
+        "    'data_dir' => dirname(__DIR__),\n" .
+        "    'session_name' => 'allclient_admin',\n" .
+        "    'session_idle_seconds' => 1800,\n" .
+        "    'backup_limit' => 30,\n" .
+        "];\n";
+    $temporary = tempnam(__DIR__, '.config-');
+    if ($temporary === false || file_put_contents($temporary, $content, LOCK_EX) === false) {
+        throw new RuntimeException('نوشتن تنظیمات پنل ممکن نیست.');
+    }
+    @chmod($temporary, 0600);
+    if (!rename($temporary, $configFile)) {
+        @unlink($temporary);
+        throw new RuntimeException('فعال‌سازی تنظیمات پنل ممکن نیست.');
+    }
+}
+
+function validateNewAdminPassword(string $password, string $confirmation): void
+{
+    if ($password !== $confirmation) {
+        throw new RuntimeException('تکرار رمز با رمز جدید یکسان نیست.');
+    }
+    if (strlen($password) < 12 || strlen($password) > 128) {
+        throw new RuntimeException('رمز مدیریت باید بین ۱۲ تا ۱۲۸ کاراکتر باشد.');
+    }
 }
 
 function csrfToken(): string
@@ -302,6 +337,21 @@ function parseTagRows(string $content): array
 $action = (string)($_POST['action'] ?? '');
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     try {
+        if ($action === 'setup') {
+            requireValidCsrf();
+            if ($configured) {
+                throw new RuntimeException('راه‌اندازی اولیه قبلاً انجام شده است.');
+            }
+            $newPassword = (string)($_POST['new_password'] ?? '');
+            validateNewAdminPassword($newPassword, (string)($_POST['confirm_password'] ?? ''));
+            savePanelConfig(password_hash($newPassword, PASSWORD_DEFAULT));
+            session_regenerate_id(true);
+            $_SESSION['authenticated'] = true;
+            $_SESSION['last_activity'] = time();
+            flash('success', 'رمز مدیریت ثبت و راه‌اندازی اولیه برای همیشه قفل شد.');
+            redirectHome();
+        }
+
         if ($action === 'login') {
             requireValidCsrf();
             $attempts = (int)($_SESSION['login_attempts'] ?? 0);
@@ -335,7 +385,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         requireValidCsrf();
 
-        if ($action === 'save_servers') {
+        if ($action === 'change_admin_password') {
+            $currentPassword = (string)($_POST['current_password'] ?? '');
+            if (!password_verify($currentPassword, (string)$config['password_hash'])) {
+                throw new RuntimeException('رمز فعلی صحیح نیست.');
+            }
+            $newPassword = (string)($_POST['new_password'] ?? '');
+            validateNewAdminPassword($newPassword, (string)($_POST['confirm_password'] ?? ''));
+            if (password_verify($newPassword, (string)$config['password_hash'])) {
+                throw new RuntimeException('رمز جدید باید با رمز فعلی متفاوت باشد.');
+            }
+            savePanelConfig(password_hash($newPassword, PASSWORD_DEFAULT));
+            session_regenerate_id(true);
+            $_SESSION['authenticated'] = true;
+            $_SESSION['last_activity'] = time();
+            flash('success', 'رمز مدیریت با موفقیت تغییر کرد.');
+        } elseif ($action === 'save_servers') {
             $servers = validateServers((string)($_POST['servers'] ?? ''));
             backupAndAtomicWrite(FILE_SERVERS, implode("\n", $servers) . ($servers ? "\n" : ''));
             flash('success', count($servers) . ' سرور با موفقیت ذخیره شد.');
@@ -362,7 +427,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 $flash = takeFlash();
-$authenticated = !empty($_SESSION['authenticated']);
+$authenticated = $configured && !empty($_SESSION['authenticated']);
 $serverText = '';
 $tagRows = [];
 $passwordConfigured = false;
@@ -396,7 +461,18 @@ if ($authenticated) {
 
   <?php if ($flash): ?><div class="notice <?= escape((string)$flash['type']) ?>"><?= escape((string)$flash['message']) ?></div><?php endif; ?>
 
-  <?php if (!$authenticated): ?>
+  <?php if (!$configured): ?>
+    <section class="card login-card">
+      <div class="icon-lock">◆</div><h2>راه‌اندازی اولیه</h2><p>رمز مدیر را تعیین کنید. این صفحه پس از ثبت رمز برای همیشه بسته می‌شود.</p>
+      <form method="post" autocomplete="off">
+        <input type="hidden" name="csrf" value="<?= escape(csrfToken()) ?>"><input type="hidden" name="action" value="setup">
+        <label>رمز جدید<input type="password" name="new_password" minlength="12" maxlength="128" required autofocus autocomplete="new-password"></label>
+        <label>تکرار رمز<input type="password" name="confirm_password" minlength="12" maxlength="128" required autocomplete="new-password"></label>
+        <button class="button primary wide" type="submit">ثبت رمز و فعال‌سازی پنل</button>
+      </form>
+      <p class="security-note">پیش از ثبت رمز، Directory Privacy سی‌پنل را برای این پوشه فعال کنید.</p>
+    </section>
+  <?php elseif (!$authenticated): ?>
     <section class="card login-card">
       <div class="icon-lock">◆</div><h2>ورود مدیر</h2><p>برای مدیریت سرویس‌های آنلاین وارد شوید.</p>
       <form method="post" autocomplete="off">
@@ -428,6 +504,16 @@ if ($authenticated) {
           <button class="button warning" type="submit">جایگزینی رمز</button>
         </form>
       </article>
+
+      <article class="card password-card">
+        <div class="card-title"><div><h2>رمز مدیریت پنل</h2><p>برای تغییر، رمز فعلی نیز الزامی است.</p></div><span class="dot active"></span></div>
+        <form method="post" autocomplete="off"><input type="hidden" name="csrf" value="<?= escape(csrfToken()) ?>"><input type="hidden" name="action" value="change_admin_password">
+          <label>رمز فعلی<input type="password" name="current_password" required autocomplete="current-password"></label>
+          <label>رمز جدید<input type="password" name="new_password" minlength="12" maxlength="128" required autocomplete="new-password"></label>
+          <label>تکرار رمز جدید<input type="password" name="confirm_password" minlength="12" maxlength="128" required autocomplete="new-password"></label>
+          <button class="button secondary" type="submit">تغییر رمز مدیریت</button>
+        </form>
+      </article>
     </section>
 
     <section class="card subscriptions">
@@ -447,4 +533,3 @@ if ($authenticated) {
 </main>
 </body>
 </html>
-
