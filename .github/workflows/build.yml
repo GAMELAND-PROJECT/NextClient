@@ -30,6 +30,9 @@ jobs:
       BASE_GAME_FILE_ID: 1gYzFPCnlmn_eb0tj7XdaUyytAyrWsrT1
       BASE_GAME_CACHE_VERSION: v1
       BASE_GAME_ARCHIVE: ${{ github.workspace }}/base-game-cache/Allclient.rar
+      CHROMIUM_FILE_ID: 1Mo0ZQHA4SmvoAggobnqOSStcViQsWjzC
+      CHROMIUM_CACHE_VERSION: v1
+      CHROMIUM_ARCHIVE: ${{ github.workspace }}/installer/runtime/chromium109/chrome.nosync.7z
 
     steps:
       - name: Checkout (with submodules)
@@ -63,14 +66,23 @@ jobs:
           path: base-game-cache/Allclient.rar
           key: base-game-${{ runner.os }}-${{ env.BASE_GAME_CACHE_VERSION }}
 
+      - name: Cache bundled Chromium archive
+        id: chromium-cache
+        uses: actions/cache@v4
+        with:
+          path: installer/runtime/chromium109/chrome.nosync.7z
+          key: chromium109-${{ runner.os }}-${{ env.CHROMIUM_CACHE_VERSION }}
+
+      - name: Install Google Drive downloader
+        shell: pwsh
+        run: python -m pip install --disable-pip-version-check --no-warn-script-location "gdown==5.2.0"
+
       - name: Download base game from Google Drive
         if: steps.base-game-cache.outputs.cache-hit != 'true'
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
           New-Item -ItemType Directory -Force -Path (Split-Path -Parent $env:BASE_GAME_ARCHIVE) | Out-Null
-
-          python -m pip install --disable-pip-version-check --no-warn-script-location "gdown==5.2.0"
 
           $downloaded = $false
           for ($attempt = 1; $attempt -le 4; $attempt++) {
@@ -91,6 +103,34 @@ jobs:
 
           if (-not $downloaded) {
             throw "The base game could not be downloaded or the downloaded file was unexpectedly small. Verify the Google Drive sharing permission."
+          }
+
+      - name: Download bundled Chromium from Google Drive
+        if: steps.chromium-cache.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          New-Item -ItemType Directory -Force -Path (Split-Path -Parent $env:CHROMIUM_ARCHIVE) | Out-Null
+
+          $downloaded = $false
+          for ($attempt = 1; $attempt -le 4; $attempt++) {
+            Write-Host "Downloading bundled Chromium (attempt $attempt of 4)..."
+            python -m gdown $env:CHROMIUM_FILE_ID --output $env:CHROMIUM_ARCHIVE
+            if ($LASTEXITCODE -eq 0 -and
+                (Test-Path -LiteralPath $env:CHROMIUM_ARCHIVE -PathType Leaf) -and
+                (Get-Item -LiteralPath $env:CHROMIUM_ARCHIVE).Length -gt 100MB) {
+              $downloaded = $true
+              break
+            }
+
+            Remove-Item -LiteralPath $env:CHROMIUM_ARCHIVE -Force -ErrorAction SilentlyContinue
+            if ($attempt -lt 4) {
+              Start-Sleep -Seconds (10 * $attempt)
+            }
+          }
+
+          if (-not $downloaded) {
+            throw "Bundled Chromium could not be downloaded or the downloaded file was unexpectedly small. Verify the Google Drive sharing permission."
           }
 
       - name: Validate and extract base game
@@ -132,6 +172,16 @@ jobs:
             throw "The extracted base game does not contain the expected files."
           }
           Write-Host "Base game prepared successfully ($baseFileCount files)."
+
+      - name: Validate bundled Chromium
+        shell: pwsh
+        run: |
+          $sevenZip = "C:\Program Files\7-Zip\7z.exe"
+          & $sevenZip t $env:CHROMIUM_ARCHIVE -bso0 -bsp0
+          if ($LASTEXITCODE -ne 0) {
+            throw "The bundled Chromium archive is corrupt or incomplete."
+          }
+          Write-Host "Bundled Chromium archive is valid."
 
       - name: Cache vcpkg packages
         uses: actions/cache@v4
@@ -178,6 +228,67 @@ jobs:
             "- Full package: ``NextClient-$env:CLIENT_TAG-$env:GITHUB_RUN_NUMBER``"
             "- Launcher EXE: ``NextClient-$env:CLIENT_TAG.exe``"
           ) | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+
+      - name: Install Inno Setup 7.1
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $installer = Join-Path $env:RUNNER_TEMP "innosetup-7.1.0-x64.exe"
+          $url = "https://github.com/jrsoftware/issrc/releases/download/is-7_1_0/innosetup-7.1.0-x64.exe"
+
+          curl.exe --fail --location --retry 4 --retry-all-errors --connect-timeout 30 --output $installer $url
+          if ($LASTEXITCODE -ne 0) {
+            throw "Failed to download Inno Setup 7.1.0."
+          }
+
+          $signature = Get-AuthenticodeSignature -LiteralPath $installer
+          if ($signature.Status -ne "Valid" -or $signature.SignerCertificate.Subject -notmatch "Pyrsys B\.V\.") {
+            throw "The Inno Setup installer has an invalid or unexpected digital signature."
+          }
+
+          $process = Start-Process -FilePath $installer -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/SP-" -Wait -PassThru
+          if ($process.ExitCode -ne 0) {
+            throw "Inno Setup installation failed with exit code $($process.ExitCode)."
+          }
+
+      - name: Build tagged Allclient installer
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $iscc = "C:\Program Files\Inno Setup 7\ISCC.exe"
+          $script = Join-Path $env:GITHUB_WORKSPACE "installer\Allclient.iss"
+          $installDir = Join-Path $env:GITHUB_WORKSPACE "install"
+          $compiledInstaller = Join-Path $env:GITHUB_WORKSPACE "installer\output\Allclient-Setup.exe"
+          $taggedInstaller = Join-Path $env:GITHUB_WORKSPACE "tagged-output\Allclient-$env:CLIENT_TAG-Setup.exe"
+
+          if (-not (Test-Path -LiteralPath $iscc -PathType Leaf)) {
+            throw "Inno Setup 7 compiler was not found after installation."
+          }
+
+          & $iscc "/DSourceRoot=$installDir" $script
+          if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $compiledInstaller -PathType Leaf)) {
+            throw "Allclient installer compilation failed."
+          }
+
+          Copy-Item -LiteralPath $compiledInstaller -Destination $taggedInstaller -Force
+          $installerSize = [math]::Round((Get-Item -LiteralPath $taggedInstaller).Length / 1MB, 1)
+          Write-Host "Installer created: $taggedInstaller ($installerSize MB)"
+
+          @(
+            ""
+            "### Ready-to-install package"
+            "- Installer: ``Allclient-$env:CLIENT_TAG-Setup.exe``"
+            "- Size: **$installerSize MB**"
+          ) | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+
+      - name: Upload tagged Allclient installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: Allclient-${{ env.CLIENT_TAG }}-Setup-${{ github.run_number }}
+          path: tagged-output/Allclient-${{ env.CLIENT_TAG }}-Setup.exe
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
