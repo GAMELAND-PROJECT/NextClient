@@ -4,7 +4,18 @@ on:
   push:
     branches: [ main ]
   workflow_dispatch:
+    inputs:
+      client_tag:
+        description: Client/game-net tag (letters, numbers, _ and - only)
+        required: true
+        default: IMORTAL_GONBAD
+        type: string
   workflow_call:
+    inputs:
+      client_tag:
+        description: Optional client/game-net build tag
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -24,6 +35,24 @@ jobs:
           submodules: recursive
           fetch-depth: 0
 
+      - name: Prepare client build tag
+        shell: pwsh
+        env:
+          REQUESTED_CLIENT_TAG: ${{ inputs.client_tag }}
+        run: |
+          $tag = $env:REQUESTED_CLIENT_TAG.Trim()
+          if ([string]::IsNullOrWhiteSpace($tag)) {
+            $tag = (Get-Content -LiteralPath "client_tags.txt" -Raw).Trim()
+          }
+
+          if ($tag.Length -gt 64 -or $tag -notmatch '^[A-Za-z0-9_-]+$') {
+            throw "Invalid client tag. Use 1-64 letters, numbers, underscores or hyphens."
+          }
+
+          Set-Content -LiteralPath "client_tags.txt" -Value $tag -Encoding ascii -NoNewline
+          "CLIENT_TAG=$tag" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Host "Building NextClient for tag: $tag"
+
       - name: Cache vcpkg packages
         uses: actions/cache@v4
         with:
@@ -42,18 +71,54 @@ jobs:
         run: cmake --preset vs2022 "-DNEXTCLIENT_INSTALL_DIR=${{ github.workspace }}\install"
 
       - name: Build
-        run: cmake --build --preset vs2022-release --target BUILD_ALL
+        run: cmake --build --preset vs2022-release --target BUILD_ALL -- /m:2 /nodeReuse:false /v:minimal
+
+      - name: Prepare tagged outputs
+        shell: pwsh
+        run: |
+          $launcher = Join-Path $env:GITHUB_WORKSPACE "install\cstrike.exe"
+          if (-not (Test-Path -LiteralPath $launcher -PathType Leaf)) {
+            throw "Expected launcher was not produced: $launcher"
+          }
+
+          $releaseDir = Join-Path $env:GITHUB_WORKSPACE "tagged-output"
+          New-Item -ItemType Directory -Force -Path $releaseDir | Out-Null
+          Copy-Item -LiteralPath $launcher -Destination (Join-Path $releaseDir "NextClient-$env:CLIENT_TAG.exe") -Force
+
+          @(
+            "Client tag: $env:CLIENT_TAG"
+            "Commit: $env:GITHUB_SHA"
+            "Workflow run: $env:GITHUB_RUN_NUMBER"
+          ) | Set-Content -LiteralPath (Join-Path $env:GITHUB_WORKSPACE "install\build-info.txt") -Encoding utf8
+
+          @(
+            "## Tagged NextClient build"
+            ""
+            "- Client tag: ``$env:CLIENT_TAG``"
+            "- Full package: ``NextClient-$env:CLIENT_TAG-$env:GITHUB_RUN_NUMBER``"
+            "- Launcher EXE: ``NextClient-$env:CLIENT_TAG.exe``"
+          ) | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: NextClient-${{ github.sha }}
+          name: NextClient-${{ env.CLIENT_TAG }}-${{ github.run_number }}
           path: install/
           if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload tagged launcher EXE
+        uses: actions/upload-artifact@v4
+        with:
+          name: NextClient-${{ env.CLIENT_TAG }}-EXE-${{ github.run_number }}
+          path: tagged-output/NextClient-${{ env.CLIENT_TAG }}.exe
+          if-no-files-found: error
+          retention-days: 14
 
       - name: Upload PDBs
         uses: actions/upload-artifact@v4
         with:
-          name: NextClient-pdb-${{ github.sha }}
+          name: NextClient-${{ env.CLIENT_TAG }}-PDB-${{ github.run_number }}
           path: out/pdb/Release/*.pdb
           if-no-files-found: error
+          retention-days: 7
