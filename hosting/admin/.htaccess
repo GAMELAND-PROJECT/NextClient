@@ -1,4 +1,5 @@
 Options -Indexes
+AddType application/manifest+json .webmanifest
 
 <FilesMatch "^(config\.php|config\.example\.php|make-password\.php)$">
   Require all denied
@@ -10,3 +11,9 @@ Options -Indexes
   Header always set Referrer-Policy "no-referrer"
 </IfModule>
 
+<Files "service-worker.js">
+  <IfModule mod_headers.c>
+    Header set Cache-Control "no-cache, no-store, must-revalidate"
+    Header set Service-Worker-Allowed "/admin/"
+  </IfModule>
+</Files>

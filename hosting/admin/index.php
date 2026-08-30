@@ -10,7 +10,7 @@ const MAX_TAGS = 256;
 header('X-Content-Type-Options: nosniff');
 header('X-Frame-Options: DENY');
 header('Referrer-Policy: no-referrer');
-header("Content-Security-Policy: default-src 'self'; style-src 'self'; script-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'");
+header("Content-Security-Policy: default-src 'self'; style-src 'self'; script-src 'self'; worker-src 'self'; manifest-src 'self'; img-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'");
 header('Cache-Control: no-store, max-age=0');
 
 $configFile = __DIR__ . '/config.php';
@@ -446,7 +446,15 @@ if ($authenticated) {
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#0b1626">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Allclient">
   <title>مدیریت Allclient</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="app-icon.ico" sizes="any">
+  <link rel="apple-touch-icon" href="icon-192.png">
   <link rel="stylesheet" href="style.css">
   <script src="panel.js" defer></script>
 </head>
@@ -455,7 +463,9 @@ if ($authenticated) {
   <header class="topbar">
     <div><span class="eyebrow">GAMELAND PROJECT</span><h1>کنترل‌پنل Allclient</h1></div>
     <?php if ($authenticated): ?>
-      <form method="post"><input type="hidden" name="csrf" value="<?= escape(csrfToken()) ?>"><input type="hidden" name="action" value="logout"><button class="button ghost" type="submit">خروج امن</button></form>
+      <div class="top-actions"><button class="button secondary pwa-install" id="pwa-install" type="button" hidden>نصب روی گوشی</button><form method="post"><input type="hidden" name="csrf" value="<?= escape(csrfToken()) ?>"><input type="hidden" name="action" value="logout"><button class="button ghost" type="submit">خروج امن</button></form></div>
+    <?php else: ?>
+      <button class="button secondary pwa-install" id="pwa-install" type="button" hidden>نصب روی گوشی</button>
     <?php endif; ?>
   </header>
 
