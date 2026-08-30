@@ -203,7 +203,7 @@ jobs:
       - name: Build
         run: cmake --build --preset vs2022-release --target BUILD_ALL -- /m:2 /nodeReuse:false /v:minimal
 
-      - name: Prepare tagged outputs
+      - name: Prepare installer metadata
         shell: pwsh
         run: |
           $launcher = Join-Path $env:GITHUB_WORKSPACE "install\cstrike.exe"
@@ -213,7 +213,6 @@ jobs:
 
           $releaseDir = Join-Path $env:GITHUB_WORKSPACE "tagged-output"
           New-Item -ItemType Directory -Force -Path $releaseDir | Out-Null
-          Copy-Item -LiteralPath $launcher -Destination (Join-Path $releaseDir "NextClient-$env:CLIENT_TAG.exe") -Force
 
           @(
             "Client tag: $env:CLIENT_TAG"
@@ -225,8 +224,7 @@ jobs:
             "## Tagged NextClient build"
             ""
             "- Client tag: ``$env:CLIENT_TAG``"
-            "- Full package: ``NextClient-$env:CLIENT_TAG-$env:GITHUB_RUN_NUMBER``"
-            "- Launcher EXE: ``NextClient-$env:CLIENT_TAG.exe``"
+            "- Output: installer EXE only"
           ) | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
 
       - name: Install Inno Setup 7.1
@@ -289,27 +287,3 @@ jobs:
           if-no-files-found: error
           compression-level: 0
           retention-days: 14
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: NextClient-${{ env.CLIENT_TAG }}-${{ github.run_number }}
-          path: install/
-          if-no-files-found: error
-          retention-days: 14
-
-      - name: Upload tagged launcher EXE
-        uses: actions/upload-artifact@v4
-        with:
-          name: NextClient-${{ env.CLIENT_TAG }}-EXE-${{ github.run_number }}
-          path: tagged-output/NextClient-${{ env.CLIENT_TAG }}.exe
-          if-no-files-found: error
-          retention-days: 14
-
-      - name: Upload PDBs
-        uses: actions/upload-artifact@v4
-        with:
-          name: NextClient-${{ env.CLIENT_TAG }}-PDB-${{ github.run_number }}
-          path: out/pdb/Release/*.pdb
-          if-no-files-found: error
-          retention-days: 7
