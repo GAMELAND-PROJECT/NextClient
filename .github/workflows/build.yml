@@ -27,6 +27,9 @@ jobs:
 
     env:
       VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/vcpkg_bincache
+      BASE_GAME_FILE_ID: 1gYzFPCnlmn_eb0tj7XdaUyytAyrWsrT1
+      BASE_GAME_CACHE_VERSION: v1
+      BASE_GAME_ARCHIVE: ${{ github.workspace }}/base-game-cache/Allclient.rar
 
     steps:
       - name: Checkout (with submodules)
@@ -52,6 +55,83 @@ jobs:
           Set-Content -LiteralPath "client_tags.txt" -Value $tag -Encoding ascii -NoNewline
           "CLIENT_TAG=$tag" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           Write-Host "Building NextClient for tag: $tag"
+
+      - name: Cache base game archive
+        id: base-game-cache
+        uses: actions/cache@v4
+        with:
+          path: base-game-cache/Allclient.rar
+          key: base-game-${{ runner.os }}-${{ env.BASE_GAME_CACHE_VERSION }}
+
+      - name: Download base game from Google Drive
+        if: steps.base-game-cache.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          New-Item -ItemType Directory -Force -Path (Split-Path -Parent $env:BASE_GAME_ARCHIVE) | Out-Null
+
+          python -m pip install --disable-pip-version-check --no-warn-script-location "gdown==5.2.0"
+
+          $downloaded = $false
+          for ($attempt = 1; $attempt -le 4; $attempt++) {
+            Write-Host "Downloading the base game (attempt $attempt of 4)..."
+            python -m gdown $env:BASE_GAME_FILE_ID --output $env:BASE_GAME_ARCHIVE
+            if ($LASTEXITCODE -eq 0 -and
+                (Test-Path -LiteralPath $env:BASE_GAME_ARCHIVE -PathType Leaf) -and
+                (Get-Item -LiteralPath $env:BASE_GAME_ARCHIVE).Length -gt 100MB) {
+              $downloaded = $true
+              break
+            }
+
+            Remove-Item -LiteralPath $env:BASE_GAME_ARCHIVE -Force -ErrorAction SilentlyContinue
+            if ($attempt -lt 4) {
+              Start-Sleep -Seconds (10 * $attempt)
+            }
+          }
+
+          if (-not $downloaded) {
+            throw "The base game could not be downloaded or the downloaded file was unexpectedly small. Verify the Google Drive sharing permission."
+          }
+
+      - name: Validate and extract base game
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $sevenZip = "C:\Program Files\7-Zip\7z.exe"
+          if (-not (Test-Path -LiteralPath $sevenZip -PathType Leaf)) {
+            throw "7-Zip is not available on this GitHub runner."
+          }
+
+          & $sevenZip t $env:BASE_GAME_ARCHIVE -bso0 -bsp0
+          if ($LASTEXITCODE -ne 0) {
+            throw "The Google Drive base-game archive is corrupt or incomplete."
+          }
+
+          $extractDir = Join-Path $env:RUNNER_TEMP "allclient-base"
+          Remove-Item -LiteralPath $extractDir -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force -Path $extractDir | Out-Null
+          & $sevenZip x $env:BASE_GAME_ARCHIVE "-o$extractDir" -y -bso0 -bsp0
+          if ($LASTEXITCODE -ne 0) {
+            throw "7-Zip failed to extract the base game."
+          }
+
+          $rootFiles = @(Get-ChildItem -LiteralPath $extractDir -Force -File)
+          $rootDirs = @(Get-ChildItem -LiteralPath $extractDir -Force -Directory)
+          if ($rootFiles.Count -eq 0 -and $rootDirs.Count -eq 1) {
+            $gameRoot = $rootDirs[0].FullName
+          } else {
+            $gameRoot = $extractDir
+          }
+
+          $installDir = Join-Path $env:GITHUB_WORKSPACE "install"
+          New-Item -ItemType Directory -Force -Path $installDir | Out-Null
+          Get-ChildItem -LiteralPath $gameRoot -Force | Copy-Item -Destination $installDir -Recurse -Force
+
+          $baseFileCount = @(Get-ChildItem -LiteralPath $installDir -Recurse -File).Count
+          if ($baseFileCount -lt 10) {
+            throw "The extracted base game does not contain the expected files."
+          }
+          Write-Host "Base game prepared successfully ($baseFileCount files)."
 
       - name: Cache vcpkg packages
         uses: actions/cache@v4
