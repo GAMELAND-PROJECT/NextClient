@@ -88,14 +88,27 @@ function savePanelConfig(string $passwordHash): void
     }
 }
 
-function validateNewAdminPassword(string $password, string $confirmation): void
+function normalizeAdminPassword(string $password): string
 {
+    return strtr($password, [
+        '۰' => '0', '۱' => '1', '۲' => '2', '۳' => '3', '۴' => '4',
+        '۵' => '5', '۶' => '6', '۷' => '7', '۸' => '8', '۹' => '9',
+        '٠' => '0', '١' => '1', '٢' => '2', '٣' => '3', '٤' => '4',
+        '٥' => '5', '٦' => '6', '٧' => '7', '٨' => '8', '٩' => '9',
+    ]);
+}
+
+function validateNewAdminPassword(string $password, string $confirmation): string
+{
+    $password = normalizeAdminPassword($password);
+    $confirmation = normalizeAdminPassword($confirmation);
     if ($password !== $confirmation) {
         throw new RuntimeException('تکرار رمز با رمز جدید یکسان نیست.');
     }
     if (!preg_match('/^\d{8}$/D', $password)) {
-        throw new RuntimeException('رمز مدیریت باید دقیقاً ۸ رقم انگلیسی باشد.');
+        throw new RuntimeException('رمز مدیریت باید دقیقاً ۸ رقم فارسی یا انگلیسی باشد.');
     }
+    return $password;
 }
 
 function csrfToken(): string
@@ -342,8 +355,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($configured) {
                 throw new RuntimeException('راه‌اندازی اولیه قبلاً انجام شده است.');
             }
-            $newPassword = (string)($_POST['new_password'] ?? '');
-            validateNewAdminPassword($newPassword, (string)($_POST['confirm_password'] ?? ''));
+            $newPassword = validateNewAdminPassword((string)($_POST['new_password'] ?? ''),
+                (string)($_POST['confirm_password'] ?? ''));
             savePanelConfig(password_hash($newPassword, PASSWORD_DEFAULT));
             session_regenerate_id(true);
             $_SESSION['authenticated'] = true;
@@ -359,7 +372,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if (time() < $blockedUntil) {
                 throw new RuntimeException('تلاش‌های ناموفق زیاد است؛ کمی بعد دوباره امتحان کنید.');
             }
-            if (!password_verify((string)($_POST['password'] ?? ''), (string)$config['password_hash'])) {
+            if (!password_verify(normalizeAdminPassword((string)($_POST['password'] ?? '')),
+                (string)$config['password_hash'])) {
                 $_SESSION['login_attempts'] = ++$attempts;
                 if ($attempts >= 5) { $_SESSION['blocked_until'] = time() + 300; }
                 throw new RuntimeException('رمز ورود صحیح نیست.');
@@ -386,12 +400,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         requireValidCsrf();
 
         if ($action === 'change_admin_password') {
-            $currentPassword = (string)($_POST['current_password'] ?? '');
+            $currentPassword = normalizeAdminPassword((string)($_POST['current_password'] ?? ''));
             if (!password_verify($currentPassword, (string)$config['password_hash'])) {
                 throw new RuntimeException('رمز فعلی صحیح نیست.');
             }
-            $newPassword = (string)($_POST['new_password'] ?? '');
-            validateNewAdminPassword($newPassword, (string)($_POST['confirm_password'] ?? ''));
+            $newPassword = validateNewAdminPassword((string)($_POST['new_password'] ?? ''),
+                (string)($_POST['confirm_password'] ?? ''));
             if (password_verify($newPassword, (string)$config['password_hash'])) {
                 throw new RuntimeException('رمز جدید باید با رمز فعلی متفاوت باشد.');
             }
@@ -476,8 +490,8 @@ if ($authenticated) {
       <div class="icon-lock">◆</div><h2>راه‌اندازی اولیه</h2><p>رمز مدیر را تعیین کنید. این صفحه پس از ثبت رمز برای همیشه بسته می‌شود.</p>
       <form method="post" autocomplete="off">
         <input type="hidden" name="csrf" value="<?= escape(csrfToken()) ?>"><input type="hidden" name="action" value="setup">
-        <label>رمز ۸ رقمی جدید<input type="password" name="new_password" minlength="8" maxlength="8" inputmode="numeric" pattern="\d{8}" required autofocus autocomplete="new-password"></label>
-        <label>تکرار رمز<input type="password" name="confirm_password" minlength="8" maxlength="8" inputmode="numeric" pattern="\d{8}" required autocomplete="new-password"></label>
+        <label>رمز ۸ رقمی جدید<input type="password" name="new_password" minlength="8" maxlength="8" inputmode="numeric" pattern="[0-9۰-۹٠-٩]{8}" required autofocus autocomplete="new-password"></label>
+        <label>تکرار رمز<input type="password" name="confirm_password" minlength="8" maxlength="8" inputmode="numeric" pattern="[0-9۰-۹٠-٩]{8}" required autocomplete="new-password"></label>
         <button class="button primary wide" type="submit">ثبت رمز و فعال‌سازی پنل</button>
       </form>
       <p class="security-note">پیش از ثبت رمز، Directory Privacy سی‌پنل را برای این پوشه فعال کنید.</p>
@@ -519,8 +533,8 @@ if ($authenticated) {
         <div class="card-title"><div><h2>رمز مدیریت پنل</h2><p>برای تغییر، رمز فعلی نیز الزامی است.</p></div><span class="dot active"></span></div>
         <form method="post" autocomplete="off"><input type="hidden" name="csrf" value="<?= escape(csrfToken()) ?>"><input type="hidden" name="action" value="change_admin_password">
           <label>رمز فعلی<input type="password" name="current_password" required autocomplete="current-password"></label>
-          <label>رمز ۸ رقمی جدید<input type="password" name="new_password" minlength="8" maxlength="8" inputmode="numeric" pattern="\d{8}" required autocomplete="new-password"></label>
-          <label>تکرار رمز جدید<input type="password" name="confirm_password" minlength="8" maxlength="8" inputmode="numeric" pattern="\d{8}" required autocomplete="new-password"></label>
+          <label>رمز ۸ رقمی جدید<input type="password" name="new_password" minlength="8" maxlength="8" inputmode="numeric" pattern="[0-9۰-۹٠-٩]{8}" required autocomplete="new-password"></label>
+          <label>تکرار رمز جدید<input type="password" name="confirm_password" minlength="8" maxlength="8" inputmode="numeric" pattern="[0-9۰-۹٠-٩]{8}" required autocomplete="new-password"></label>
           <button class="button secondary" type="submit">تغییر رمز مدیریت</button>
         </form>
       </article>
