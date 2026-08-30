@@ -12,8 +12,8 @@ $password = strtr($argv[1] ?? '', [
     '٠' => '0', '١' => '1', '٢' => '2', '٣' => '3', '٤' => '4',
     '٥' => '5', '٦' => '6', '٧' => '7', '٨' => '8', '٩' => '9',
 ]);
-if (!preg_match('/^\d{8}$/D', $password)) {
-    fwrite(STDERR, "Password must contain exactly 8 Persian, Arabic or ASCII digits.\n");
+if (!preg_match('/\A.{8}\z/us', $password)) {
+    fwrite(STDERR, "Password must contain exactly 8 characters.\n");
     exit(1);
 }
 

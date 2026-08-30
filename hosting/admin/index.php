@@ -105,8 +105,8 @@ function validateNewAdminPassword(string $password, string $confirmation): strin
     if ($password !== $confirmation) {
         throw new RuntimeException('تکرار رمز با رمز جدید یکسان نیست.');
     }
-    if (!preg_match('/^\d{8}$/D', $password)) {
-        throw new RuntimeException('رمز مدیریت باید دقیقاً ۸ رقم فارسی یا انگلیسی باشد.');
+    if (!preg_match('/\A.{8}\z/us', $password)) {
+        throw new RuntimeException('رمز مدیریت باید دقیقاً ۸ کاراکتر باشد؛ حروف و اعداد مجاز هستند.');
     }
     return $password;
 }
@@ -490,8 +490,8 @@ if ($authenticated) {
       <div class="icon-lock">◆</div><h2>راه‌اندازی اولیه</h2><p>رمز مدیر را تعیین کنید. این صفحه پس از ثبت رمز برای همیشه بسته می‌شود.</p>
       <form method="post" autocomplete="off">
         <input type="hidden" name="csrf" value="<?= escape(csrfToken()) ?>"><input type="hidden" name="action" value="setup">
-        <label>رمز ۸ رقمی جدید<input type="password" name="new_password" inputmode="numeric" required autofocus autocomplete="new-password"></label>
-        <label>تکرار رمز<input type="password" name="confirm_password" inputmode="numeric" required autocomplete="new-password"></label>
+        <label>رمز ۸ کاراکتری جدید<input type="password" name="new_password" required autofocus autocomplete="new-password"></label>
+        <label>تکرار رمز<input type="password" name="confirm_password" required autocomplete="new-password"></label>
         <button class="button primary wide" type="submit">ثبت رمز و فعال‌سازی پنل</button>
       </form>
       <p class="security-note">پیش از ثبت رمز، Directory Privacy سی‌پنل را برای این پوشه فعال کنید.</p>
@@ -533,8 +533,8 @@ if ($authenticated) {
         <div class="card-title"><div><h2>رمز مدیریت پنل</h2><p>برای تغییر، رمز فعلی نیز الزامی است.</p></div><span class="dot active"></span></div>
         <form method="post" autocomplete="off"><input type="hidden" name="csrf" value="<?= escape(csrfToken()) ?>"><input type="hidden" name="action" value="change_admin_password">
           <label>رمز فعلی<input type="password" name="current_password" required autocomplete="current-password"></label>
-          <label>رمز ۸ رقمی جدید<input type="password" name="new_password" inputmode="numeric" required autocomplete="new-password"></label>
-          <label>تکرار رمز جدید<input type="password" name="confirm_password" inputmode="numeric" required autocomplete="new-password"></label>
+          <label>رمز ۸ کاراکتری جدید<input type="password" name="new_password" required autocomplete="new-password"></label>
+          <label>تکرار رمز جدید<input type="password" name="confirm_password" required autocomplete="new-password"></label>
           <button class="button secondary" type="submit">تغییر رمز مدیریت</button>
         </form>
       </article>
