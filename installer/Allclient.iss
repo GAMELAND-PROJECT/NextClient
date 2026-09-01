@@ -18,6 +18,9 @@ AppId={{D9E46BD1-52F8-470F-8639-FF31FE7C5E48}
 AppName={#AppName}
 AppVersion={#AppVersion}
 AppPublisher={#AppPublisher}
+; Inno Setup 7 and the application binaries are supported on Windows 7 SP1+
+; only. Keep this explicit so an unsupported legacy OS fails before extraction.
+MinVersion=6.1sp1
 DefaultDirName={localappdata}\Allclient
 DefaultGroupName={#AppName}
 DisableDirPage=no
@@ -175,7 +178,53 @@ begin
 #endif
 end;
 
-function FetchWithChromium(const Url: String; var ResponseText: AnsiString): Boolean;
+function FetchWithNativeHttps(const Url: String; var ResponseText: String): Boolean;
+var
+  Request: Variant;
+  ProxyMode: Integer;
+begin
+  Result := False;
+  ResponseText := '';
+  if Pos('https://', Lowercase(Url)) <> 1 then
+  begin
+    OnlineVerificationMessage := 'The verification URL is not secure.';
+    Exit;
+  end;
+
+  { WinHttpRequestOption_SecureProtocols = 9 and TLS 1.2 = 2048.
+    This avoids the legacy TLS 1.0 default used by WinHTTP on Windows 7. }
+  for ProxyMode := 0 to 1 do
+  begin
+    try
+      Request := CreateOleObject('WinHttp.WinHttpRequest.5.1');
+      Request.SetTimeouts(5000, 10000, 10000, 20000);
+      if ProxyMode = 1 then
+        Request.SetProxy(1); { HTTPREQUEST_PROXYSETTING_DIRECT }
+      Request.Option[6] := True; { Follow HTTPS redirects. }
+      Request.Option[9] := 2048; { TLS 1.2 only. }
+      Request.Open('GET', Url, False);
+      Request.SetRequestHeader('User-Agent', 'Allclient-Setup/2.0');
+      Request.SetRequestHeader('Cache-Control', 'no-cache');
+      Request.Send();
+
+      if Request.Status = 200 then
+      begin
+        ResponseText := Request.ResponseText;
+        if (Length(ResponseText) > 0) and (Length(ResponseText) <= 262144) then
+        begin
+          Result := True;
+          Exit;
+        end;
+        ResponseText := '';
+      end;
+    except
+      { Try the direct transport and then the bundled Chromium fallback. }
+      ResponseText := '';
+    end;
+  end;
+end;
+
+function FetchWithChromium(const Url: String; var ResponseText: String): Boolean;
 var
   BrowserPath, ProfilePath, Parameters: String;
   ResultCode, I: Integer;
@@ -186,7 +235,8 @@ begin
   ProfilePath := ExpandConstant('{tmp}\allclient-browser-profile');
   try
     try
-      { Online access always uses the Chromium runtime embedded in this Setup. }
+      { Bundled Chromium is the compatibility fallback when native WinHTTP
+        cannot complete the secure request on an older Windows installation. }
       if not PrepareBundledChromium(BrowserPath) then
       begin
         OnlineVerificationMessage := 'Verification component could not be prepared.';
@@ -199,6 +249,7 @@ begin
       Parameters := '--headless --disable-gpu --no-first-run ' +
       '--no-default-browser-check --disable-extensions --disable-sync ' +
       '--disable-component-update --disable-background-networking ' +
+      '--disable-quic --ssl-version-min=tls1.2 ' +
       '--disable-crash-reporter --disable-breakpad --no-pings ' +
       '--disable-default-apps --disable-logging --disable-metrics ' +
       '--disable-translate --dns-prefetch-disable --disable-preconnect ' +
@@ -251,7 +302,7 @@ begin
   end;
 end;
 
-function FetchAccessResponse(const Url: String; var ResponseText: AnsiString): Boolean;
+function FetchAccessResponse(const Url: String; var ResponseText: String): Boolean;
 var
   Attempt: Integer;
 begin
@@ -262,12 +313,22 @@ begin
     SetAccessStatus('Connecting to online service (attempt ' +
       IntToStr(Attempt) + ' of 2)...', clGray);
     try
-      if FetchWithChromium(Url, ResponseText) then
+      if FetchWithNativeHttps(Url, ResponseText) then
       begin
         Result := True;
         Exit;
       end
-      else if Attempt < 2 then
+      else
+      begin
+        SetAccessStatus('Native connection unavailable. Trying compatibility transport...', clGray);
+        if FetchWithChromium(Url, ResponseText) then
+        begin
+          Result := True;
+          Exit;
+        end;
+      end;
+
+      if Attempt < 2 then
         SetAccessStatus('Connection was interrupted. Retrying safely...', clGray);
     except
       OnlineVerificationMessage := 'The service response could not be processed safely.';
@@ -279,7 +340,7 @@ end;
 function OnlineAccessCodeIsValid(const EnteredCode: String): Boolean;
 var
   RequestUrl: String;
-  ResponseText: AnsiString;
+  ResponseText: String;
 begin
   Result := False;
   OnlineServiceUnavailable := False;
@@ -335,7 +396,7 @@ end;
 
 procedure RefreshAccessStatus(Sender: TObject);
 var
-  ResponseText: AnsiString;
+  ResponseText: String;
 begin
   RefreshAccessButton.Enabled := False;
   OnlineVerificationMessage := '';
@@ -358,8 +419,7 @@ end;
 
 procedure RunEarlyPreparation(Sender: TObject);
 var
-  BrowserPath: String;
-  ResponseText: AnsiString;
+  ResponseText: String;
 begin
   PreparationStarted := True;
   PreparationReady := False;
@@ -373,37 +433,26 @@ begin
   WizardForm.Update;
 
   try
-    if PrepareBundledChromium(BrowserPath) then
-    begin
-      PreparationProgress.Position := 55;
-      PreparationStatusLabel.Caption :=
-        'Component prepared. Confirming secure online access...';
-      WizardForm.Update;
+    PreparationProgress.Position := 55;
+    PreparationStatusLabel.Caption :=
+      'Secure transports prepared. Confirming online access...';
+    WizardForm.Update;
 
-      if FetchAccessResponse(AccessApiUrl + '?action=status', ResponseText) and
-         (Pos('"service":"allclient-access"', Lowercase(ResponseText)) > 0) then
-      begin
-        PreparationProgress.Position := 100;
-        PreparationReady := True;
-        PreparationStatusLabel.Font.Color := clGreen;
-        PreparationStatusLabel.Caption :=
-          'Configuration complete. Online verification is ready.';
-      end
-      else
-      begin
-        PreparationProgress.Position := 55;
-        PreparationStatusLabel.Font.Color := clRed;
-        PreparationStatusLabel.Caption :=
-          'Component is ready, but the online service could not be confirmed. You may retry or continue with offline access.';
-        PreparationRetryButton.Visible := True;
-      end;
+    if FetchAccessResponse(AccessApiUrl + '?action=status', ResponseText) and
+       (Pos('"service":"allclient-access"', Lowercase(ResponseText)) > 0) then
+    begin
+      PreparationProgress.Position := 100;
+      PreparationReady := True;
+      PreparationStatusLabel.Font.Color := clGreen;
+      PreparationStatusLabel.Caption :=
+        'Configuration complete. Online verification is ready.';
     end
     else
     begin
-      PreparationProgress.Position := 0;
+      PreparationProgress.Position := 55;
       PreparationStatusLabel.Font.Color := clRed;
       PreparationStatusLabel.Caption :=
-        'Online verification could not be prepared. You may retry or continue with offline access.';
+        'Secure transports are ready, but the online service could not be confirmed. You may retry or continue with offline access.';
       PreparationRetryButton.Visible := True;
     end;
   except

@@ -1,6 +1,15 @@
 cmake_minimum_required(VERSION 3.21)
 project(NextClient VERSION 2.5.3)
 
+# VS 2022 is the newest Microsoft toolchain that supports producing native
+# Windows 7 binaries. VS 2026 raises the target floor to Windows 10, so reject
+# it instead of silently publishing an installer that cannot start on Win7.
+if (MSVC AND MSVC_VERSION GREATER_EQUAL 1950)
+    message(FATAL_ERROR
+            "Windows 7 builds require Visual Studio 2022 (MSVC v143) or older; "
+            "Visual Studio 2026 cannot target Windows 7")
+endif ()
+
 set(NEXTCLIENT_ROOT ${CMAKE_CURRENT_SOURCE_DIR})
 set(USE_PROFILER OFF CACHE BOOL "Build with Optick profiler instrumentation" FORCE)
 

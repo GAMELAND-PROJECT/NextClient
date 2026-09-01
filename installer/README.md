@@ -8,13 +8,22 @@
 4. creates Voice and No Voice desktop shortcuts;
 5. creates a standard Windows uninstaller.
 
-Online verification uses the bundled Chromium 109 x86 in hidden headless mode,
-which avoids networks where the native Windows downloader cannot complete a
-Google TLS connection. It is extracted into the installer's temporary directory
-and used only for access requests. Installed browsers and the Windows HTTPS
-downloader are deliberately ignored, so every machine uses the exact same
-verification engine. The access page includes a connection-status indicator and
-a manual refresh button.
+Online verification first uses Windows WinHTTP with TLS 1.2. If an older
+Windows installation cannot complete the Google HTTPS request, the installer
+automatically falls back to bundled Chromium 109 x86 in hidden headless mode.
+Chromium is extracted into the installer's temporary directory and used only
+for access requests; an installed browser is not required. The access page
+includes a connection-status indicator and a manual refresh button.
+
+## Supported Windows versions
+
+- Windows 7 SP1 (x86 and x64), Windows 8/8.1, Windows 10 and Windows 11 are
+  supported by the normal VS2022 build and this installer.
+- Windows XP is not supported by this build. VS2022, Inno Setup 7, Chromium 109
+  and several runtime APIs in the client cannot run on XP. An XP release would
+  require a separate `v141_xp` toolchain, older dependencies, a different
+  installer and a dedicated test/release pipeline; changing `WINVER` alone is
+  not sufficient.
 
 ## Chromium 109 fallback
 

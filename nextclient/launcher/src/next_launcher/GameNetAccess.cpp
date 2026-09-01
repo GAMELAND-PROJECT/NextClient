@@ -12,6 +12,7 @@
 #include <cstdint>
 #include <string>
 #include <string_view>
+#include <utility>
 
 namespace
 {
@@ -28,6 +29,34 @@ public:
 private:
     HINTERNET value_;
 };
+
+class GlobalMemory
+{
+public:
+    ~GlobalMemory() { reset(); }
+    GlobalMemory(const GlobalMemory&) = delete;
+    GlobalMemory& operator=(const GlobalMemory&) = delete;
+    GlobalMemory() = default;
+
+    void reset(void* value = nullptr)
+    {
+        if (value_)
+            GlobalFree(value_);
+        value_ = value;
+    }
+
+private:
+    void* value_{};
+};
+
+enum class ProxyMode
+{
+    CurrentUser,
+    WinHttpDefault,
+    Direct,
+};
+
+constexpr DWORD kTls12Only = 0x00000800; // WINHTTP_FLAG_SECURE_PROTOCOL_TLS1_2
 
 std::string_view Trim(std::string_view value)
 {
@@ -289,7 +318,12 @@ bool GetIranDateFromResponse(HINTERNET request, CalendarDate& date)
     return true;
 }
 
-bool DownloadSmallHttpsText(const wchar_t* url, size_t maximum_size, std::string& response)
+bool PerformHttpsGet(
+    const wchar_t* url,
+    size_t maximum_size,
+    ProxyMode proxy_mode,
+    std::string& response,
+    CalendarDate* server_date)
 {
     URL_COMPONENTS parts{};
     parts.dwStructSize = sizeof(parts);
@@ -305,12 +339,48 @@ bool DownloadSmallHttpsText(const wchar_t* url, size_t maximum_size, std::string
     if (parts.dwExtraInfoLength)
         path.append(parts.lpszExtraInfo, parts.dwExtraInfoLength);
 
+    WINHTTP_CURRENT_USER_IE_PROXY_CONFIG ie_proxy{};
+    GlobalMemory ie_proxy_name;
+    GlobalMemory ie_proxy_bypass;
+    GlobalMemory ie_auto_config;
+    bool have_ie_proxy = false;
+    if (proxy_mode == ProxyMode::CurrentUser && WinHttpGetIEProxyConfigForCurrentUser(&ie_proxy))
+    {
+        ie_proxy_name.reset(ie_proxy.lpszProxy);
+        ie_proxy_bypass.reset(ie_proxy.lpszProxyBypass);
+        ie_auto_config.reset(ie_proxy.lpszAutoConfigUrl);
+        have_ie_proxy = true;
+    }
+
+    DWORD access_type = WINHTTP_ACCESS_TYPE_NO_PROXY;
+    const wchar_t* proxy_name = WINHTTP_NO_PROXY_NAME;
+    const wchar_t* proxy_bypass = WINHTTP_NO_PROXY_BYPASS;
+    if (proxy_mode == ProxyMode::WinHttpDefault)
+    {
+        access_type = WINHTTP_ACCESS_TYPE_DEFAULT_PROXY;
+    }
+    else if (have_ie_proxy && ie_proxy.lpszProxy)
+    {
+        access_type = WINHTTP_ACCESS_TYPE_NAMED_PROXY;
+        proxy_name = ie_proxy.lpszProxy;
+        proxy_bypass = ie_proxy.lpszProxyBypass;
+    }
+
     WinHttpHandle session(WinHttpOpen(
-        L"Allclient-Access/1.0", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
-        WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0));
+        L"Allclient-Access/2.0", access_type, proxy_name, proxy_bypass, 0));
     if (!session.get())
         return false;
     WinHttpSetTimeouts(session.get(), 3000, 3000, 5000, 5000);
+
+    // Windows 7 WinHTTP commonly defaults to TLS 1.0 even when browsers use
+    // TLS 1.2. Select TLS 1.2 per-process so no machine registry change is
+    // required. Failure is allowed to fall through to the other transports.
+    DWORD secure_protocols = kTls12Only;
+    if (!WinHttpSetOption(session.get(), WINHTTP_OPTION_SECURE_PROTOCOLS,
+            &secure_protocols, sizeof(secure_protocols)))
+    {
+        return false;
+    }
 
     WinHttpHandle connection(WinHttpConnect(session.get(), host.c_str(), parts.nPort, 0));
     if (!connection.get())
@@ -318,13 +388,53 @@ bool DownloadSmallHttpsText(const wchar_t* url, size_t maximum_size, std::string
     WinHttpHandle request(WinHttpOpenRequest(
         connection.get(), L"GET", path.c_str(), nullptr, WINHTTP_NO_REFERER,
         WINHTTP_DEFAULT_ACCEPT_TYPES, WINHTTP_FLAG_SECURE));
-    if (!request.get() ||
-        !WinHttpSendRequest(request.get(), WINHTTP_NO_ADDITIONAL_HEADERS, 0,
+    if (!request.get())
+        return false;
+
+    WINHTTP_PROXY_INFO auto_proxy{};
+    GlobalMemory auto_proxy_name;
+    GlobalMemory auto_proxy_bypass;
+    if (proxy_mode == ProxyMode::CurrentUser && have_ie_proxy &&
+        !ie_proxy.lpszProxy && (ie_proxy.fAutoDetect || ie_proxy.lpszAutoConfigUrl))
+    {
+        WINHTTP_AUTOPROXY_OPTIONS options{};
+        if (ie_proxy.lpszAutoConfigUrl)
+        {
+            options.dwFlags |= WINHTTP_AUTOPROXY_CONFIG_URL;
+            options.lpszAutoConfigUrl = ie_proxy.lpszAutoConfigUrl;
+        }
+        if (ie_proxy.fAutoDetect)
+        {
+            options.dwFlags |= WINHTTP_AUTOPROXY_AUTO_DETECT;
+            options.dwAutoDetectFlags = WINHTTP_AUTO_DETECT_TYPE_DHCP |
+                WINHTTP_AUTO_DETECT_TYPE_DNS_A;
+        }
+        options.fAutoLogonIfChallenged = TRUE;
+        if (WinHttpGetProxyForUrl(session.get(), url, &options, &auto_proxy))
+        {
+            auto_proxy_name.reset(auto_proxy.lpszProxy);
+            auto_proxy_bypass.reset(auto_proxy.lpszProxyBypass);
+            if (!WinHttpSetOption(request.get(), WINHTTP_OPTION_PROXY,
+                    &auto_proxy, sizeof(auto_proxy)))
+            {
+                return false;
+            }
+        }
+    }
+
+    DWORD auto_logon_policy = WINHTTP_AUTOLOGON_SECURITY_LEVEL_LOW;
+    WinHttpSetOption(request.get(), WINHTTP_OPTION_AUTOLOGON_POLICY,
+        &auto_logon_policy, sizeof(auto_logon_policy));
+
+    if (!WinHttpSendRequest(request.get(), WINHTTP_NO_ADDITIONAL_HEADERS, 0,
             WINHTTP_NO_REQUEST_DATA, 0, 0, 0) ||
         !WinHttpReceiveResponse(request.get(), nullptr))
     {
         return false;
     }
+
+    if (server_date && !GetIranDateFromResponse(request.get(), *server_date))
+        return false;
 
     DWORD status_code = 0;
     DWORD status_size = sizeof(status_code);
@@ -354,6 +464,42 @@ bool DownloadSmallHttpsText(const wchar_t* url, size_t maximum_size, std::string
         response.resize(offset + read);
     }
 }
+
+bool DownloadHttpsText(
+    const wchar_t* url,
+    size_t maximum_size,
+    std::string& response,
+    CalendarDate* server_date = nullptr)
+{
+    // Try the current user's IE/PAC settings first (important on Windows 7),
+    // then the machine WinHTTP proxy and finally a direct connection. Each
+    // attempt owns fresh handles so a failed proxy cannot poison the fallback.
+    constexpr std::array modes{
+        ProxyMode::CurrentUser,
+        ProxyMode::WinHttpDefault,
+        ProxyMode::Direct,
+    };
+    for (const auto mode : modes)
+    {
+        CalendarDate candidate_date{};
+        std::string candidate_response;
+        if (PerformHttpsGet(url, maximum_size, mode, candidate_response,
+                server_date ? &candidate_date : nullptr))
+        {
+            response = std::move(candidate_response);
+            if (server_date)
+                *server_date = candidate_date;
+            return true;
+        }
+    }
+    response.clear();
+    return false;
+}
+
+bool DownloadSmallHttpsText(const wchar_t* url, size_t maximum_size, std::string& response)
+{
+    return DownloadHttpsText(url, maximum_size, response);
+}
 }
 
 GameNetAccessStatus QueryGameNetOnlineAccess()
@@ -364,73 +510,10 @@ GameNetAccessStatus QueryGameNetOnlineAccess()
             GameNetAccessState::ServiceUnavailable, kGameNetTag, {}, {}, -1};
     };
 
-    URL_COMPONENTS parts{};
-    parts.dwStructSize = sizeof(parts);
-    parts.dwSchemeLength = static_cast<DWORD>(-1);
-    parts.dwHostNameLength = static_cast<DWORD>(-1);
-    parts.dwUrlPathLength = static_cast<DWORD>(-1);
-    parts.dwExtraInfoLength = static_cast<DWORD>(-1);
-    if (!WinHttpCrackUrl(kGameNetAccessUrl, 0, 0, &parts) || parts.nScheme != INTERNET_SCHEME_HTTPS)
-        return unavailable();
-
-    const std::wstring host(parts.lpszHostName, parts.dwHostNameLength);
-    std::wstring path(parts.lpszUrlPath, parts.dwUrlPathLength);
-    if (parts.dwExtraInfoLength)
-        path.append(parts.lpszExtraInfo, parts.dwExtraInfoLength);
-
-    WinHttpHandle session(WinHttpOpen(
-        L"Allclient-Access/1.0", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
-        WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0));
-    if (!session.get())
-        return unavailable();
-
-    WinHttpSetTimeouts(session.get(), 3000, 3000, 5000, 5000);
-    WinHttpHandle connection(WinHttpConnect(session.get(), host.c_str(), parts.nPort, 0));
-    if (!connection.get())
-        return unavailable();
-
-    WinHttpHandle request(WinHttpOpenRequest(
-        connection.get(), L"GET", path.c_str(), nullptr, WINHTTP_NO_REFERER,
-        WINHTTP_DEFAULT_ACCEPT_TYPES, WINHTTP_FLAG_SECURE));
-    if (!request.get() ||
-        !WinHttpSendRequest(request.get(), WINHTTP_NO_ADDITIONAL_HEADERS, 0,
-            WINHTTP_NO_REQUEST_DATA, 0, 0, 0) ||
-        !WinHttpReceiveResponse(request.get(), nullptr))
-    {
-        return unavailable();
-    }
-
-    DWORD status_code = 0;
-    DWORD status_size = sizeof(status_code);
-    if (!WinHttpQueryHeaders(request.get(), WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
-            WINHTTP_HEADER_NAME_BY_INDEX, &status_code, &status_size, WINHTTP_NO_HEADER_INDEX) ||
-        status_code != HTTP_STATUS_OK)
-    {
-        return unavailable();
-    }
-
     CalendarDate today;
-    if (!GetIranDateFromResponse(request.get(), today))
-        return unavailable();
-
     std::string response;
-    for (;;)
-    {
-        DWORD available = 0;
-        if (!WinHttpQueryDataAvailable(request.get(), &available))
-            return unavailable();
-        if (available == 0)
-            break;
-        if (response.size() + available > 64 * 1024)
-            return unavailable();
-
-        const size_t offset = response.size();
-        response.resize(offset + available);
-        DWORD read = 0;
-        if (!WinHttpReadData(request.get(), response.data() + offset, available, &read))
-            return unavailable();
-        response.resize(offset + read);
-    }
+    if (!DownloadHttpsText(kGameNetAccessUrl, 64 * 1024, response, &today))
+        return unavailable();
 
     return ResponseAccessStatus(response, today);
 }
