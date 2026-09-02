@@ -81,6 +81,10 @@ var
   PreviousInstallDirectoryPendingCleanup: String;
   DestinationCleanupDone: Boolean;
 
+function URLDownloadToFile(Caller: NativeInt; URL, FileName: String;
+  Reserved: DWORD; StatusCallback: NativeInt): HResult;
+  external 'URLDownloadToFileW@urlmon.dll stdcall delayload';
+
 procedure SetAccessStatus(const Caption: String; Color: TColor);
 begin
   AccessStatusLabel.Font.Color := Color;
@@ -224,6 +228,40 @@ begin
   end;
 end;
 
+function FetchWithInternetExplorer(const Url: String; var ResponseText: String): Boolean;
+var
+  DownloadPath: String;
+  RawResponse: AnsiString;
+  ResponseSize: Integer;
+begin
+  Result := False;
+  ResponseText := '';
+  DownloadPath := ExpandConstant('{tmp}\allclient-ie-response.tmp');
+
+  try
+    try
+      DeleteFile(DownloadPath);
+      { URLMon uses the same WinINet, certificate store and proxy configuration
+        as Internet Explorer. This is the preferred Windows 7 transport. }
+      if URLDownloadToFile(0, Url, DownloadPath, 0, 0) <> 0 then
+        Exit;
+      if not FileSize(DownloadPath, ResponseSize) or
+         (ResponseSize <= 0) or (ResponseSize > 262144) then
+        Exit;
+      if not LoadStringFromFile(DownloadPath, RawResponse) then
+        Exit;
+
+      ResponseText := RawResponse;
+      Result := Length(ResponseText) > 0;
+    except
+      ResponseText := '';
+      Result := False;
+    end;
+  finally
+    DeleteFile(DownloadPath);
+  end;
+end;
+
 function FetchWithSetupDownloader(const Url: String; var ResponseText: String): Boolean;
 var
   DownloadName, DownloadPath: String;
@@ -347,14 +385,21 @@ begin
     SetAccessStatus('Connecting to online service (attempt ' +
       IntToStr(Attempt) + ' of 2)...', clGray);
     try
-      if FetchWithSetupDownloader(Url, ResponseText) then
+      if FetchWithInternetExplorer(Url, ResponseText) then
       begin
         Result := True;
         Exit;
       end
       else
       begin
-        SetAccessStatus('Primary connection unavailable. Trying Windows compatibility mode...', clGray);
+        SetAccessStatus('Internet Explorer connection unavailable. Trying Setup transport...', clGray);
+        if FetchWithSetupDownloader(Url, ResponseText) then
+        begin
+          Result := True;
+          Exit;
+        end;
+
+        SetAccessStatus('Setup transport unavailable. Trying Windows compatibility mode...', clGray);
         if FetchWithNativeHttps(Url, ResponseText) then
         begin
           Result := True;

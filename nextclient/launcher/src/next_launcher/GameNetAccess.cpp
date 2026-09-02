@@ -1,6 +1,7 @@
 #include "GameNetAccess.h"
 
 #include "GameNetAccessConfig.h"
+#include "GameNetWinInet.h"
 
 #include <Windows.h>
 #include <winhttp.h>
@@ -294,17 +295,8 @@ GameNetAccessStatus ResponseAccessStatus(const std::string& response, const Cale
     return status;
 }
 
-bool GetIranDateFromResponse(HINTERNET request, CalendarDate& date)
+bool GetIranDateFromUtcTime(const SYSTEMTIME& utc_time, CalendarDate& date)
 {
-    SYSTEMTIME utc_time{};
-    DWORD size = sizeof(utc_time);
-    if (!WinHttpQueryHeaders(request,
-            WINHTTP_QUERY_DATE | WINHTTP_QUERY_FLAG_SYSTEMTIME,
-            WINHTTP_HEADER_NAME_BY_INDEX, &utc_time, &size, WINHTTP_NO_HEADER_INDEX))
-    {
-        return false;
-    }
-
     FILETIME file_time{};
     if (!SystemTimeToFileTime(&utc_time, &file_time))
         return false;
@@ -321,6 +313,19 @@ bool GetIranDateFromResponse(HINTERNET request, CalendarDate& date)
         return false;
     date = GregorianToJalali(local_time.wYear, local_time.wMonth, local_time.wDay);
     return true;
+}
+
+bool GetIranDateFromResponse(HINTERNET request, CalendarDate& date)
+{
+    SYSTEMTIME utc_time{};
+    DWORD size = sizeof(utc_time);
+    if (!WinHttpQueryHeaders(request,
+            WINHTTP_QUERY_DATE | WINHTTP_QUERY_FLAG_SYSTEMTIME,
+            WINHTTP_HEADER_NAME_BY_INDEX, &utc_time, &size, WINHTTP_NO_HEADER_INDEX))
+    {
+        return false;
+    }
+    return GetIranDateFromUtcTime(utc_time, date);
 }
 
 bool PerformHttpsGet(
@@ -481,8 +486,25 @@ bool DownloadHttpsText(
     std::string& response,
     CalendarDate* server_date = nullptr)
 {
-    // Try the current user's IE/PAC settings first (important on Windows 7),
-    // then the machine WinHTTP proxy and finally a direct connection. Each
+    // WinINet follows the exact Internet Explorer configuration that is known
+    // to work on the target Windows 7 machines. WinHTTP remains a clean
+    // fallback for machine proxy and direct-connect environments.
+    SYSTEMTIME wininet_time{};
+    std::string wininet_response;
+    if (DownloadWithWinInet(url, maximum_size, wininet_response,
+            server_date ? &wininet_time : nullptr))
+    {
+        CalendarDate wininet_date{};
+        if (!server_date || GetIranDateFromUtcTime(wininet_time, wininet_date))
+        {
+            response = std::move(wininet_response);
+            if (server_date)
+                *server_date = wininet_date;
+            return true;
+        }
+    }
+
+    // Try current-user proxy/PAC, machine WinHTTP proxy, then direct. Each
     // attempt owns fresh handles so a failed proxy cannot poison the fallback.
     constexpr std::array modes{
         ProxyMode::CurrentUser,

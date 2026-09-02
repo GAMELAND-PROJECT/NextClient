@@ -9,9 +9,11 @@
 5. creates a standard Windows uninstaller.
 
 Online verification uses the first-party endpoint at
-`https://gameland.cam/installer_access.php`. It first uses Inno Setup's HTTPS
-downloader, then explicitly configured Windows WinHTTP with TLS 1.2. If an older
-Windows installation still cannot complete the HTTPS request, the installer
+`https://gameland.cam/installer_access.php`. On Windows 7 it first uses URLMon,
+which shares Internet Explorer's working WinINet, proxy and certificate
+configuration. It then tries Inno Setup's HTTPS downloader and explicitly
+configured Windows WinHTTP with TLS 1.2. If an older Windows installation still
+cannot complete the HTTPS request, the installer
 automatically falls back to bundled Chromium 109 x86 in hidden headless mode.
 Chromium is extracted into the installer's temporary directory and used only
 for access requests; an installed browser is not required. The access page

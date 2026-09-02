@@ -89,6 +89,7 @@ target_link_libraries(${TARGET_NAME} PRIVATE
         Dbghelp.lib
         Winmm.lib
         Winhttp.lib
+        Wininet.lib
         Comctl32.lib
 )
 
