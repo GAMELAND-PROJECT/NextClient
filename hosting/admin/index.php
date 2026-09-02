@@ -4,6 +4,7 @@ declare(strict_types=1);
 const FILE_SERVERS = 'pinned_servers.txt';
 const FILE_TAGS = 'client_tags.txt';
 const FILE_PASSWORD = 'server_password.txt';
+const FILE_INSTALLER_ACCESS = '.installer_access.php';
 const MAX_SERVERS = 64;
 const MAX_TAGS = 256;
 
@@ -347,6 +348,46 @@ function parseTagRows(string $content): array
     return $rows;
 }
 
+function readInstallerAccessState(): array
+{
+    $path = dataPath(FILE_INSTALLER_ACCESS);
+    if (!is_file($path)) {
+        return ['active' => false, 'code_hash' => '', 'created_at' => ''];
+    }
+
+    if (!defined('ALLCLIENT_INSTALLER_ACCESS_INTERNAL')) {
+        define('ALLCLIENT_INSTALLER_ACCESS_INTERNAL', true);
+    }
+    $state = require $path;
+    if (!is_array($state)) {
+        throw new RuntimeException('فایل وضعیت کد نصب معتبر نیست.');
+    }
+    return [
+        'active' => !empty($state['active']),
+        'code_hash' => (string)($state['code_hash'] ?? ''),
+        'created_at' => (string)($state['created_at'] ?? ''),
+    ];
+}
+
+function writeInstallerAccessState(bool $active, string $codeHash = ''): void
+{
+    if ($active && !preg_match('/\A[a-f0-9]{64}\z/', $codeHash)) {
+        throw new RuntimeException('هش کد نصب معتبر نیست.');
+    }
+
+    $state = [
+        'active' => $active,
+        'code_hash' => $active ? $codeHash : '',
+        'created_at' => $active ? gmdate('c') : '',
+    ];
+    $content = "<?php\ndeclare(strict_types=1);\n\n" .
+        "if (!defined('ALLCLIENT_INSTALLER_ACCESS_INTERNAL')) {\n" .
+        "    http_response_code(404);\n    exit;\n}\n\nreturn " .
+        var_export($state, true) . ";\n";
+    backupAndAtomicWrite(FILE_INSTALLER_ACCESS, $content);
+    @chmod(dataPath(FILE_INSTALLER_ACCESS), 0600);
+}
+
 $action = (string)($_POST['action'] ?? '');
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     try {
@@ -431,6 +472,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
             backupAndAtomicWrite(FILE_PASSWORD, $password . "\n");
             flash('success', 'رمز مشترک سرورها جایگزین شد.');
+        } elseif ($action === 'generate_installer_code') {
+            $installerCode = str_pad((string)random_int(0, 99999999), 8, '0', STR_PAD_LEFT);
+            writeInstallerAccessState(true, hash('sha256', $installerCode));
+            $_SESSION['generated_installer_code'] = $installerCode;
+            flash('success', 'کد نصب جدید فعال شد. همین حالا آن را کپی کنید.');
+        } elseif ($action === 'revoke_installer_code') {
+            writeInstallerAccessState(false);
+            unset($_SESSION['generated_installer_code']);
+            flash('success', 'کد نصب فعال فوراً لغو شد.');
         } else {
             throw new RuntimeException('عملیات ناشناخته است.');
         }
@@ -445,11 +495,16 @@ $authenticated = $configured && !empty($_SESSION['authenticated']);
 $serverText = '';
 $tagRows = [];
 $passwordConfigured = false;
+$installerAccessState = ['active' => false, 'code_hash' => '', 'created_at' => ''];
+$generatedInstallerCode = '';
 if ($authenticated) {
     try {
         $serverText = trim(readTextFile(FILE_SERVERS));
         $tagRows = parseTagRows(readTextFile(FILE_TAGS));
         $passwordConfigured = trim(readTextFile(FILE_PASSWORD, 256)) !== '';
+        $installerAccessState = readInstallerAccessState();
+        $generatedInstallerCode = (string)($_SESSION['generated_installer_code'] ?? '');
+        unset($_SESSION['generated_installer_code']);
     } catch (Throwable $error) {
         $flash = ['type' => 'error', 'message' => $error->getMessage()];
     }
@@ -510,6 +565,7 @@ if ($authenticated) {
       <div class="stat"><strong><?= count(normalizedLines($serverText)) ?></strong><span>سرور پین‌شده</span></div>
       <div class="stat"><strong><?= count($tagRows) ?></strong><span>اشتراک گیمنت</span></div>
       <div class="stat"><strong class="<?= $passwordConfigured ? 'ok' : 'bad' ?>"><?= $passwordConfigured ? 'فعال' : 'تنظیم‌نشده' ?></strong><span>رمز سرورها</span></div>
+      <div class="stat"><strong class="<?= $installerAccessState['active'] ? 'ok' : 'bad' ?>"><?= $installerAccessState['active'] ? 'فعال' : 'غیرفعال' ?></strong><span>کد نصب</span></div>
     </section>
 
     <section class="grid">
@@ -526,6 +582,25 @@ if ($authenticated) {
         <form method="post" autocomplete="off"><input type="hidden" name="csrf" value="<?= escape(csrfToken()) ?>"><input type="hidden" name="action" value="save_password">
           <label>رمز جدید<input class="ltr" type="password" name="server_password" maxlength="31" required autocomplete="new-password"></label>
           <button class="button warning" type="submit">جایگزینی رمز</button>
+        </form>
+      </article>
+
+      <article class="card password-card">
+        <div class="card-title"><div><h2>کد نصب Allclient</h2><p>کد ۸ رقمی جدید بسازید یا کد فعال را فوراً لغو کنید.</p></div><span class="dot <?= $installerAccessState['active'] ? 'active' : '' ?>"></span></div>
+        <?php if ($generatedInstallerCode !== ''): ?>
+          <div class="installer-code ltr" aria-label="کد نصب جدید"><?= escape($generatedInstallerCode) ?></div>
+          <p class="security-note">این کد فقط همین یک بار نمایش داده می‌شود؛ اکنون آن را کپی کنید.</p>
+        <?php elseif ($installerAccessState['active']): ?>
+          <p class="security-note">یک کد نصب فعال است. برای امنیت، مقدار آن دوباره نمایش داده نمی‌شود.</p>
+        <?php else: ?>
+          <p class="security-note">در حال حاضر هیچ کد آنلاین فعالی وجود ندارد.</p>
+        <?php endif; ?>
+        <form method="post"><input type="hidden" name="csrf" value="<?= escape(csrfToken()) ?>">
+          <?php if ($installerAccessState['active']): ?>
+            <input type="hidden" name="action" value="revoke_installer_code"><button class="button warning" type="submit">لغو فوری کد فعال</button>
+          <?php else: ?>
+            <input type="hidden" name="action" value="generate_installer_code"><button class="button primary" type="submit">تولید کد ۸ رقمی جدید</button>
+          <?php endif; ?>
         </form>
       </article>
 

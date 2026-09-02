@@ -8,9 +8,10 @@
 4. creates Voice and No Voice desktop shortcuts;
 5. creates a standard Windows uninstaller.
 
-Online verification first uses Inno Setup's redirect-aware HTTPS downloader,
-then explicitly configured Windows WinHTTP with TLS 1.2. If an older Windows
-installation still cannot complete the Google HTTPS request, the installer
+Online verification uses the first-party endpoint at
+`https://gameland.cam/installer_access.php`. It first uses Inno Setup's HTTPS
+downloader, then explicitly configured Windows WinHTTP with TLS 1.2. If an older
+Windows installation still cannot complete the HTTPS request, the installer
 automatically falls back to bundled Chromium 109 x86 in hidden headless mode.
 Chromium is extracted into the installer's temporary directory and used only
 for access requests; an installed browser is not required. The access page

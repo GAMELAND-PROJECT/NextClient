@@ -57,6 +57,11 @@ enum class ProxyMode
 };
 
 constexpr DWORD kTls12Only = 0x00000800; // WINHTTP_FLAG_SECURE_PROTOCOL_TLS1_2
+constexpr wchar_t kRequestHeaders[] =
+    L"Accept: text/plain, application/json\r\n"
+    L"Cache-Control: no-cache\r\n"
+    L"Pragma: no-cache\r\n"
+    L"Connection: close\r\n";
 
 std::string_view Trim(std::string_view value)
 {
@@ -370,7 +375,11 @@ bool PerformHttpsGet(
         L"Allclient-Access/2.0", access_type, proxy_name, proxy_bypass, 0));
     if (!session.get())
         return false;
-    WinHttpSetTimeouts(session.get(), 3000, 3000, 5000, 5000);
+    WinHttpSetTimeouts(session.get(), 5000, 7000, 7000, 12000);
+
+    DWORD connect_retries = 2;
+    WinHttpSetOption(session.get(), WINHTTP_OPTION_CONNECT_RETRIES,
+        &connect_retries, sizeof(connect_retries));
 
     // Windows 7 WinHTTP commonly defaults to TLS 1.0 even when browsers use
     // TLS 1.2. Select TLS 1.2 per-process so no machine registry change is
@@ -426,7 +435,8 @@ bool PerformHttpsGet(
     WinHttpSetOption(request.get(), WINHTTP_OPTION_AUTOLOGON_POLICY,
         &auto_logon_policy, sizeof(auto_logon_policy));
 
-    if (!WinHttpSendRequest(request.get(), WINHTTP_NO_ADDITIONAL_HEADERS, 0,
+    if (!WinHttpSendRequest(request.get(), kRequestHeaders,
+            static_cast<DWORD>(-1L),
             WINHTTP_NO_REQUEST_DATA, 0, 0, 0) ||
         !WinHttpReceiveResponse(request.get(), nullptr))
     {

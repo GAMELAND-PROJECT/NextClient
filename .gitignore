@@ -1,6 +1,7 @@
 /out
 /build
 /installer/output/
+/hosting/*.zip
 
 # Visual Studio
 .vs

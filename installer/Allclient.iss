@@ -59,7 +59,7 @@ Filename: "{app}\platform\steam\games\SmartEmu\SSELauncher.exe"; Parameters: "-a
 
 [Code]
 const
-  AccessApiUrl = 'https://script.google.com/macros/s/AKfycbyPOh-kYDfyANzHK3_D6L1_W9Km-RT1oqGp3makI6T-Z97ksgsPZXug2ld18nF3vi1X/exec';
+  AccessApiUrl = 'https://gameland.cam/installer_access.php';
   OfflineCode = 'amir1394';
   AllclientUninstallKey = 'Software\Microsoft\Windows\CurrentVersion\Uninstall\{D9E46BD1-52F8-470F-8639-FF31FE7C5E48}_is1';
 
@@ -378,6 +378,21 @@ begin
   end;
 end;
 
+function FetchAccessApi(const Query: String; var ResponseText: String): Boolean;
+var
+  NormalizedResponse: String;
+begin
+  SetAccessStatus('Connecting to the Allclient access service...', clGray);
+  Result := FetchAccessResponse(AccessApiUrl + Query, ResponseText);
+  if Result then
+  begin
+    NormalizedResponse := Lowercase(ResponseText);
+    Result := (Pos('"service":"allclient-access"', NormalizedResponse) > 0) or
+      (Pos('"valid":true', NormalizedResponse) > 0) or
+      (Pos('"valid":false', NormalizedResponse) > 0);
+  end;
+end;
+
 function OnlineAccessCodeIsValid(const EnteredCode: String): Boolean;
 var
   RequestUrl: String;
@@ -393,16 +408,9 @@ begin
     Exit;
   end;
 
-  if Pos('PASTE_', AccessApiUrl) = 1 then
-  begin
-    OnlineServiceUnavailable := True;
-    OnlineVerificationMessage := 'Online verification is not configured.';
-    Exit;
-  end;
-
   SetAccessStatus('Checking the entered code securely...', clGray);
-  RequestUrl := AccessApiUrl + '?action=verify&code=' + Trim(EnteredCode);
-  if FetchAccessResponse(RequestUrl, ResponseText) then
+  RequestUrl := '?action=verify&code=' + Trim(EnteredCode);
+  if FetchAccessApi(RequestUrl, ResponseText) then
   begin
     SetAccessStatus('Response received. Validating result...', clGray);
     if Pos('"valid":true', Lowercase(ResponseText)) > 0 then
@@ -443,7 +451,7 @@ begin
   OnlineVerificationMessage := '';
   SetAccessStatus('Preparing secure verification component...', clGray);
   try
-    if FetchAccessResponse(AccessApiUrl + '?action=status', ResponseText) and
+    if FetchAccessApi('?action=status', ResponseText) and
        (Pos('"service":"allclient-access"', Lowercase(ResponseText)) > 0) then
       SetAccessStatus('Online service: connected and responding normally', clGreen)
     else
@@ -479,7 +487,7 @@ begin
       'Secure transports prepared. Confirming online access...';
     WizardForm.Update;
 
-    if FetchAccessResponse(AccessApiUrl + '?action=status', ResponseText) and
+    if FetchAccessApi('?action=status', ResponseText) and
        (Pos('"service":"allclient-access"', Lowercase(ResponseText)) > 0) then
     begin
       PreparationProgress.Position := 100;
