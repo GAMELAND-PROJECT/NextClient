@@ -20,6 +20,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ inputs.client_tag || github.sha }}
+  cancel-in-progress: false
+
 jobs:
   build:
     name: Build (vs2022, Release, x86)
@@ -30,9 +34,6 @@ jobs:
       BASE_GAME_FILE_ID: 1gYzFPCnlmn_eb0tj7XdaUyytAyrWsrT1
       BASE_GAME_CACHE_VERSION: v1
       BASE_GAME_ARCHIVE: ${{ github.workspace }}/base-game-cache/Allclient.rar
-      CHROMIUM_FILE_ID: 1Mo0ZQHA4SmvoAggobnqOSStcViQsWjzC
-      CHROMIUM_CACHE_VERSION: v1
-      CHROMIUM_ARCHIVE: ${{ github.workspace }}/installer/runtime/chromium109/chrome.nosync.7z
 
     steps:
       - name: Checkout (with submodules)
@@ -40,6 +41,21 @@ jobs:
         with:
           submodules: recursive
           fetch-depth: 0
+          clean: true
+
+      - name: Verify checked-out source revision
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $actualCommit = (git rev-parse HEAD).Trim()
+          if ($actualCommit -ne $env:GITHUB_SHA) {
+            throw "Checkout mismatch: expected $env:GITHUB_SHA but found $actualCommit."
+          }
+          $brokenSubmodules = @(git submodule status --recursive | Where-Object { $_ -match '^[-+U]' })
+          if ($brokenSubmodules.Count -gt 0) {
+            throw "One or more submodules do not match the checked-out commit."
+          }
+          Write-Host "Building exact repository commit: $actualCommit"
 
       - name: Prepare client build tag
         shell: pwsh
@@ -65,13 +81,6 @@ jobs:
         with:
           path: base-game-cache/Allclient.rar
           key: base-game-${{ runner.os }}-${{ env.BASE_GAME_CACHE_VERSION }}
-
-      - name: Cache bundled Chromium archive
-        id: chromium-cache
-        uses: actions/cache@v4
-        with:
-          path: installer/runtime/chromium109/chrome.nosync.7z
-          key: chromium109-${{ runner.os }}-${{ env.CHROMIUM_CACHE_VERSION }}
 
       - name: Install Google Drive downloader
         shell: pwsh
@@ -103,34 +112,6 @@ jobs:
 
           if (-not $downloaded) {
             throw "The base game could not be downloaded or the downloaded file was unexpectedly small. Verify the Google Drive sharing permission."
-          }
-
-      - name: Download bundled Chromium from Google Drive
-        if: steps.chromium-cache.outputs.cache-hit != 'true'
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = "Stop"
-          New-Item -ItemType Directory -Force -Path (Split-Path -Parent $env:CHROMIUM_ARCHIVE) | Out-Null
-
-          $downloaded = $false
-          for ($attempt = 1; $attempt -le 4; $attempt++) {
-            Write-Host "Downloading bundled Chromium (attempt $attempt of 4)..."
-            python -m gdown $env:CHROMIUM_FILE_ID --output $env:CHROMIUM_ARCHIVE
-            if ($LASTEXITCODE -eq 0 -and
-                (Test-Path -LiteralPath $env:CHROMIUM_ARCHIVE -PathType Leaf) -and
-                (Get-Item -LiteralPath $env:CHROMIUM_ARCHIVE).Length -gt 100MB) {
-              $downloaded = $true
-              break
-            }
-
-            Remove-Item -LiteralPath $env:CHROMIUM_ARCHIVE -Force -ErrorAction SilentlyContinue
-            if ($attempt -lt 4) {
-              Start-Sleep -Seconds (10 * $attempt)
-            }
-          }
-
-          if (-not $downloaded) {
-            throw "Bundled Chromium could not be downloaded or the downloaded file was unexpectedly small. Verify the Google Drive sharing permission."
           }
 
       - name: Validate and extract base game
@@ -173,16 +154,6 @@ jobs:
           }
           Write-Host "Base game prepared successfully ($baseFileCount files)."
 
-      - name: Validate bundled Chromium
-        shell: pwsh
-        run: |
-          $sevenZip = "C:\Program Files\7-Zip\7z.exe"
-          & $sevenZip t $env:CHROMIUM_ARCHIVE -bso0 -bsp0
-          if ($LASTEXITCODE -ne 0) {
-            throw "The bundled Chromium archive is corrupt or incomplete."
-          }
-          Write-Host "Bundled Chromium archive is valid."
-
       - name: Cache vcpkg packages
         uses: actions/cache@v4
         with:
@@ -198,7 +169,7 @@ jobs:
         run: .\vcpkg\bootstrap-vcpkg.bat -disableMetrics
 
       - name: Configure
-        run: cmake --preset vs2022 "-DNEXTCLIENT_INSTALL_DIR=${{ github.workspace }}\install"
+        run: cmake --fresh --preset vs2022 "-DNEXTCLIENT_INSTALL_DIR=${{ github.workspace }}\install"
 
       - name: Build
         run: cmake --build --preset vs2022-release --target BUILD_ALL -- /m:2 /nodeReuse:false /v:minimal

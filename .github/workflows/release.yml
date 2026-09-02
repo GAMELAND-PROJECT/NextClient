@@ -17,34 +17,40 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - name: Download build artifact
+      - name: Download installer produced by this release build
         uses: actions/download-artifact@v4
         with:
-          name: NextClient-${{ github.sha }}
-          path: dist/nextclient
+          pattern: Allclient-*-Setup-*
+          path: dist
+          merge-multiple: true
 
-      - name: Download PDB artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: NextClient-pdb-${{ github.sha }}
-          path: dist/pdb
-
-      - name: Package release archives
+      - name: Validate and name release installer
+        id: package
         env:
           TAG: ${{ github.event.release.tag_name }}
+        shell: bash
         run: |
-          (cd dist/nextclient && zip -r "$GITHUB_WORKSPACE/NextClient-$TAG.zip" .)
-          (cd dist/pdb && zip -r "$GITHUB_WORKSPACE/NextClient-$TAG-pdb.zip" .)
+          set -euo pipefail
+          mapfile -t installers < <(find dist -maxdepth 1 -type f -name 'Allclient-*-Setup.exe' -print)
+          if [ "${#installers[@]}" -ne 1 ]; then
+            echo "Expected exactly one installer artifact, found ${#installers[@]}." >&2
+            exit 1
+          fi
+          output="Allclient-${TAG}-Setup.exe"
+          mv "${installers[0]}" "$output"
+          echo "installer=$output" >> "$GITHUB_OUTPUT"
+          echo "### Release installer" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Source commit: \`${GITHUB_SHA}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- File: \`${output}\`" >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Attest build provenance
+      - name: Attest installer provenance
         uses: actions/attest-build-provenance@v2
         with:
-          subject-path: |
-            NextClient-${{ github.event.release.tag_name }}.zip
-            NextClient-${{ github.event.release.tag_name }}-pdb.zip
+          subject-path: ${{ steps.package.outputs.installer }}
 
-      - name: Upload assets to release
+      - name: Upload installer to release
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.event.release.tag_name }}
-        run: gh release upload "$TAG" "NextClient-$TAG.zip" "NextClient-$TAG-pdb.zip" --clobber --repo "$GITHUB_REPOSITORY"
+          INSTALLER: ${{ steps.package.outputs.installer }}
+        run: gh release upload "$TAG" "$INSTALLER" --clobber --repo "$GITHUB_REPOSITORY"
