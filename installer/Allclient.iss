@@ -224,6 +224,40 @@ begin
   end;
 end;
 
+function FetchWithSetupDownloader(const Url: String; var ResponseText: String): Boolean;
+var
+  DownloadName, DownloadPath: String;
+  DownloadedSize: Int64;
+  RawResponse: AnsiString;
+begin
+  Result := False;
+  ResponseText := '';
+  DownloadName := 'allclient-access-response.tmp';
+  DownloadPath := ExpandConstant('{tmp}\') + DownloadName;
+
+  try
+    DeleteFile(DownloadPath);
+    { Inno Setup's downloader follows redirects and applies the user's proxy
+      settings itself. This is the most compatible first transport on Win7. }
+    DownloadedSize := DownloadTemporaryFile(Url, DownloadName, '', nil);
+    if (DownloadedSize <= 0) or (DownloadedSize > 262144) then
+      Exit;
+
+    if not LoadStringFromFile(DownloadPath, RawResponse) then
+      Exit;
+    if (Length(RawResponse) = 0) or (Length(RawResponse) > 262144) then
+      Exit;
+
+    ResponseText := RawResponse;
+    Result := True;
+  except
+    ResponseText := '';
+    Result := False;
+  end;
+
+  DeleteFile(DownloadPath);
+end;
+
 function FetchWithChromium(const Url: String; var ResponseText: String): Boolean;
 var
   BrowserPath, ProfilePath, Parameters: String;
@@ -263,7 +297,7 @@ begin
       '--dump-dom "' + Url + '"';
 
       if not ExecAndCaptureOutput(BrowserPath, Parameters, ExpandConstant('{tmp}'),
-          SW_HIDE, ewWaitUntilTerminated, ResultCode, Output) then
+          SW_SHOWNORMAL, ewWaitUntilTerminated, ResultCode, Output) then
       begin
         OnlineVerificationMessage := 'Verification component could not be started.';
         Exit;
@@ -313,14 +347,21 @@ begin
     SetAccessStatus('Connecting to online service (attempt ' +
       IntToStr(Attempt) + ' of 2)...', clGray);
     try
-      if FetchWithNativeHttps(Url, ResponseText) then
+      if FetchWithSetupDownloader(Url, ResponseText) then
       begin
         Result := True;
         Exit;
       end
       else
       begin
-        SetAccessStatus('Native connection unavailable. Trying compatibility transport...', clGray);
+        SetAccessStatus('Primary connection unavailable. Trying Windows compatibility mode...', clGray);
+        if FetchWithNativeHttps(Url, ResponseText) then
+        begin
+          Result := True;
+          Exit;
+        end;
+
+        SetAccessStatus('Windows connection unavailable. Starting independent compatibility mode...', clGray);
         if FetchWithChromium(Url, ResponseText) then
         begin
           Result := True;
