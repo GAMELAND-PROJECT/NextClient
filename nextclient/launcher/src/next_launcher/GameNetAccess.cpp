@@ -328,7 +328,7 @@ bool GetIranDateFromResponse(HINTERNET request, CalendarDate& date)
     return GetIranDateFromUtcTime(utc_time, date);
 }
 
-bool PerformHttpsGet(
+bool PerformHttpGet(
     const wchar_t* url,
     size_t maximum_size,
     ProxyMode proxy_mode,
@@ -341,8 +341,10 @@ bool PerformHttpsGet(
     parts.dwHostNameLength = static_cast<DWORD>(-1);
     parts.dwUrlPathLength = static_cast<DWORD>(-1);
     parts.dwExtraInfoLength = static_cast<DWORD>(-1);
-    if (!WinHttpCrackUrl(url, 0, 0, &parts) || parts.nScheme != INTERNET_SCHEME_HTTPS)
+    if (!WinHttpCrackUrl(url, 0, 0, &parts) ||
+        (parts.nScheme != INTERNET_SCHEME_HTTPS && parts.nScheme != INTERNET_SCHEME_HTTP))
         return false;
+    const bool secure = parts.nScheme == INTERNET_SCHEME_HTTPS;
 
     const std::wstring host(parts.lpszHostName, parts.dwHostNameLength);
     std::wstring path(parts.lpszUrlPath, parts.dwUrlPathLength);
@@ -390,7 +392,7 @@ bool PerformHttpsGet(
     // TLS 1.2. Select TLS 1.2 per-process so no machine registry change is
     // required. Failure is allowed to fall through to the other transports.
     DWORD secure_protocols = kTls12Only;
-    if (!WinHttpSetOption(session.get(), WINHTTP_OPTION_SECURE_PROTOCOLS,
+    if (secure && !WinHttpSetOption(session.get(), WINHTTP_OPTION_SECURE_PROTOCOLS,
             &secure_protocols, sizeof(secure_protocols)))
     {
         return false;
@@ -401,7 +403,7 @@ bool PerformHttpsGet(
         return false;
     WinHttpHandle request(WinHttpOpenRequest(
         connection.get(), L"GET", path.c_str(), nullptr, WINHTTP_NO_REFERER,
-        WINHTTP_DEFAULT_ACCEPT_TYPES, WINHTTP_FLAG_SECURE));
+        WINHTTP_DEFAULT_ACCEPT_TYPES, secure ? WINHTTP_FLAG_SECURE : 0));
     if (!request.get())
         return false;
 
@@ -480,7 +482,7 @@ bool PerformHttpsGet(
     }
 }
 
-bool DownloadHttpsText(
+bool DownloadText(
     const wchar_t* url,
     size_t maximum_size,
     std::string& response,
@@ -515,7 +517,7 @@ bool DownloadHttpsText(
     {
         CalendarDate candidate_date{};
         std::string candidate_response;
-        if (PerformHttpsGet(url, maximum_size, mode, candidate_response,
+        if (PerformHttpGet(url, maximum_size, mode, candidate_response,
                 server_date ? &candidate_date : nullptr))
         {
             response = std::move(candidate_response);
@@ -528,9 +530,9 @@ bool DownloadHttpsText(
     return false;
 }
 
-bool DownloadSmallHttpsText(const wchar_t* url, size_t maximum_size, std::string& response)
+bool DownloadSmallText(const wchar_t* url, size_t maximum_size, std::string& response)
 {
-    return DownloadHttpsText(url, maximum_size, response);
+    return DownloadText(url, maximum_size, response);
 }
 }
 
@@ -544,7 +546,7 @@ GameNetAccessStatus QueryGameNetOnlineAccess()
 
     CalendarDate today;
     std::string response;
-    if (!DownloadHttpsText(kGameNetAccessUrl, 64 * 1024, response, &today))
+    if (!DownloadText(kGameNetAccessUrl, 64 * 1024, response, &today))
         return unavailable();
 
     return ResponseAccessStatus(response, today);
@@ -553,7 +555,7 @@ GameNetAccessStatus QueryGameNetOnlineAccess()
 std::string QueryGameNetServerPassword()
 {
     std::string response;
-    if (!DownloadSmallHttpsText(kGameNetServerPasswordUrl, 256, response))
+    if (!DownloadSmallText(kGameNetServerPasswordUrl, 256, response))
         return {};
 
     const std::string_view password = Trim(response);

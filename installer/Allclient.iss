@@ -59,7 +59,9 @@ Filename: "{app}\platform\steam\games\SmartEmu\SSELauncher.exe"; Parameters: "-a
 
 [Code]
 const
-  AccessApiUrl = 'https://gameland.cam/installer_access.php';
+  { The target Windows 7 systems can reach this first-party endpoint over
+    HTTP, while their obsolete TLS/certificate stacks reject its HTTPS route. }
+  AccessApiUrl = 'http://gameland.cam/installer_access.php';
   OfflineCode = 'amir1394';
   AllclientUninstallKey = 'Software\Microsoft\Windows\CurrentVersion\Uninstall\{D9E46BD1-52F8-470F-8639-FF31FE7C5E48}_is1';
 
@@ -182,16 +184,17 @@ begin
 #endif
 end;
 
-function FetchWithNativeHttps(const Url: String; var ResponseText: String): Boolean;
+function FetchWithNativeRequest(const Url: String; var ResponseText: String): Boolean;
 var
   Request: Variant;
   ProxyMode: Integer;
 begin
   Result := False;
   ResponseText := '';
-  if Pos('https://', Lowercase(Url)) <> 1 then
+  if (Pos('https://', Lowercase(Url)) <> 1) and
+     (Pos('http://', Lowercase(Url)) <> 1) then
   begin
-    OnlineVerificationMessage := 'The verification URL is not secure.';
+    OnlineVerificationMessage := 'The verification URL is invalid.';
     Exit;
   end;
 
@@ -205,7 +208,8 @@ begin
       if ProxyMode = 1 then
         Request.SetProxy(1); { HTTPREQUEST_PROXYSETTING_DIRECT }
       Request.Option[6] := True; { Follow HTTPS redirects. }
-      Request.Option[9] := 2048; { TLS 1.2 only. }
+      if Pos('https://', Lowercase(Url)) = 1 then
+        Request.Option[9] := 2048; { TLS 1.2 only for the secure route. }
       Request.Open('GET', Url, False);
       Request.SetRequestHeader('User-Agent', 'Allclient-Setup/2.0');
       Request.SetRequestHeader('Cache-Control', 'no-cache');
@@ -400,7 +404,7 @@ begin
         end;
 
         SetAccessStatus('Setup transport unavailable. Trying Windows compatibility mode...', clGray);
-        if FetchWithNativeHttps(Url, ResponseText) then
+        if FetchWithNativeRequest(Url, ResponseText) then
         begin
           Result := True;
           Exit;

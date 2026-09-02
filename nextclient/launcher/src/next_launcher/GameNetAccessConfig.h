@@ -9,9 +9,10 @@ inline constexpr char kGameNetTag[] = NEXTCLIENT_GAME_NET_TAG;
 
 // Subscription list format: build tag | player name tag | expiry (YYYY/MM/DD).
 // Blank lines and lines beginning with '#' are ignored.
-inline constexpr wchar_t kGameNetAccessUrl[] = L"https://gameland.cam/client_tags.txt";
+inline constexpr wchar_t kGameNetAccessUrl[] = L"http://gameland.cam/client_tags.txt";
 
 // The response contains one password shared by every managed pinned server.
-// HTTPS protects it in transit, but a public URL does not make it secret.
+// This endpoint intentionally uses HTTP for compatibility with legacy Win7.
+// A public URL does not make the shared value secret.
 inline constexpr wchar_t kGameNetServerPasswordUrl[] =
-    L"https://gameland.cam/server_password.txt";
+    L"http://gameland.cam/server_password.txt";

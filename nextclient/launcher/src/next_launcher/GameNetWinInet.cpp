@@ -50,11 +50,14 @@ bool DownloadWithWinInet(
         L"Accept: text/plain, application/json\r\n"
         L"Cache-Control: no-cache\r\n"
         L"Pragma: no-cache\r\n";
-    constexpr DWORD flags = INTERNET_FLAG_SECURE |
-        INTERNET_FLAG_RELOAD |
+    DWORD flags = INTERNET_FLAG_RELOAD |
         INTERNET_FLAG_NO_CACHE_WRITE |
         INTERNET_FLAG_NO_COOKIES |
         INTERNET_FLAG_NO_UI;
+    if (_wcsnicmp(url, L"https://", 8) == 0)
+        flags |= INTERNET_FLAG_SECURE;
+    else if (_wcsnicmp(url, L"http://", 7) != 0)
+        return false;
     InternetHandle request(InternetOpenUrlW(
         session.get(), url, headers, static_cast<DWORD>(-1L), flags, 0));
     if (!request.get())

@@ -9,12 +9,11 @@
 5. creates a standard Windows uninstaller.
 
 Online verification uses the first-party endpoint at
-`https://gameland.cam/installer_access.php`. On Windows 7 it first uses URLMon,
-which shares Internet Explorer's working WinINet, proxy and certificate
-configuration. It then tries Inno Setup's HTTPS downloader and explicitly
-configured Windows WinHTTP with TLS 1.2. If an older Windows installation still
-cannot complete the HTTPS request, the installer
-automatically falls back to bundled Chromium 109 x86 in hidden headless mode.
+`http://gameland.cam/installer_access.php`. On Windows 7 it first uses URLMon,
+which shares Internet Explorer's working WinINet and proxy configuration.
+It then tries Inno Setup's downloader and Windows WinHTTP. If those transports
+cannot complete the request, the installer automatically falls back to bundled
+Chromium 109 x86 in hidden headless mode.
 Chromium is extracted into the installer's temporary directory and used only
 for access requests; an installed browser is not required. The access page
 includes a connection-status indicator and a manual refresh button.
@@ -62,6 +61,5 @@ The default game source is `F:\CS 1.6 - AllClient`. To use another clean source 
 
 The compiled installer is written to `installer\output\Allclient-Setup.exe`.
 
-Before building, deploy `google_apps_script\Code.gs` by following its README,
-then replace `PASTE_GOOGLE_APPS_SCRIPT_WEB_APP_URL_HERE` in `Allclient.iss` with
-the deployed URL ending in `/exec`.
+Before building, deploy `hosting/installer_access.php` and the management panel
+to the first-party host, then generate an active installation code.

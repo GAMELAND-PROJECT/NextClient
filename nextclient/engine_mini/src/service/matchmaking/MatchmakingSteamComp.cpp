@@ -15,7 +15,7 @@ using namespace taskcoro;
 namespace
 {
 constexpr char kPinnedServersUrl[] =
-    "https://gameland.cam/pinned_servers.txt";
+    "http://gameland.cam/pinned_servers.txt";
 constexpr wchar_t kPinnedServersCacheFile[] = L"pinned_servers.dat";
 constexpr size_t kMaxPinnedServers = 64;
 }
