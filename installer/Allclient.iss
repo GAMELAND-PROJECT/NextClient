@@ -7,12 +7,6 @@
   #define SourceRoot "F:\CS 1.6 - AllClient"
 #endif
 
-#define BundledChromiumArchive AddBackslash(SourcePath) + "runtime\chromium109\chrome.nosync.7z"
-#ifnexist BundledChromiumArchive
-  #error Bundled Chromium is missing: installer\runtime\chromium109\chrome.nosync.7z
-#endif
-#define HasBundledChromium
-
 [Setup]
 AppId={{D9E46BD1-52F8-470F-8639-FF31FE7C5E48}
 AppName={#AppName}
@@ -38,15 +32,11 @@ ArchitecturesInstallIn64BitMode=x64compatible
 CloseApplications=yes
 RestartApplications=no
 SetupLogging=no
-ArchiveExtraction=enhanced/nopassword
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Files]
-#ifdef HasBundledChromium
-Source: "{#BundledChromiumArchive}"; Flags: dontcopy noencryption nocompression
-#endif
 Source: "{#SourceRoot}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "crashes\*,htmlcache\*,*.log,*.mdmp,debug.log,install.bat,unins000.exe,unins000.dat"
 
 [Icons]
@@ -76,7 +66,6 @@ var
   AccessStatusLabel: TNewStaticText;
   RefreshAccessButton: TNewButton;
   OnlineServiceUnavailable: Boolean;
-  BundledChromiumPath: String;
   OnlineVerificationMessage: String;
   AccessApproved: Boolean;
   PreviousInstallCleanupDone: Boolean;
@@ -108,80 +97,6 @@ begin
         Result := False;
         Exit;
       end;
-end;
-
-function FindChromeExecutable(const Directory: String; var ChromePath: String): Boolean;
-var
-  FindRec: TFindRec;
-  Candidate: String;
-begin
-  Result := False;
-  Candidate := AddBackslash(Directory) + 'chrome.exe';
-  if FileExists(Candidate) then
-  begin
-    ChromePath := Candidate;
-    Result := True;
-    Exit;
-  end;
-
-  if FindFirst(AddBackslash(Directory) + '*', FindRec) then
-  begin
-    try
-      repeat
-        if ((FindRec.Attributes and FILE_ATTRIBUTE_DIRECTORY) <> 0) and
-           (FindRec.Name <> '.') and (FindRec.Name <> '..') then
-        begin
-          if FindChromeExecutable(AddBackslash(Directory) + FindRec.Name, ChromePath) then
-          begin
-            Result := True;
-            Exit;
-          end;
-        end;
-      until not FindNext(FindRec);
-    finally
-      FindClose(FindRec);
-    end;
-  end;
-end;
-
-function PrepareBundledChromium(var BrowserPath: String): Boolean;
-var
-  ArchivePath, ExtractPath: String;
-begin
-  Result := False;
-  BrowserPath := '';
-
-#ifdef HasBundledChromium
-  if (BundledChromiumPath <> '') and FileExists(BundledChromiumPath) then
-  begin
-    BrowserPath := BundledChromiumPath;
-    Result := True;
-    Exit;
-  end;
-
-  ArchivePath := ExpandConstant('{tmp}\chrome.nosync.7z');
-  ExtractPath := ExpandConstant('{tmp}\allclient-chromium109');
-
-  try
-    if not FileExists(ArchivePath) then
-      ExtractTemporaryFile('chrome.nosync.7z');
-
-    if not DirExists(ExtractPath) then
-    begin
-      ForceDirectories(ExtractPath);
-      ExtractArchive(ArchivePath, ExtractPath, '', True, nil);
-    end;
-
-    if FindChromeExecutable(ExtractPath, BundledChromiumPath) then
-    begin
-      BrowserPath := BundledChromiumPath;
-      Result := True;
-    end;
-  except
-    { Keep internal paths and exception details out of installer output. }
-    Result := False;
-  end;
-#endif
 end;
 
 function FetchWithNativeRequest(const Url: String; var ResponseText: String): Boolean;
@@ -226,7 +141,7 @@ begin
         ResponseText := '';
       end;
     except
-      { Try the direct transport and then the bundled Chromium fallback. }
+      { Try the direct transport and then retry through the native stack. }
       ResponseText := '';
     end;
   end;
@@ -300,84 +215,6 @@ begin
   DeleteFile(DownloadPath);
 end;
 
-function FetchWithChromium(const Url: String; var ResponseText: String): Boolean;
-var
-  BrowserPath, ProfilePath, Parameters: String;
-  ResultCode, I: Integer;
-  Output: TExecOutput;
-begin
-  Result := False;
-  ResponseText := '';
-  ProfilePath := ExpandConstant('{tmp}\allclient-browser-profile');
-  try
-    try
-      { Bundled Chromium is the compatibility fallback when native WinHTTP
-        cannot complete the secure request on an older Windows installation. }
-      if not PrepareBundledChromium(BrowserPath) then
-      begin
-        OnlineVerificationMessage := 'Verification component could not be prepared.';
-        Exit;
-      end;
-
-      SetAccessStatus('Verification component ready. Contacting online service...', clGray);
-      DelTree(ProfilePath, True, True, True);
-
-      Parameters := '--headless --disable-gpu --no-first-run ' +
-      '--no-default-browser-check --disable-extensions --disable-sync ' +
-      '--disable-component-update --disable-background-networking ' +
-      '--disable-quic --ssl-version-min=tls1.2 ' +
-      '--disable-crash-reporter --disable-breakpad --no-pings ' +
-      '--disable-default-apps --disable-logging --disable-metrics ' +
-      '--disable-translate --dns-prefetch-disable --disable-preconnect ' +
-      '--safebrowsing-disable-auto-update ' +
-      '--disable-client-side-phishing-detection ' +
-      '--blink-settings=imagesEnabled=false ' +
-      '--disable-features=MediaRouter,OptimizationHints,Translate,' +
-      'AutofillServerCommunication,CertificateTransparencyComponentUpdater ' +
-      '--virtual-time-budget=60000 ' +
-      '--user-data-dir="' + ProfilePath + '" ' +
-      '--dump-dom "' + Url + '"';
-
-      if not ExecAndCaptureOutput(BrowserPath, Parameters, ExpandConstant('{tmp}'),
-          SW_SHOWNORMAL, ewWaitUntilTerminated, ResultCode, Output) then
-      begin
-        OnlineVerificationMessage := 'Verification component could not be started.';
-        Exit;
-      end;
-
-      if (ResultCode <> 0) or Output.Error then
-      begin
-        OnlineVerificationMessage := 'The online request did not complete successfully.';
-        Exit;
-      end;
-
-      for I := 0 to GetArrayLength(Output.StdOut) - 1 do
-      begin
-        ResponseText := ResponseText + Output.StdOut[I] + #10;
-        if Length(ResponseText) > 262144 then
-        begin
-          ResponseText := '';
-          OnlineVerificationMessage := 'The service returned an invalid response.';
-          Exit;
-        end;
-      end;
-
-      if Length(ResponseText) = 0 then
-      begin
-        OnlineVerificationMessage := 'No response was received from the online service.';
-        Exit;
-      end;
-
-      Result := True;
-    except
-      OnlineVerificationMessage := 'The verification component encountered a recoverable error.';
-      Result := False;
-    end;
-  finally
-    DelTree(ProfilePath, True, True, True);
-  end;
-end;
-
 function FetchAccessResponse(const Url: String; var ResponseText: String): Boolean;
 var
   Attempt: Integer;
@@ -410,12 +247,6 @@ begin
           Exit;
         end;
 
-        SetAccessStatus('Windows connection unavailable. Starting independent compatibility mode...', clGray);
-        if FetchWithChromium(Url, ResponseText) then
-        begin
-          Result := True;
-          Exit;
-        end;
       end;
 
       if Attempt < 2 then
@@ -527,13 +358,13 @@ begin
   PreparationProgress.Position := 15;
   PreparationStatusLabel.Font.Color := clGray;
   PreparationStatusLabel.Caption :=
-    'Preparing the secure online verification component...';
+    'Preparing the online verification connection...';
   WizardForm.Update;
 
   try
     PreparationProgress.Position := 55;
     PreparationStatusLabel.Caption :=
-      'Secure transports prepared. Confirming online access...';
+      'Windows transports prepared. Confirming online access...';
     WizardForm.Update;
 
     if FetchAccessApi('?action=status', ResponseText) and
@@ -550,7 +381,7 @@ begin
       PreparationProgress.Position := 55;
       PreparationStatusLabel.Font.Color := clRed;
       PreparationStatusLabel.Caption :=
-        'Secure transports are ready, but the online service could not be confirmed. You may retry or continue with offline access.';
+        'Windows transports are ready, but the online service could not be confirmed. You may retry or continue with offline access.';
       PreparationRetryButton.Visible := True;
     end;
   except
@@ -587,7 +418,7 @@ begin
   PreparationStatusLabel.AutoSize := False;
   PreparationStatusLabel.WordWrap := True;
   PreparationStatusLabel.Caption :=
-    'Ready to configure the secure online verification component.';
+    'Ready to configure the online verification connection.';
   PreparationStatusLabel.Font.Color := clGray;
 
   PreparationProgress := TNewProgressBar.Create(WizardForm);
