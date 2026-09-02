@@ -5,6 +5,7 @@ const FILE_SERVERS = 'pinned_servers.txt';
 const FILE_TAGS = 'client_tags.txt';
 const FILE_PASSWORD = 'server_password.txt';
 const FILE_INSTALLER_ACCESS = '.installer_access.php';
+const FILE_SUSPENDED_SUBSCRIPTIONS = '.suspended_subscriptions.php';
 const MAX_SERVERS = 64;
 const MAX_TAGS = 256;
 
@@ -342,10 +343,154 @@ function parseTagRows(string $content): array
     foreach (normalizedLines($content) as $line) {
         $parts = array_map('trim', explode('|', $line));
         if (count($parts) === 3) {
-            $rows[] = ['build' => $parts[0], 'player' => $parts[1], 'expiry' => $parts[2]];
+            $rows[] = ['build' => $parts[0], 'player' => $parts[1],
+                'expiry' => $parts[2], 'suspended' => false];
         }
     }
     return $rows;
+}
+
+function readSuspendedSubscriptionRows(): array
+{
+    $path = dataPath(FILE_SUSPENDED_SUBSCRIPTIONS);
+    if (!is_file($path)) {
+        return [];
+    }
+    if (!defined('ALLCLIENT_SUBSCRIPTIONS_INTERNAL')) {
+        define('ALLCLIENT_SUBSCRIPTIONS_INTERNAL', true);
+    }
+    $stored = require $path;
+    if (!is_array($stored)) {
+        throw new RuntimeException('فایل اشتراک‌های معلق معتبر نیست.');
+    }
+
+    $rows = [];
+    foreach ($stored as $row) {
+        if (!is_array($row)) { continue; }
+        $validated = validateTags([(string)($row['build'] ?? '')],
+            [(string)($row['player'] ?? '')], [(string)($row['expiry'] ?? '')]);
+        if (!$validated) { continue; }
+        [$build, $player, $expiry] = array_map('trim', explode('|', $validated[0]));
+        $rows[] = ['build' => $build, 'player' => $player,
+            'expiry' => $expiry, 'suspended' => true];
+    }
+    return $rows;
+}
+
+function subscriptionRowsByKey(): array
+{
+    $rows = [];
+    foreach (readSuspendedSubscriptionRows() as $row) {
+        $rows[strtoupper($row['build'])] = $row;
+    }
+    // Active records take precedence if a previous interrupted write left a duplicate.
+    foreach (parseTagRows(readTextFile(FILE_TAGS)) as $row) {
+        $rows[strtoupper($row['build'])] = $row;
+    }
+    return $rows;
+}
+
+function writeSubscriptionRows(array $rows): void
+{
+    $active = [];
+    $suspended = [];
+    foreach ($rows as $row) {
+        $validated = validateTags([(string)($row['build'] ?? '')],
+            [(string)($row['player'] ?? '')], [(string)($row['expiry'] ?? '')]);
+        if (!$validated) { continue; }
+        if (!empty($row['suspended'])) {
+            $suspended[] = [
+                'build' => (string)$row['build'],
+                'player' => (string)$row['player'],
+                'expiry' => (string)$row['expiry'],
+            ];
+        } else {
+            $active[] = $validated[0];
+        }
+    }
+
+    $state = "<?php\ndeclare(strict_types=1);\n\n" .
+        "if (!defined('ALLCLIENT_SUBSCRIPTIONS_INTERNAL')) {\n" .
+        "    http_response_code(404);\n    exit;\n}\n\nreturn " .
+        var_export($suspended, true) . ";\n";
+    backupAndAtomicWrite(FILE_SUSPENDED_SUBSCRIPTIONS, $state);
+    @chmod(dataPath(FILE_SUSPENDED_SUBSCRIPTIONS), 0600);
+    backupAndAtomicWrite(FILE_TAGS, implode("\n", $active) . ($active ? "\n" : ''));
+}
+
+function iranToday(): DateTimeImmutable
+{
+    return new DateTimeImmutable('today', new DateTimeZone('Asia/Tehran'));
+}
+
+function jalaliDateToDateTime(string $value): DateTimeImmutable
+{
+    if (!validJalaliDate($value)) {
+        throw new RuntimeException('تاریخ شمسی اشتراک معتبر نیست.');
+    }
+    [$jy, $jm, $jd] = array_map('intval', explode('/', $value));
+    [$gy, $gm, $gd] = jalaliToGregorian($jy, $jm, $jd);
+    return (new DateTimeImmutable('now', new DateTimeZone('Asia/Tehran')))
+        ->setDate($gy, $gm, $gd)->setTime(0, 0);
+}
+
+function dateTimeToJalali(DateTimeImmutable $date): string
+{
+    [$jy, $jm, $jd] = gregorianToJalali((int)$date->format('Y'),
+        (int)$date->format('n'), (int)$date->format('j'));
+    return sprintf('%04d/%02d/%02d', $jy, $jm, $jd);
+}
+
+function jalaliMonthLength(int $year, int $month): int
+{
+    if ($month <= 6) { return 31; }
+    if ($month <= 11) { return 30; }
+    return validJalaliDate(sprintf('%04d/12/30', $year)) ? 30 : 29;
+}
+
+function addJalaliMonths(string $value, int $months): string
+{
+    [$year, $month, $day] = array_map('intval', explode('/', $value));
+    $monthIndex = $year * 12 + ($month - 1) + $months;
+    $targetYear = intdiv($monthIndex, 12);
+    $targetMonth = $monthIndex % 12 + 1;
+    $targetDay = min($day, jalaliMonthLength($targetYear, $targetMonth));
+    return sprintf('%04d/%02d/%02d', $targetYear, $targetMonth, $targetDay);
+}
+
+function extendSubscriptionExpiry(string $expiry, int $months, int $days): string
+{
+    $today = iranToday();
+    $current = jalaliDateToDateTime($expiry);
+    $base = $current < $today ? $today : $current;
+    $result = dateTimeToJalali($base);
+    if ($months > 0) {
+        $result = addJalaliMonths($result, $months);
+    }
+    if ($days > 0) {
+        $result = dateTimeToJalali(jalaliDateToDateTime($result)->modify('+' . $days . ' days'));
+    }
+    return $result;
+}
+
+function decorateSubscriptionRow(array $row): array
+{
+    $days = (int)iranToday()->diff(jalaliDateToDateTime((string)$row['expiry']))->format('%r%a');
+    $row['days_remaining'] = $days;
+    if (!empty($row['suspended'])) {
+        $row['state'] = 'suspended';
+        $row['state_label'] = 'معلق';
+    } elseif ($days < 0) {
+        $row['state'] = 'expired';
+        $row['state_label'] = 'منقضی';
+    } elseif ($days <= 7) {
+        $row['state'] = 'urgent';
+        $row['state_label'] = 'رو به پایان';
+    } else {
+        $row['state'] = 'active';
+        $row['state_label'] = 'فعال';
+    }
+    return $row;
 }
 
 function readInstallerAccessState(): array
@@ -462,8 +607,82 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } elseif ($action === 'save_tags') {
             $tags = validateTags((array)($_POST['build_tag'] ?? []),
                 (array)($_POST['player_tag'] ?? []), (array)($_POST['expiry'] ?? []));
-            backupAndAtomicWrite(FILE_TAGS, implode("\n", $tags) . ($tags ? "\n" : ''));
+            $rows = subscriptionRowsByKey();
+            foreach ($rows as $key => $row) {
+                if (empty($row['suspended'])) { unset($rows[$key]); }
+            }
+            foreach ($tags as $tag) {
+                [$build, $player, $expiry] = array_map('trim', explode('|', $tag));
+                $rows[strtoupper($build)] = compact('build', 'player', 'expiry') + ['suspended' => false];
+            }
+            writeSubscriptionRows($rows);
             flash('success', count($tags) . ' اشتراک با موفقیت ذخیره شد.');
+        } elseif ($action === 'add_subscription' || $action === 'save_subscription') {
+            $validated = validateTags([(string)($_POST['build_tag'] ?? '')],
+                [(string)($_POST['player_tag'] ?? '')], [(string)($_POST['expiry'] ?? '')]);
+            [$build, $player, $expiry] = array_map('trim', explode('|', $validated[0]));
+            $rows = subscriptionRowsByKey();
+            $newKey = strtoupper($build);
+            $originalKey = strtoupper(trim((string)($_POST['original_build'] ?? $build)));
+            if ($action === 'add_subscription' && isset($rows[$newKey])) {
+                throw new RuntimeException('این تگ Build قبلاً ثبت شده است.');
+            }
+            if ($action === 'save_subscription' && !isset($rows[$originalKey])) {
+                throw new RuntimeException('اشتراک موردنظر دیگر وجود ندارد؛ صفحه را تازه‌سازی کنید.');
+            }
+            if ($newKey !== $originalKey && isset($rows[$newKey])) {
+                throw new RuntimeException('تگ Build جدید متعلق به اشتراک دیگری است.');
+            }
+            $suspended = $action === 'save_subscription' && !empty($rows[$originalKey]['suspended']);
+            unset($rows[$originalKey]);
+            $rows[$newKey] = compact('build', 'player', 'expiry', 'suspended');
+            writeSubscriptionRows($rows);
+            flash('success', $action === 'add_subscription' ?
+                'گیمنت جدید با موفقیت اضافه شد.' : 'مشخصات اشتراک ذخیره شد.');
+        } elseif ($action === 'adjust_subscription') {
+            $key = strtoupper(trim((string)($_POST['build'] ?? '')));
+            $operation = (string)($_POST['operation'] ?? '');
+            $rows = subscriptionRowsByKey();
+            if ($key === '' || !isset($rows[$key])) {
+                throw new RuntimeException('اشتراک موردنظر پیدا نشد؛ صفحه را تازه‌سازی کنید.');
+            }
+            if ($operation === 'suspend') {
+                $rows[$key]['suspended'] = true;
+                $message = 'اشتراک فوراً معلق و دسترسی آنلاین آن قطع شد.';
+            } elseif ($operation === 'resume') {
+                if (jalaliDateToDateTime((string)$rows[$key]['expiry']) < iranToday()) {
+                    throw new RuntimeException('این اشتراک منقضی شده است؛ ابتدا آن را تمدید و سپس فعال کنید.');
+                }
+                $rows[$key]['suspended'] = false;
+                $message = 'اشتراک دوباره فعال شد.';
+            } elseif ($operation === 'extend_months') {
+                $months = (int)($_POST['months'] ?? 0);
+                if (!in_array($months, [1, 2, 3], true)) {
+                    throw new RuntimeException('مدت تمدید ماهانه معتبر نیست.');
+                }
+                $rows[$key]['expiry'] = extendSubscriptionExpiry($rows[$key]['expiry'], $months, 0);
+                $message = 'اشتراک ' . $months . ' ماه تمدید شد.';
+            } elseif ($operation === 'extend_days') {
+                $days = (int)($_POST['days'] ?? 0);
+                if ($days < 1 || $days > 3650) {
+                    throw new RuntimeException('تعداد روز باید بین ۱ تا ۳۶۵۰ باشد.');
+                }
+                $rows[$key]['expiry'] = extendSubscriptionExpiry($rows[$key]['expiry'], 0, $days);
+                $message = 'اشتراک ' . $days . ' روز تمدید شد.';
+            } else {
+                throw new RuntimeException('عملیات اشتراک معتبر نیست.');
+            }
+            writeSubscriptionRows($rows);
+            flash('success', $message);
+        } elseif ($action === 'delete_subscription') {
+            $key = strtoupper(trim((string)($_POST['build'] ?? '')));
+            $rows = subscriptionRowsByKey();
+            if ($key === '' || !isset($rows[$key])) {
+                throw new RuntimeException('اشتراک موردنظر پیدا نشد.');
+            }
+            unset($rows[$key]);
+            writeSubscriptionRows($rows);
+            flash('success', 'اشتراک گیمنت حذف شد.');
         } elseif ($action === 'save_password') {
             $password = trim((string)($_POST['server_password'] ?? ''));
             if ($password === '' || strlen($password) > 31 ||
@@ -494,13 +713,26 @@ $flash = takeFlash();
 $authenticated = $configured && !empty($_SESSION['authenticated']);
 $serverText = '';
 $tagRows = [];
+$activeSubscriptions = 0;
+$suspendedSubscriptions = 0;
+$expiringSubscriptions = 0;
 $passwordConfigured = false;
 $installerAccessState = ['active' => false, 'code_hash' => '', 'created_at' => ''];
 $generatedInstallerCode = '';
 if ($authenticated) {
     try {
         $serverText = trim(readTextFile(FILE_SERVERS));
-        $tagRows = parseTagRows(readTextFile(FILE_TAGS));
+        $tagRows = array_map('decorateSubscriptionRow', array_values(subscriptionRowsByKey()));
+        usort($tagRows, static function (array $left, array $right): int {
+            $priority = ['expired' => 0, 'urgent' => 1, 'suspended' => 2, 'active' => 3];
+            return ($priority[$left['state']] <=> $priority[$right['state']]) ?:
+                strcasecmp($left['build'], $right['build']);
+        });
+        foreach ($tagRows as $row) {
+            if ($row['state'] === 'suspended') { ++$suspendedSubscriptions; }
+            elseif ($row['state'] === 'expired' || $row['state'] === 'urgent') { ++$expiringSubscriptions; }
+            else { ++$activeSubscriptions; }
+        }
         $passwordConfigured = trim(readTextFile(FILE_PASSWORD, 256)) !== '';
         $installerAccessState = readInstallerAccessState();
         $generatedInstallerCode = (string)($_SESSION['generated_installer_code'] ?? '');
@@ -563,12 +795,21 @@ if ($authenticated) {
   <?php else: ?>
     <section class="stats">
       <div class="stat"><strong><?= count(normalizedLines($serverText)) ?></strong><span>سرور پین‌شده</span></div>
-      <div class="stat"><strong><?= count($tagRows) ?></strong><span>اشتراک گیمنت</span></div>
-      <div class="stat"><strong class="<?= $passwordConfigured ? 'ok' : 'bad' ?>"><?= $passwordConfigured ? 'فعال' : 'تنظیم‌نشده' ?></strong><span>رمز سرورها</span></div>
+      <div class="stat"><strong><?= count($tagRows) ?></strong><span>کل اشتراک‌ها</span></div>
+      <div class="stat"><strong class="ok"><?= $activeSubscriptions ?></strong><span>اشتراک فعال</span></div>
+      <div class="stat"><strong class="<?= $expiringSubscriptions ? 'warn' : 'ok' ?>"><?= $expiringSubscriptions ?></strong><span>نیازمند توجه</span></div>
+      <div class="stat"><strong class="<?= $suspendedSubscriptions ? 'bad' : 'ok' ?>"><?= $suspendedSubscriptions ?></strong><span>اشتراک معلق</span></div>
       <div class="stat"><strong class="<?= $installerAccessState['active'] ? 'ok' : 'bad' ?>"><?= $installerAccessState['active'] ? 'فعال' : 'غیرفعال' ?></strong><span>کد نصب</span></div>
     </section>
 
-    <section class="grid">
+    <nav class="panel-tabs" aria-label="بخش‌های پنل">
+      <button class="panel-tab active" type="button" data-panel="dashboard" aria-selected="true"><span class="tab-icon">⌂</span><span>داشبورد</span></button>
+      <button class="panel-tab" type="button" data-panel="subscriptions" aria-selected="false"><span class="tab-icon">◫</span><span>اشتراک‌ها</span><b><?= count($tagRows) ?></b></button>
+      <button class="panel-tab" type="button" data-panel="settings" aria-selected="false"><span class="tab-icon">⚙</span><span>تنظیمات</span></button>
+    </nav>
+
+    <section class="panel-view active" data-panel-view="dashboard">
+    <section class="grid dashboard-grid">
       <article class="card">
         <div class="card-title"><div><h2>سرورهای پین‌شده</h2><p>هر سرور در یک خط با قالب IP:PORT</p></div><span class="pill">حداکثر ۶۴</span></div>
         <form method="post"><input type="hidden" name="csrf" value="<?= escape(csrfToken()) ?>"><input type="hidden" name="action" value="save_servers">
@@ -604,30 +845,76 @@ if ($authenticated) {
         </form>
       </article>
 
-      <article class="card password-card">
-        <div class="card-title"><div><h2>رمز مدیریت پنل</h2><p>برای تغییر، رمز فعلی نیز الزامی است.</p></div><span class="dot active"></span></div>
-        <form method="post" autocomplete="off"><input type="hidden" name="csrf" value="<?= escape(csrfToken()) ?>"><input type="hidden" name="action" value="change_admin_password">
-          <label>رمز فعلی<input type="password" name="current_password" required autocomplete="current-password"></label>
-          <label>رمز ۸ کاراکتری جدید<input type="password" name="new_password" required autocomplete="new-password"></label>
-          <label>تکرار رمز جدید<input type="password" name="confirm_password" required autocomplete="new-password"></label>
-          <button class="button secondary" type="submit">تغییر رمز مدیریت</button>
-        </form>
-      </article>
+    </section>
     </section>
 
-    <section class="card subscriptions">
-      <div class="card-title"><div><h2>اشتراک گیمنت‌ها</h2><p>تگ Build، تگ نمایش بازیکن و تاریخ انقضای شمسی</p></div><button class="button secondary" id="add-row" type="button">+ گیمنت جدید</button></div>
-      <form method="post"><input type="hidden" name="csrf" value="<?= escape(csrfToken()) ?>"><input type="hidden" name="action" value="save_tags">
-        <div class="table-head"><span>تگ Build</span><span>تگ بازیکن</span><span>انقضا</span><span></span></div>
-        <div id="tag-rows">
-          <?php foreach ($tagRows as $row): ?>
-            <div class="tag-row"><input name="build_tag[]" maxlength="64" pattern="[A-Za-z0-9_-]+" value="<?= escape($row['build']) ?>" required><input name="player_tag[]" maxlength="12" pattern="[A-Za-z0-9_-]+" value="<?= escape($row['player']) ?>" required><input name="expiry[]" class="ltr" maxlength="10" pattern="\d{4}/\d{2}/\d{2}" value="<?= escape($row['expiry']) ?>" required><button class="remove-row" type="button" aria-label="حذف">×</button></div>
-          <?php endforeach; ?>
-        </div>
-        <button class="button primary" type="submit">ذخیره اشتراک‌ها</button>
+    <section class="subscriptions panel-view" data-panel-view="subscriptions">
+      <div class="section-heading">
+        <div><span class="eyebrow">SUBSCRIPTIONS</span><h2>مدیریت اشتراک گیمنت‌ها</h2><p>وضعیت، زمان باقی‌مانده، تمدید و تعلیق فوری</p></div>
+        <button class="button primary" id="show-add-subscription" type="button">+ اشتراک جدید</button>
+      </div>
+
+      <form class="card add-subscription" id="add-subscription" method="post" hidden>
+        <input type="hidden" name="csrf" value="<?= escape(csrfToken()) ?>"><input type="hidden" name="action" value="add_subscription">
+        <div class="form-heading"><div><h3>افزودن گیمنت</h3><p>اشتراک پس از ذخیره فوراً برای کلاینت قابل استفاده است.</p></div><button class="icon-button" id="close-add-subscription" type="button" aria-label="بستن">×</button></div>
+        <div class="subscription-fields"><label>نام یا تگ Build<input class="ltr" name="build_tag" maxlength="64" pattern="[A-Za-z0-9_-]+" placeholder="IMORTAL_GONBAD" required></label><label>تگ بازیکن<input class="ltr" name="player_tag" maxlength="12" pattern="[A-Za-z0-9_-]+" placeholder="IM" required></label><label>انقضای شمسی<input class="ltr" name="expiry" maxlength="10" pattern="\d{4}/\d{2}/\d{2}" placeholder="1405/06/25" required></label></div>
+        <button class="button primary" type="submit">ساخت اشتراک</button>
       </form>
+
+      <div class="subscription-toolbar card">
+        <label class="search-box">جست‌وجو<input id="subscription-search" type="search" placeholder="نام گیمنت یا تگ بازیکن"></label>
+        <div class="filter-buttons" role="group" aria-label="فیلتر اشتراک‌ها"><button class="filter-chip active" type="button" data-filter="all">همه</button><button class="filter-chip" type="button" data-filter="active">فعال</button><button class="filter-chip" type="button" data-filter="attention">نیازمند توجه</button><button class="filter-chip" type="button" data-filter="suspended">معلق</button></div>
+      </div>
+
+      <div class="subscription-table-head" aria-hidden="true"><span>پروفایل گیمنت</span><span>وضعیت</span><span>اعتبار باقی‌مانده</span><span>تاریخ انقضا</span><span>مدیریت</span></div>
+      <div class="subscription-list" id="subscription-list">
+        <?php foreach ($tagRows as $rowIndex => $row): ?>
+          <?php $attention = in_array($row['state'], ['expired', 'urgent'], true); ?>
+          <article class="subscription-card state-<?= escape($row['state']) ?>" data-state="<?= $attention ? 'attention' : escape($row['state']) ?>" data-search="<?= escape(strtolower($row['build'] . ' ' . $row['player'])) ?>">
+            <div class="subscription-identity">
+              <span class="profile-avatar"><?= escape(strtoupper(substr($row['player'], 0, 2))) ?></span>
+              <div><h3><?= escape($row['build']) ?></h3><span class="player-tag ltr"><?= escape($row['player']) ?></span></div>
+            </div>
+            <div class="subscription-status"><span class="status-dot <?= escape($row['state']) ?>"></span><span class="status-badge <?= escape($row['state']) ?>"><?= escape($row['state_label']) ?></span></div>
+            <div class="remaining <?= $row['days_remaining'] < 0 ? 'overdue' : '' ?>">
+              <?php if ($row['state'] === 'suspended' && $row['days_remaining'] >= 0): ?><strong><?= (int)$row['days_remaining'] ?></strong><span>روز (معلق)</span>
+              <?php elseif ($row['state'] === 'suspended'): ?><strong><?= abs((int)$row['days_remaining']) ?></strong><span>روز گذشته (معلق)</span>
+              <?php elseif ($row['days_remaining'] < 0): ?><strong><?= abs((int)$row['days_remaining']) ?></strong><span>روز گذشته</span>
+              <?php else: ?><strong><?= (int)$row['days_remaining'] ?></strong><span>روز باقی‌مانده</span><?php endif; ?>
+            </div>
+            <div class="expiry-line"><span>انقضا</span><strong class="ltr"><?= escape($row['expiry']) ?></strong></div>
+
+            <button class="open-profile-modal" type="button" data-modal="profile-modal-<?= (int)$rowIndex ?>"><span>مدیریت پروفایل</span><i>←</i></button>
+            <dialog class="profile-modal" id="profile-modal-<?= (int)$rowIndex ?>" aria-labelledby="profile-title-<?= (int)$rowIndex ?>">
+              <div class="modal-shell">
+                <header class="modal-header"><div class="modal-profile"><span class="profile-avatar"><?= escape(strtoupper(substr($row['player'], 0, 2))) ?></span><div><span class="status-badge <?= escape($row['state']) ?>"><?= escape($row['state_label']) ?></span><h3 id="profile-title-<?= (int)$rowIndex ?>"><?= escape($row['build']) ?></h3><p>تگ بازیکن: <b class="ltr"><?= escape($row['player']) ?></b> · انقضا: <b class="ltr"><?= escape($row['expiry']) ?></b></p></div></div><button class="modal-close" type="button" data-close-modal aria-label="بستن پنجره">×</button></header>
+                <div class="modal-overview"><div><span>وضعیت فعلی</span><strong class="<?= escape($row['state']) ?>"><?= escape($row['state_label']) ?></strong></div><div><span>اعتبار</span><strong><?= abs((int)$row['days_remaining']) ?> روز <?= $row['days_remaining'] < 0 ? 'گذشته' : 'باقی‌مانده' ?></strong></div><div><span>تاریخ انقضا</span><strong class="ltr"><?= escape($row['expiry']) ?></strong></div></div>
+                <div class="manage-panel">
+                <section class="manage-block renewal-block"><div class="manage-title"><strong>تمدید اعتبار</strong><span>از تاریخ فعلی یا امروز محاسبه می‌شود</span></div><div class="quick-actions"><form method="post" class="month-actions"><input type="hidden" name="csrf" value="<?= escape(csrfToken()) ?>"><input type="hidden" name="action" value="adjust_subscription"><input type="hidden" name="operation" value="extend_months"><input type="hidden" name="build" value="<?= escape($row['build']) ?>"><button type="submit" name="months" value="1">+ ۱ ماه</button><button type="submit" name="months" value="2">+ ۲ ماه</button><button type="submit" name="months" value="3">+ ۳ ماه</button></form><form method="post" class="days-action"><input type="hidden" name="csrf" value="<?= escape(csrfToken()) ?>"><input type="hidden" name="action" value="adjust_subscription"><input type="hidden" name="operation" value="extend_days"><input type="hidden" name="build" value="<?= escape($row['build']) ?>"><input type="number" name="days" min="1" max="3650" inputmode="numeric" placeholder="تعداد روز" required><button class="button secondary" type="submit">تمدید دلخواه</button></form></div></section>
+                <section class="manage-block access-block"><div class="manage-title"><strong>کنترل دسترسی</strong><span>تغییر وضعیت بلافاصله روی فایل کلاینت اعمال می‌شود</span></div><form method="post" class="confirm-form" data-confirm="<?= $row['suspended'] ? 'اشتراک دوباره فعال شود؟' : 'دسترسی آنلاین این گیمنت فوراً معلق شود؟' ?>"><input type="hidden" name="csrf" value="<?= escape(csrfToken()) ?>"><input type="hidden" name="action" value="adjust_subscription"><input type="hidden" name="operation" value="<?= $row['suspended'] ? 'resume' : 'suspend' ?>"><input type="hidden" name="build" value="<?= escape($row['build']) ?>"><button class="button <?= $row['suspended'] ? 'primary' : 'warning' ?>" type="submit"><?= $row['suspended'] ? 'فعال‌سازی مجدد' : 'تعلیق دسترسی آنلاین' ?></button></form></section>
+                <details class="subscription-edit"><summary>ویرایش اطلاعات پروفایل</summary><div class="edit-actions"><form method="post" class="edit-form"><input type="hidden" name="csrf" value="<?= escape(csrfToken()) ?>"><input type="hidden" name="action" value="save_subscription"><input type="hidden" name="original_build" value="<?= escape($row['build']) ?>"><div class="subscription-fields"><label>تگ Build<input class="ltr" name="build_tag" maxlength="64" pattern="[A-Za-z0-9_-]+" value="<?= escape($row['build']) ?>" required></label><label>تگ بازیکن<input class="ltr" name="player_tag" maxlength="12" pattern="[A-Za-z0-9_-]+" value="<?= escape($row['player']) ?>" required></label><label>انقضای شمسی<input class="ltr" name="expiry" maxlength="10" pattern="\d{4}/\d{2}/\d{2}" value="<?= escape($row['expiry']) ?>" required></label></div><button class="button secondary" type="submit">ذخیره اطلاعات</button></form><form method="post" class="confirm-form delete-form" data-confirm="این اشتراک برای همیشه حذف شود؟"><input type="hidden" name="csrf" value="<?= escape(csrfToken()) ?>"><input type="hidden" name="action" value="delete_subscription"><input type="hidden" name="build" value="<?= escape($row['build']) ?>"><button class="button danger" type="submit">حذف کامل پروفایل</button></form></div></details>
+                </div>
+              </div>
+            </dialog>
+          </article>
+        <?php endforeach; ?>
+        <?php if (!$tagRows): ?><div class="card empty-state"><strong>هنوز اشتراکی ثبت نشده است</strong><span>با دکمه «اشتراک جدید» اولین گیمنت را اضافه کنید.</span></div><?php endif; ?>
+      </div>
     </section>
-    <template id="tag-row-template"><div class="tag-row"><input name="build_tag[]" maxlength="64" pattern="[A-Za-z0-9_-]+" placeholder="IMORTAL_GONBAD" required><input name="player_tag[]" maxlength="12" pattern="[A-Za-z0-9_-]+" placeholder="IM" required><input name="expiry[]" class="ltr" maxlength="10" pattern="\d{4}/\d{2}/\d{2}" placeholder="1405/06/25" required><button class="remove-row" type="button" aria-label="حذف">×</button></div></template>
+
+    <section class="settings panel-view" data-panel-view="settings">
+      <div class="section-heading"><div><span class="eyebrow">SETTINGS</span><h2>تنظیمات پنل</h2><p>تنظیمات امنیتی و مدیریتی حساب شما</p></div></div>
+      <article class="card settings-card">
+        <div class="settings-mark">⚿</div>
+        <div class="settings-content">
+          <div class="card-title"><div><h2>تغییر رمز مدیریت</h2><p>برای امنیت، رمز فعلی را وارد کنید. رمز جدید باید دقیقاً ۸ کاراکتر باشد.</p></div><span class="status-badge active">امن</span></div>
+          <form method="post" autocomplete="off"><input type="hidden" name="csrf" value="<?= escape(csrfToken()) ?>"><input type="hidden" name="action" value="change_admin_password">
+            <div class="settings-fields"><label>رمز فعلی<input type="password" name="current_password" required autocomplete="current-password"></label><label>رمز ۸ کاراکتری جدید<input type="password" name="new_password" minlength="8" maxlength="8" required autocomplete="new-password"></label><label>تکرار رمز جدید<input type="password" name="confirm_password" minlength="8" maxlength="8" required autocomplete="new-password"></label></div>
+            <button class="button primary" type="submit">ذخیره رمز جدید</button>
+          </form>
+        </div>
+      </article>
+    </section>
   <?php endif; ?>
 </main>
 </body>

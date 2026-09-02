@@ -1,6 +1,6 @@
 'use strict';
 
-const CACHE_NAME = 'allclient-admin-static-v1';
+const CACHE_NAME = 'allclient-admin-static-v4';
 const STATIC_ASSETS = [
   './style.css',
   './panel.js',

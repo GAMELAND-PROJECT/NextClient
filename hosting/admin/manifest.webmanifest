@@ -1,15 +1,15 @@
 {
   "id": "./",
-  "name": "Allclient Control Panel",
+  "name": "پنل مدیریت Allclient",
   "short_name": "Allclient",
-  "description": "مدیریت امن سرورها و اشتراک‌های Allclient",
+  "description": "مدیریت موبایلی سرورها، اشتراک‌ها و دسترسی نصب Allclient",
   "lang": "fa",
   "dir": "rtl",
   "start_url": "./?source=pwa",
   "scope": "./",
   "display": "standalone",
   "orientation": "any",
-  "background_color": "#07111f",
+  "background_color": "#06101d",
   "theme_color": "#0b1626",
   "icons": [
     {
