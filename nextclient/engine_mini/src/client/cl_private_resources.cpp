@@ -115,7 +115,10 @@ void PrivateRes_ListRequest()
 
 void PrivateRes_ParseList(const char* data, int len)
 {
-    std::stringstream data_stream(data);
+    if (!data || len <= 0)
+        return;
+    // Network/decompressed buffers are not necessarily NUL-terminated.
+    std::stringstream data_stream(std::string(data, static_cast<size_t>(len)));
     std::string line;
     std::array<std::string_view, 5> tokens;
 
@@ -132,6 +135,10 @@ void PrivateRes_ParseList(const char* data, int len)
             Con_DPrintf(ConLogType::Info, "PrivateRes_ParseList: can't tokenize line %d, skipping...\n", line_num);
             continue;
         }
+
+        if (tokens[0].empty() || tokens[1].empty() || tokens[2].empty() ||
+            tokens[3].empty() || tokens[4].empty())
+            continue;
 
         bool must_be_replaced = tokens[0][0] == '1';
         std::string filepath(tokens[1]);
@@ -158,6 +165,9 @@ void PrivateRes_ParseList(const char* data, int len)
             Con_DPrintf(ConLogType::Info, "PrivateRes_ParseList: can't parse size at line %d: result is out of range, skipping...\n", line_num);
             continue;
         }
+
+        if (iSize < 0)
+            continue;
 
         AddPrivateResource(!must_be_replaced, filepath, ncl_filepath, uiCrc32, iSize);
 
