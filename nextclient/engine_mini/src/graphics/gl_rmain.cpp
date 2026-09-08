@@ -57,11 +57,13 @@ float GlowBlend(cl_entity_t* pEntity)
 
 void R_AllowFog(qboolean allow)
 {
-    // Fog is disabled by the stable client profile. glIsEnabled is a driver
-    // query and can serialize CPU/GPU work, so keep it off the per-frame path.
+    // The engine flag is not the OpenGL state: client triangle callbacks or
+    // a previous underwater pass may have left GL_FOG enabled. Restore the
+    // actual state without a synchronous glIsEnabled query in this path.
     if (!*p_g_bUserFogOn)
     {
         *p_isFogEnabled = false;
+        qglDisable(GL_FOG);
         return;
     }
 
@@ -480,6 +482,13 @@ void R_RenderScene()
     R_SetupFrame();
     R_SetFrustum();
     R_SetupGL();
+    // Reset leaked fog before drawing the world, not only after it: otherwise
+    // a previous pass can black out distant geometry for this entire frame.
+    if (!*p_g_bUserFogOn)
+    {
+        *p_isFogEnabled = false;
+        qglDisable(GL_FOG);
+    }
     R_MarkLeaves();
 
     if (!r_refdef->onlyClientDraws)
