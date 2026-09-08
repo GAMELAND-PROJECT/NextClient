@@ -24,7 +24,6 @@ constexpr int kWindowsPointerSpeeds[] = {1, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20};
 enum ControlId
 {
     IdResolution = 100,
-    IdFullscreen,
     IdHdModels,
     IdHighQuality,
     IdLaunch,
@@ -101,7 +100,6 @@ HINSTANCE g_instance{};
 HFONT g_font{};
 HFONT g_emphasisFont{};
 HWND g_resolution{};
-HWND g_fullscreen{};
 HWND g_hdModels{};
 HWND g_highQuality{};
 HWND g_pointerSpeed{};
@@ -393,7 +391,6 @@ void SetControls(const VideoSettings& value)
         it = std::prev(g_resolutions.end());
     }
     SendMessageW(g_resolution, CB_SETCURSEL, std::distance(g_resolutions.begin(), it), 0);
-    Button_SetCheck(g_fullscreen, value.windowed ? BST_UNCHECKED : BST_CHECKED);
     Button_SetCheck(g_hdModels, value.hdModels ? BST_CHECKED : BST_UNCHECKED);
     Button_SetCheck(g_highQuality, value.videoLevel ? BST_CHECKED : BST_UNCHECKED);
 }
@@ -454,7 +451,7 @@ bool SettingsFromControls(VideoSettings& value)
     value.width = static_cast<DWORD>(g_resolutions[selectedIndex].width);
     value.height = static_cast<DWORD>(g_resolutions[selectedIndex].height);
     value.bpp = 32;
-    value.windowed = Button_GetCheck(g_fullscreen) == BST_CHECKED ? 0 : 1;
+    value.windowed = ReadSettings().windowed; // Preserve the hidden display mode.
     value.hdModels = Button_GetCheck(g_hdModels) == BST_CHECKED ? 1 : 0;
     value.videoLevel = Button_GetCheck(g_highQuality) == BST_CHECKED ? 1 : 0;
     return true;
@@ -511,52 +508,55 @@ void CreateControls(HWND window)
 {
     InitializeNativeResolutionIfNeeded();
 
-    AddControl(window, L"STATIC", L"\u062a\u0646\u0638\u06cc\u0645\u0627\u062a \u062a\u0635\u0648\u06cc\u0631 \u0648 \u0645\u0627\u0648\u0633 \u0631\u0627 \u0627\u0646\u062a\u062e\u0627\u0628 \u06a9\u0646\u06cc\u062f\u060c \u0633\u067e\u0633 \u0628\u0627\u0632\u06cc \u0631\u0627 \u0627\u062c\u0631\u0627 \u06a9\u0646\u06cc\u062f.",
-               SS_LEFT, 24, 18, 572, 22);
-    AddControl(window, L"BUTTON", L"\u0646\u0645\u0627\u06cc\u0634 \u062a\u0635\u0648\u06cc\u0631", BS_GROUPBOX, 18, 48, 578, 166);
-    AddControl(window, L"STATIC", L"\u0648\u0636\u0648\u062d \u062a\u0635\u0648\u06cc\u0631", SS_LEFT, 38, 78, 120, 22);
-    g_resolution = AddControl(window, WC_COMBOBOXW, L"", CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP,
-                              176, 74, 210, 220, IdResolution);
-    g_fullscreen = AddControl(window, L"BUTTON", L"\u062a\u0645\u0627\u0645\u200c\u0635\u0641\u062d\u0647", BS_AUTOCHECKBOX | WS_TABSTOP,
-                              38, 116, 220, 24, IdFullscreen);
-    g_hdModels = AddControl(window, L"BUTTON", L"\u0645\u062f\u0644\u200c\u0647\u0627\u06cc \u0628\u0627\u06a9\u06cc\u0641\u06cc\u062a \u0628\u0627\u0632\u06cc\u06a9\u0646\u0627\u0646", BS_AUTOCHECKBOX | WS_TABSTOP,
-                            38, 148, 220, 24, IdHdModels);
-    g_highQuality = AddControl(window, L"BUTTON", L"\u06a9\u06cc\u0641\u06cc\u062a \u0628\u0627\u0644\u0627\u06cc \u062a\u0635\u0648\u06cc\u0631", BS_AUTOCHECKBOX | WS_TABSTOP,
-                               294, 148, 240, 24, IdHighQuality);
-    AddControl(window, L"STATIC", L"\u0631\u0646\u06af \u06f3\u06f2 \u0628\u06cc\u062a\u06cc\u060c \u0631\u0646\u062f\u0631 OpenGL", SS_LEFT, 294, 116, 244, 24);
 
-    AddControl(window, L"BUTTON", L"\u0645\u0627\u0648\u0633 \u0648\u06cc\u0646\u062f\u0648\u0632", BS_GROUPBOX, 18, 224, 578, 96);
-    AddControl(window, L"STATIC", L"\u0633\u0631\u0639\u062a \u0646\u0634\u0627\u0646\u06af\u0631", SS_LEFT, 38, 252, 112, 22);
+    auto label = [&](const wchar_t* text, int x, int y, int width, int height = 24)
+    {
+        return AddControl(window, L"STATIC", text, SS_RIGHT, x, y, width, height);
+    };
+    HWND heading = label(L"\u0622\u0645\u0627\u062f\u0647\u0654 \u0628\u0627\u0632\u06cc \u0647\u0633\u062a\u06cc\u062f\u061f", 24, 16, 568, 28);
+    SendMessageW(heading, WM_SETFONT, reinterpret_cast<WPARAM>(g_emphasisFont), TRUE);
+    label(L"\u062a\u0646\u0638\u06cc\u0645\u0627\u062a \u062f\u0644\u062e\u0648\u0627\u0647\u062a\u0627\u0646 \u0631\u0627 \u0627\u0646\u062a\u062e\u0627\u0628 \u06a9\u0646\u06cc\u062f \u0648 \u0648\u0627\u0631\u062f \u0628\u0627\u0632\u06cc \u0634\u0648\u06cc\u062f.", 24, 48, 568);
+
+    AddControl(window, L"BUTTON", L"  \u062a\u0635\u0648\u06cc\u0631  ", BS_GROUPBOX | BS_RIGHT, 20, 82, 576, 120);
+    label(L"\u0648\u0636\u0648\u062d \u062a\u0635\u0648\u06cc\u0631", 422, 113, 150);
+    g_resolution = AddControl(window, WC_COMBOBOXW, L"", CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP,
+                              44, 108, 246, 220, IdResolution);
+    SetWindowLongPtrW(g_resolution, GWL_EXSTYLE,
+        GetWindowLongPtrW(g_resolution, GWL_EXSTYLE) & ~WS_EX_RTLREADING);
+    g_highQuality = AddControl(window, L"BUTTON", L"\u06a9\u06cc\u0641\u06cc\u062a \u0628\u0627\u0644\u0627\u06cc \u062a\u0635\u0648\u06cc\u0631",
+        BS_AUTOCHECKBOX | BS_RIGHT | BS_LEFTTEXT | WS_TABSTOP, 324, 156, 248, 28, IdHighQuality);
+    g_hdModels = AddControl(window, L"BUTTON", L"\u0645\u062f\u0644\u200c\u0647\u0627\u06cc \u0628\u0627\u06a9\u06cc\u0641\u06cc\u062a \u0628\u0627\u0632\u06cc\u06a9\u0646\u0627\u0646",
+        BS_AUTOCHECKBOX | BS_RIGHT | BS_LEFTTEXT | WS_TABSTOP, 44, 156, 248, 28, IdHdModels);
+
+    AddControl(window, L"BUTTON", L"  \u0645\u0627\u0648\u0633 \u0648\u06cc\u0646\u062f\u0648\u0632  ", BS_GROUPBOX | BS_RIGHT, 20, 214, 576, 116);
+    label(L"\u0633\u0631\u0639\u062a \u0646\u0634\u0627\u0646\u06af\u0631", 434, 246, 138);
     g_pointerSpeed = AddControl(window, TRACKBAR_CLASSW, L"", TBS_AUTOTICKS | TBS_HORZ | WS_TABSTOP,
-                                150, 244, 280, 34, IdPointerSpeed);
+                                114, 239, 304, 36, IdPointerSpeed);
+    SetWindowLongPtrW(g_pointerSpeed, GWL_EXSTYLE,
+        GetWindowLongPtrW(g_pointerSpeed, GWL_EXSTYLE) & ~WS_EX_RTLREADING);
     SendMessageW(g_pointerSpeed, TBM_SETRANGE, TRUE, MAKELPARAM(1, 11));
     SendMessageW(g_pointerSpeed, TBM_SETTICFREQ, 1, 0);
-    g_pointerSpeedValue = AddControl(window, L"STATIC", L"6 / 11", SS_CENTER, 438, 250, 54, 22, IdPointerSpeedValue);
+    g_pointerSpeedValue = AddControl(window, L"STATIC", L"", SS_CENTER, 44, 246, 62, 24, IdPointerSpeedValue);
     g_enhancePointer = AddControl(window, L"BUTTON", L"\u0627\u0641\u0632\u0627\u06cc\u0634 \u062f\u0642\u062a \u0646\u0634\u0627\u0646\u06af\u0631",
-                                  BS_AUTOCHECKBOX | WS_TABSTOP, 38, 282, 250, 24, IdEnhancePointer);
-    AddControl(window, L"STATIC", L"\u0627\u06cc\u0646 \u062a\u0646\u0638\u06cc\u0645 \u0628\u0631\u0627\u06cc \u06a9\u0627\u0631\u0628\u0631 \u0641\u0639\u0644\u06cc \u0648\u06cc\u0646\u062f\u0648\u0632 \u0627\u0633\u062a.",
-               SS_LEFT, 310, 284, 260, 22);
+        BS_AUTOCHECKBOX | BS_RIGHT | BS_LEFTTEXT | WS_TABSTOP, 324, 286, 248, 28, IdEnhancePointer);
+    label(L"\u0627\u0639\u0645\u0627\u0644 \u0631\u0648\u06cc \u0645\u0627\u0648\u0633 \u06a9\u0627\u0631\u0628\u0631 \u0641\u0639\u0644\u06cc \u0648\u06cc\u0646\u062f\u0648\u0632", 44, 289, 260);
 
-    AddControl(window, L"BUTTON", L"\u0627\u0634\u062a\u0631\u0627\u06a9 \u0622\u0646\u0644\u0627\u06cc\u0646", BS_GROUPBOX, 18, 330, 578, 104);
-    g_subscriptionState = AddControl(window, L"STATIC", L"\u062f\u0631 \u062d\u0627\u0644 \u0628\u0631\u0631\u0633\u06cc \u0627\u0634\u062a\u0631\u0627\u06a9\u2026",
-                                     SS_LEFT, 38, 354, 536, 22, IdSubscriptionState);
-    g_subscriptionTag = AddControl(window, L"STATIC", L"",
-                                   SS_LEFT, 38, 382, 188, 24, IdSubscriptionTag);
-    SendMessageW(g_subscriptionTag, WM_SETFONT,
-                 reinterpret_cast<WPARAM>(g_emphasisFont), TRUE);
-    g_subscriptionDetails = AddControl(window, L"STATIC", L"",
-                                       SS_LEFT, 238, 378, 336, 22, IdSubscriptionDetails);
-    g_subscriptionRemaining = AddControl(window, L"STATIC", L"",
-                                         SS_LEFT, 238, 402, 336, 22, IdSubscriptionRemaining);
-    SendMessageW(g_subscriptionRemaining, WM_SETFONT,
-                 reinterpret_cast<WPARAM>(g_emphasisFont), TRUE);
+    AddControl(window, L"BUTTON", L"  \u0627\u0634\u062a\u0631\u0627\u06a9 \u06af\u06cc\u0645\u0646\u062a  ", BS_GROUPBOX | BS_RIGHT, 20, 342, 576, 132);
+    g_subscriptionTag = label(L"", 44, 368, 528, 24);
+    SendMessageW(g_subscriptionTag, WM_SETFONT, reinterpret_cast<WPARAM>(g_emphasisFont), TRUE);
+    g_subscriptionState = label(L"", 44, 395, 528, 24);
+    g_subscriptionDetails = label(L"", 44, 422, 528, 22);
+    g_subscriptionRemaining = label(L"", 44, 445, 528, 24);
+    SendMessageW(g_subscriptionRemaining, WM_SETFONT, reinterpret_cast<WPARAM>(g_emphasisFont), TRUE);
     PopulateSubscriptionStatus();
 
-    AddControl(window, L"BUTTON", L"\u0628\u0627\u0632\u0646\u0634\u0627\u0646\u06cc", BS_PUSHBUTTON | WS_TABSTOP, 18, 452, 112, 32, IdRestore);
-    AddControl(window, L"BUTTON", L"\u0627\u0646\u0635\u0631\u0627\u0641", BS_PUSHBUTTON | WS_TABSTOP, 140, 452, 100, 32, IdCancel);
     AddControl(window, L"BUTTON", L"\u0627\u062c\u0631\u0627\u06cc \u0628\u0627\u0632\u06cc", BS_DEFPUSHBUTTON | WS_TABSTOP,
-               460, 452, 136, 32, IdLaunch);
-    g_status = AddControl(window, L"STATIC", L"\u0622\u0645\u0627\u062f\u0647", SS_LEFT, 20, 502, 576, 36, IdStatus);
+               420, 488, 176, 36, IdLaunch);
+    AddControl(window, L"BUTTON", L"\u0628\u0627\u0632\u0646\u0634\u0627\u0646\u06cc", BS_PUSHBUTTON | WS_TABSTOP,
+               138, 488, 108, 36, IdRestore);
+    AddControl(window, L"BUTTON", L"\u0627\u0646\u0635\u0631\u0627\u0641", BS_PUSHBUTTON | WS_TABSTOP,
+               20, 488, 108, 36, IdCancel);
+    g_status = label(L"\u0622\u0645\u0627\u062f\u0647", 24, 536, 568, 42);
 
     const VideoSettings current = ReadSettings();
     PopulateResolutions(current);
@@ -577,6 +577,7 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
     case WM_COMMAND:
         switch (LOWORD(wParam))
         {
+        case IDOK:
         case IdLaunch:
             if (ApplySettings())
             {
@@ -584,6 +585,7 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
                 DestroyWindow(window);
             }
             return 0;
+        case IDCANCEL:
         case IdCancel:
             RevertMousePreview();
             DestroyWindow(window);
@@ -596,7 +598,6 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
         {
             // Resolution is intentionally not touched. Restore only resets the
             // non-resolution defaults and preserves the user's current choice.
-            Button_SetCheck(g_fullscreen, BST_CHECKED);
             Button_SetCheck(g_hdModels, BST_UNCHECKED);
             Button_SetCheck(g_highQuality, BST_CHECKED);
 
@@ -661,7 +662,7 @@ bool ShowVideoSettingsDialog(HINSTANCE instance, const GameNetAccessStatus& acce
     g_instance = instance;
     g_launchRequested = false;
     g_accessStatus = access_status;
-    INITCOMMONCONTROLSEX controls{sizeof(controls), ICC_STANDARD_CLASSES};
+    INITCOMMONCONTROLSEX controls{sizeof(controls), ICC_STANDARD_CLASSES | ICC_BAR_CLASSES};
     InitCommonControlsEx(&controls);
 
     NONCLIENTMETRICSW metrics{sizeof(metrics)};
@@ -687,14 +688,14 @@ bool ShowVideoSettingsDialog(HINSTANCE instance, const GameNetAccessStatus& acce
             return false;
     }
 
-    RECT rect{0, 0, 616, 558};
+    RECT rect{0, 0, 616, 590};
     AdjustWindowRectEx(&rect, WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX, FALSE, 0);
     const int width = rect.right - rect.left;
     const int height = rect.bottom - rect.top;
     const int x = (GetSystemMetrics(SM_CXSCREEN) - width) / 2;
     const int y = (GetSystemMetrics(SM_CYSCREEN) - height) / 2;
 
-    HWND window = CreateWindowExW(WS_EX_LAYOUTRTL | WS_EX_RTLREADING, kWindowClass, kTitle,
+    HWND window = CreateWindowExW(WS_EX_RTLREADING, kWindowClass, kTitle,
                                   WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
                                   x, y, width, height, nullptr, nullptr, instance, nullptr);
     if (!window)
@@ -706,6 +707,8 @@ bool ShowVideoSettingsDialog(HINSTANCE instance, const GameNetAccessStatus& acce
     MSG message{};
     while (GetMessageW(&message, nullptr, 0, 0) > 0)
     {
+        if (IsDialogMessageW(window, &message))
+            continue;
         TranslateMessage(&message);
         DispatchMessageW(&message);
     }
