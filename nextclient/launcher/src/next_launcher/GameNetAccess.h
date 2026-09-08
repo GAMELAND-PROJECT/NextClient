@@ -24,9 +24,5 @@ struct GameNetAccessStatus
     [[nodiscard]] bool allowed() const { return state == GameNetAccessState::Active; }
 };
 
-// Checks access at startup. LAN requires a successful verification in the last 15 days.
+// Checks access at startup. LAN requires verification within the configured grace period.
 GameNetAccessStatus QueryGameNetOnlineAccess();
-
-// Downloads the shared managed-server password once during launcher startup.
-// The returned value is passed only to the in-process engine and is never logged.
-std::string QueryGameNetServerPassword();

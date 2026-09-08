@@ -16,7 +16,7 @@
 namespace
 {
 constexpr wchar_t kWindowClass[] = L"NextClientLauncherWindow";
-constexpr wchar_t kTitle[] = L"NextClient Launcher";
+constexpr wchar_t kTitle[] = L"\u0631\u0627\u0647\u200c\u0627\u0646\u062f\u0627\u0632 Allclient";
 constexpr wchar_t kSettingsKey[] = L"Software\\Valve\\Half-Life\\Settings";
 constexpr wchar_t kLauncherKey[] = L"Software\\Valve\\Half-Life\\nextclient\\video_launcher";
 constexpr int kWindowsPointerSpeeds[] = {1, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20};
@@ -314,41 +314,41 @@ void PopulateSubscriptionStatus()
     switch (g_accessStatus.state)
     {
     case GameNetAccessState::Active:
-        stateText = L"ACTIVE SUBSCRIPTION";
-        detailText = L"Expires: " + expiry;
+        stateText = L"\u0627\u0634\u062a\u0631\u0627\u06a9 \u0641\u0639\u0627\u0644";
+        detailText = L"\u067e\u0627\u06cc\u0627\u0646 \u0627\u0634\u062a\u0631\u0627\u06a9: \u200e" + expiry;
         if (g_accessStatus.days_remaining == 0)
-            remainingText = L"Expires today";
+            remainingText = L"\u0627\u0645\u0631\u0648\u0632 \u0645\u0646\u0642\u0636\u06cc \u0645\u06cc\u200c\u0634\u0648\u062f";
         else if (g_accessStatus.days_remaining > 0)
             remainingText = std::to_wstring(g_accessStatus.days_remaining) +
-                L" days remaining";
+                L" \u0631\u0648\u0632 \u0628\u0627\u0642\u06cc\u200c\u0645\u0627\u0646\u062f\u0647";
         break;
     case GameNetAccessState::Expired:
-        stateText = L"SUBSCRIPTION EXPIRED";
-        detailText = L"Expired: " + expiry;
+        stateText = L"\u0627\u0634\u062a\u0631\u0627\u06a9 \u0645\u0646\u0642\u0636\u06cc \u0634\u062f\u0647";
+        detailText = L"\u062a\u0627\u0631\u06cc\u062e \u0627\u0646\u0642\u0636\u0627: \u200e" + expiry;
         if (g_accessStatus.days_remaining < 0)
             remainingText = std::to_wstring(-g_accessStatus.days_remaining) +
-                L" days ago";
+                L" \u0631\u0648\u0632 \u0627\u0632 \u0627\u0646\u0642\u0636\u0627 \u06af\u0630\u0634\u062a\u0647";
         break;
     case GameNetAccessState::TagMissing:
-        stateText = L"SUBSCRIPTION INACTIVE";
-        detailText = L"No active subscription was found.";
+        stateText = L"\u0627\u0634\u062a\u0631\u0627\u06a9 \u063a\u06cc\u0631\u0641\u0639\u0627\u0644";
+        detailText = L"\u0627\u0634\u062a\u0631\u0627\u06a9 \u0641\u0639\u0627\u0644\u06cc \u06cc\u0627\u0641\u062a \u0646\u0634\u062f.";
         break;
     case GameNetAccessState::InvalidEntry:
-        stateText = L"SUBSCRIPTION DATA INVALID";
-        detailText = L"The subscription record has an invalid expiration date.";
+        stateText = L"\u0627\u0637\u0644\u0627\u0639\u0627\u062a \u0627\u0634\u062a\u0631\u0627\u06a9 \u0646\u0627\u0645\u0639\u062a\u0628\u0631 \u0627\u0633\u062a";
+        detailText = L"\u062a\u0627\u0631\u06cc\u062e \u067e\u0627\u06cc\u0627\u0646 \u0627\u0634\u062a\u0631\u0627\u06a9 \u0645\u0639\u062a\u0628\u0631 \u0646\u06cc\u0633\u062a.";
         break;
     case GameNetAccessState::ServiceUnavailable:
     default:
-        stateText = L"STATUS UNAVAILABLE";
-        detailText = L"Subscription could not be verified. Online is disabled; LAN remains available.";
+        stateText = L"\u0648\u0636\u0639\u06cc\u062a \u062f\u0631 \u062f\u0633\u062a\u0631\u0633 \u0646\u06cc\u0633\u062a";
+        detailText = L"\u062a\u0623\u06cc\u06cc\u062f \u0627\u0634\u062a\u0631\u0627\u06a9 \u0645\u0645\u06a9\u0646 \u0646\u0634\u062f\u061b \u0622\u0646\u0644\u0627\u06cc\u0646 \u063a\u06cc\u0631\u0641\u0639\u0627\u0644 \u0627\u0633\u062a.";
         break;
     }
 
     if (!g_accessStatus.allowed())
         remainingText = g_accessStatus.lan_allowed
-            ? L"LAN access remaining: " +
-                std::to_wstring(g_accessStatus.offline_days_remaining) + L" days"
-            : L"LAN locked: online verification required";
+            ? L"\u0645\u0647\u0644\u062a \u0644\u0646: " +
+                std::to_wstring(g_accessStatus.offline_days_remaining) + L" \u0631\u0648\u0632"
+            : L"\u0644\u0646 \u0645\u0633\u062f\u0648\u062f \u0627\u0633\u062a\u061b \u062a\u0623\u06cc\u06cc\u062f \u0622\u0646\u0644\u0627\u06cc\u0646 \u0644\u0627\u0632\u0645 \u0627\u0633\u062a";
 
     SetWindowTextW(g_subscriptionState, stateText.c_str());
     const std::wstring tag = WidenAscii(g_accessStatus.tag);
@@ -429,10 +429,10 @@ void ApplyMousePreview()
     if (PreviewSystemMouseSettings(requested))
     {
         g_mousePreviewChanged = !SameSettings(requested, g_mouseAtLastApply);
-        SetStatus(L"Mouse preview active. Launch Game to keep it, or Cancel to revert.");
+        SetStatus(L"\u062a\u0646\u0638\u06cc\u0645 \u0645\u0627\u0648\u0633 \u0645\u0648\u0642\u062a \u0627\u0633\u062a\u061b \u00ab\u0627\u062c\u0631\u0627\u06cc \u0628\u0627\u0632\u06cc\u00bb \u0630\u062e\u06cc\u0631\u0647 \u0648 \u00ab\u0627\u0646\u0635\u0631\u0627\u0641\u00bb \u0644\u063a\u0648 \u0645\u06cc\u200c\u06a9\u0646\u062f.");
     }
     else
-        SetStatus(L"Windows rejected the mouse preview setting.", true);
+        SetStatus(L"\u0648\u06cc\u0646\u062f\u0648\u0632 \u062a\u0646\u0638\u06cc\u0645 \u0645\u0648\u0642\u062a \u0645\u0627\u0648\u0633 \u0631\u0627 \u0646\u067e\u0630\u06cc\u0631\u0641\u062a.", true);
 }
 
 void RevertMousePreview()
@@ -465,7 +465,7 @@ bool ApplySettings()
     VideoSettings requested;
     if (!SettingsFromControls(requested))
     {
-        SetStatus(L"Please select a valid resolution.", true);
+        SetStatus(L"\u0648\u0636\u0648\u062d \u062a\u0635\u0648\u06cc\u0631 \u0645\u0639\u062a\u0628\u0631\u06cc \u0627\u0646\u062a\u062e\u0627\u0628 \u06a9\u0646\u06cc\u062f.", true);
         return false;
     }
 
@@ -474,33 +474,33 @@ bool ApplySettings()
     const SystemMouseSettings requestedMouse = MouseSettingsFromControls(previousMouse);
     if (SameSettings(previous, requested) && SameSettings(previousMouse, requestedMouse))
     {
-        SetStatus(L"Video settings are already up to date.");
+        SetStatus(L"\u062a\u0646\u0638\u06cc\u0645\u0627\u062a \u0641\u0639\u0644\u06cc \u0646\u06cc\u0627\u0632\u06cc \u0628\u0647 \u062a\u063a\u06cc\u06cc\u0631 \u0646\u062f\u0627\u0631\u0646\u062f.");
         return true;
     }
 
     if (!SaveBackup(previous, previousMouse))
     {
-        SetStatus(L"Could not create a settings backup. No changes were made.", true);
+        SetStatus(L"\u0630\u062e\u06cc\u0631\u0647 \u062a\u0646\u0638\u06cc\u0645\u0627\u062a \u0642\u0628\u0644\u06cc \u0645\u0645\u06a9\u0646 \u0646\u0634\u062f\u061b \u062a\u063a\u06cc\u06cc\u0631\u06cc \u0627\u0639\u0645\u0627\u0644 \u0646\u0634\u062f.", true);
         return false;
     }
     if (!WriteSettings(requested) || !WriteSystemMouseSettings(requestedMouse))
     {
         WriteSettings(previous);
         WriteSystemMouseSettings(previousMouse);
-        SetStatus(L"Could not apply settings; the previous values were restored.", true);
+        SetStatus(L"\u0627\u0639\u0645\u0627\u0644 \u062a\u0646\u0638\u06cc\u0645\u0627\u062a \u0645\u0645\u06a9\u0646 \u0646\u0634\u062f\u061b \u0645\u0642\u0627\u062f\u06cc\u0631 \u0642\u0628\u0644\u06cc \u0628\u0627\u0632\u06cc\u0627\u0628\u06cc \u0634\u062f\u0646\u062f.", true);
         return false;
     }
 
     g_mouseAtLastApply = requestedMouse;
     g_mousePreviewChanged = false;
-    SetStatus(L"Video and Windows mouse settings applied successfully.");
+    SetStatus(L"\u062a\u0646\u0638\u06cc\u0645\u0627\u062a \u062a\u0635\u0648\u06cc\u0631 \u0648 \u0645\u0627\u0648\u0633 \u0648\u06cc\u0646\u062f\u0648\u0632 \u0630\u062e\u06cc\u0631\u0647 \u0634\u062f\u0646\u062f.");
     return true;
 }
 
 HWND AddControl(HWND parent, const wchar_t* type, const wchar_t* text, DWORD style,
                 int x, int y, int width, int height, int id = 0, DWORD exStyle = 0)
 {
-    HWND control = CreateWindowExW(exStyle, type, text, WS_CHILD | WS_VISIBLE | style,
+    HWND control = CreateWindowExW(exStyle | WS_EX_RTLREADING, type, text, WS_CHILD | WS_VISIBLE | style,
                                    x, y, width, height, parent,
                                    reinterpret_cast<HMENU>(static_cast<INT_PTR>(id)), g_instance, nullptr);
     SendMessageW(control, WM_SETFONT, reinterpret_cast<WPARAM>(g_font), TRUE);
@@ -511,34 +511,34 @@ void CreateControls(HWND window)
 {
     InitializeNativeResolutionIfNeeded();
 
-    AddControl(window, L"STATIC", L"Configure restart-sensitive video options, then launch NextClient.",
+    AddControl(window, L"STATIC", L"\u062a\u0646\u0638\u06cc\u0645\u0627\u062a \u062a\u0635\u0648\u06cc\u0631 \u0648 \u0645\u0627\u0648\u0633 \u0631\u0627 \u0627\u0646\u062a\u062e\u0627\u0628 \u06a9\u0646\u06cc\u062f\u060c \u0633\u067e\u0633 \u0628\u0627\u0632\u06cc \u0631\u0627 \u0627\u062c\u0631\u0627 \u06a9\u0646\u06cc\u062f.",
                SS_LEFT, 24, 18, 572, 22);
-    AddControl(window, L"BUTTON", L"Display", BS_GROUPBOX, 18, 48, 578, 166);
-    AddControl(window, L"STATIC", L"Resolution", SS_LEFT, 38, 78, 120, 22);
+    AddControl(window, L"BUTTON", L"\u0646\u0645\u0627\u06cc\u0634 \u062a\u0635\u0648\u06cc\u0631", BS_GROUPBOX, 18, 48, 578, 166);
+    AddControl(window, L"STATIC", L"\u0648\u0636\u0648\u062d \u062a\u0635\u0648\u06cc\u0631", SS_LEFT, 38, 78, 120, 22);
     g_resolution = AddControl(window, WC_COMBOBOXW, L"", CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP,
                               176, 74, 210, 220, IdResolution);
-    g_fullscreen = AddControl(window, L"BUTTON", L"Fullscreen", BS_AUTOCHECKBOX | WS_TABSTOP,
+    g_fullscreen = AddControl(window, L"BUTTON", L"\u062a\u0645\u0627\u0645\u200c\u0635\u0641\u062d\u0647", BS_AUTOCHECKBOX | WS_TABSTOP,
                               38, 116, 220, 24, IdFullscreen);
-    g_hdModels = AddControl(window, L"BUTTON", L"HD player models", BS_AUTOCHECKBOX | WS_TABSTOP,
+    g_hdModels = AddControl(window, L"BUTTON", L"\u0645\u062f\u0644\u200c\u0647\u0627\u06cc \u0628\u0627\u06a9\u06cc\u0641\u06cc\u062a \u0628\u0627\u0632\u06cc\u06a9\u0646\u0627\u0646", BS_AUTOCHECKBOX | WS_TABSTOP,
                             38, 148, 220, 24, IdHdModels);
-    g_highQuality = AddControl(window, L"BUTTON", L"High video quality", BS_AUTOCHECKBOX | WS_TABSTOP,
+    g_highQuality = AddControl(window, L"BUTTON", L"\u06a9\u06cc\u0641\u06cc\u062a \u0628\u0627\u0644\u0627\u06cc \u062a\u0635\u0648\u06cc\u0631", BS_AUTOCHECKBOX | WS_TABSTOP,
                                294, 148, 240, 24, IdHighQuality);
-    AddControl(window, L"STATIC", L"OpenGL renderer, 32-bit color", SS_LEFT, 294, 116, 244, 24);
+    AddControl(window, L"STATIC", L"\u0631\u0646\u06af \u06f3\u06f2 \u0628\u06cc\u062a\u06cc\u060c \u0631\u0646\u062f\u0631 OpenGL", SS_LEFT, 294, 116, 244, 24);
 
-    AddControl(window, L"BUTTON", L"Windows mouse", BS_GROUPBOX, 18, 224, 578, 96);
-    AddControl(window, L"STATIC", L"Pointer speed", SS_LEFT, 38, 252, 112, 22);
+    AddControl(window, L"BUTTON", L"\u0645\u0627\u0648\u0633 \u0648\u06cc\u0646\u062f\u0648\u0632", BS_GROUPBOX, 18, 224, 578, 96);
+    AddControl(window, L"STATIC", L"\u0633\u0631\u0639\u062a \u0646\u0634\u0627\u0646\u06af\u0631", SS_LEFT, 38, 252, 112, 22);
     g_pointerSpeed = AddControl(window, TRACKBAR_CLASSW, L"", TBS_AUTOTICKS | TBS_HORZ | WS_TABSTOP,
                                 150, 244, 280, 34, IdPointerSpeed);
     SendMessageW(g_pointerSpeed, TBM_SETRANGE, TRUE, MAKELPARAM(1, 11));
     SendMessageW(g_pointerSpeed, TBM_SETTICFREQ, 1, 0);
     g_pointerSpeedValue = AddControl(window, L"STATIC", L"6 / 11", SS_CENTER, 438, 250, 54, 22, IdPointerSpeedValue);
-    g_enhancePointer = AddControl(window, L"BUTTON", L"Enhance pointer precision",
+    g_enhancePointer = AddControl(window, L"BUTTON", L"\u0627\u0641\u0632\u0627\u06cc\u0634 \u062f\u0642\u062a \u0646\u0634\u0627\u0646\u06af\u0631",
                                   BS_AUTOCHECKBOX | WS_TABSTOP, 38, 282, 250, 24, IdEnhancePointer);
-    AddControl(window, L"STATIC", L"This changes the current Windows user setting.",
+    AddControl(window, L"STATIC", L"\u0627\u06cc\u0646 \u062a\u0646\u0638\u06cc\u0645 \u0628\u0631\u0627\u06cc \u06a9\u0627\u0631\u0628\u0631 \u0641\u0639\u0644\u06cc \u0648\u06cc\u0646\u062f\u0648\u0632 \u0627\u0633\u062a.",
                SS_LEFT, 310, 284, 260, 22);
 
-    AddControl(window, L"BUTTON", L"Online subscription", BS_GROUPBOX, 18, 330, 578, 104);
-    g_subscriptionState = AddControl(window, L"STATIC", L"Checking subscription...",
+    AddControl(window, L"BUTTON", L"\u0627\u0634\u062a\u0631\u0627\u06a9 \u0622\u0646\u0644\u0627\u06cc\u0646", BS_GROUPBOX, 18, 330, 578, 104);
+    g_subscriptionState = AddControl(window, L"STATIC", L"\u062f\u0631 \u062d\u0627\u0644 \u0628\u0631\u0631\u0633\u06cc \u0627\u0634\u062a\u0631\u0627\u06a9\u2026",
                                      SS_LEFT, 38, 354, 536, 22, IdSubscriptionState);
     g_subscriptionTag = AddControl(window, L"STATIC", L"",
                                    SS_LEFT, 38, 382, 188, 24, IdSubscriptionTag);
@@ -552,11 +552,11 @@ void CreateControls(HWND window)
                  reinterpret_cast<WPARAM>(g_emphasisFont), TRUE);
     PopulateSubscriptionStatus();
 
-    AddControl(window, L"BUTTON", L"Restore", BS_PUSHBUTTON | WS_TABSTOP, 18, 452, 112, 32, IdRestore);
-    AddControl(window, L"BUTTON", L"Cancel", BS_PUSHBUTTON | WS_TABSTOP, 140, 452, 100, 32, IdCancel);
-    AddControl(window, L"BUTTON", L"Launch Game", BS_DEFPUSHBUTTON | WS_TABSTOP,
+    AddControl(window, L"BUTTON", L"\u0628\u0627\u0632\u0646\u0634\u0627\u0646\u06cc", BS_PUSHBUTTON | WS_TABSTOP, 18, 452, 112, 32, IdRestore);
+    AddControl(window, L"BUTTON", L"\u0627\u0646\u0635\u0631\u0627\u0641", BS_PUSHBUTTON | WS_TABSTOP, 140, 452, 100, 32, IdCancel);
+    AddControl(window, L"BUTTON", L"\u0627\u062c\u0631\u0627\u06cc \u0628\u0627\u0632\u06cc", BS_DEFPUSHBUTTON | WS_TABSTOP,
                460, 452, 136, 32, IdLaunch);
-    g_status = AddControl(window, L"STATIC", L"Ready", SS_LEFT, 20, 502, 576, 36, IdStatus);
+    g_status = AddControl(window, L"STATIC", L"\u0622\u0645\u0627\u062f\u0647", SS_LEFT, 20, 502, 576, 36, IdStatus);
 
     const VideoSettings current = ReadSettings();
     PopulateResolutions(current);
@@ -607,7 +607,7 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
             mouseDefaults.acceleration[2] = 1;
             SetMouseControls(mouseDefaults);
             ApplyMousePreview();
-            SetStatus(L"Defaults selected; resolution preserved. Fullscreen and high quality on, HD off, pointer speed 4 / 11, precision on.");
+            SetStatus(L"\u067e\u06cc\u0634\u200c\u0641\u0631\u0636\u200c\u0647\u0627 \u0627\u0646\u062a\u062e\u0627\u0628 \u0634\u062f\u0646\u062f\u061b \u0648\u0636\u0648\u062d \u062a\u0635\u0648\u06cc\u0631 \u062d\u0641\u0638 \u0634\u062f. \u0645\u062f\u0644 HD \u062e\u0627\u0645\u0648\u0634 \u0648 \u0633\u0631\u0639\u062a \u0645\u0627\u0648\u0633 \u06f4 \u0627\u0632 \u06f1\u06f1 \u0627\u0633\u062a.");
             return 0;
         }
         default:
@@ -666,6 +666,7 @@ bool ShowVideoSettingsDialog(HINSTANCE instance, const GameNetAccessStatus& acce
 
     NONCLIENTMETRICSW metrics{sizeof(metrics)};
     SystemParametersInfoW(SPI_GETNONCLIENTMETRICS, sizeof(metrics), &metrics, 0);
+    wcscpy_s(metrics.lfMessageFont.lfFaceName, L"Tahoma");
     g_font = CreateFontIndirectW(&metrics.lfMessageFont);
     LOGFONTW emphasisFont = metrics.lfMessageFont;
     emphasisFont.lfWeight = FW_BOLD;
@@ -693,7 +694,7 @@ bool ShowVideoSettingsDialog(HINSTANCE instance, const GameNetAccessStatus& acce
     const int x = (GetSystemMetrics(SM_CXSCREEN) - width) / 2;
     const int y = (GetSystemMetrics(SM_CYSCREEN) - height) / 2;
 
-    HWND window = CreateWindowExW(0, kWindowClass, kTitle,
+    HWND window = CreateWindowExW(WS_EX_LAYOUTRTL | WS_EX_RTLREADING, kWindowClass, kTitle,
                                   WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
                                   x, y, width, height, nullptr, nullptr, instance, nullptr);
     if (!window)

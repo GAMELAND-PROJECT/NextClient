@@ -1,4 +1,4 @@
-#define AppName "Allclient"
+﻿#define AppName "Allclient"
 #define AppVersion "2.5.3"
 #define AppPublisher "GAMELAND PROJECT"
 #define AppExeName "cstrike.exe"
@@ -34,7 +34,7 @@ RestartApplications=no
 SetupLogging=no
 
 [Languages]
-Name: "english"; MessagesFile: "compiler:Default.isl"
+Name: "farsi"; MessagesFile: "languages\Farsi.isl"
 
 [Files]
 Source: "{#SourceRoot}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "crashes\*,htmlcache\*,*.log,*.mdmp,debug.log,install.bat,unins000.exe,unins000.dat"
@@ -42,10 +42,10 @@ Source: "{#SourceRoot}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs
 [Icons]
 Name: "{autodesktop}\Allclient - Voice Enabled"; Filename: "{app}\platform\steam\games\SmartEmu\SSELauncher.exe"; Parameters: "-appid 10"; WorkingDir: "{app}\platform\steam\games\SmartEmu"; IconFilename: "{app}\cstrike.exe"
 Name: "{autodesktop}\Allclient - No Voice"; Filename: "{app}\platform\steam\games\SmartEmu2\SSELauncher.exe"; Parameters: "-appid 10"; WorkingDir: "{app}\platform\steam\games\SmartEmu2"; IconFilename: "{app}\cstrike.exe"
-Name: "{group}\Uninstall Allclient"; Filename: "{uninstallexe}"
+Name: "{group}\حذف Allclient"; Filename: "{uninstallexe}"
 
 [Run]
-Filename: "{app}\platform\steam\games\SmartEmu\SSELauncher.exe"; Parameters: "-appid 10"; WorkingDir: "{app}\platform\steam\games\SmartEmu"; Description: "Launch Allclient (Voice Enabled)"; Flags: nowait postinstall skipifsilent unchecked
+Filename: "{app}\platform\steam\games\SmartEmu\SSELauncher.exe"; Parameters: "-appid 10"; WorkingDir: "{app}\platform\steam\games\SmartEmu"; Description: "اجرای Allclient با گفت‌وگوی صوتی"; Flags: nowait postinstall skipifsilent unchecked
 
 [Code]
 const
@@ -83,6 +83,21 @@ begin
   WizardForm.Update;
 end;
 
+function NormalizeAccessCode(const Value: String): String;
+var
+  I, Digit: Integer;
+begin
+  Result := Trim(Value);
+  for I := 1 to Length(Result) do
+  begin
+    Digit := Ord(Result[I]);
+    if (Digit >= $06F0) and (Digit <= $06F9) then
+      Result[I] := Chr(Ord('0') + Digit - $06F0)
+    else if (Digit >= $0660) and (Digit <= $0669) then
+      Result[I] := Chr(Ord('0') + Digit - $0660);
+  end;
+end;
+
 function IsEightDigitCode(const Value: String): Boolean;
 var
   I: Integer;
@@ -109,7 +124,7 @@ begin
   if (Pos('https://', Lowercase(Url)) <> 1) and
      (Pos('http://', Lowercase(Url)) <> 1) then
   begin
-    OnlineVerificationMessage := 'The verification URL is invalid.';
+    OnlineVerificationMessage := 'نشانی سرویس تأیید معتبر نیست.';
     Exit;
   end;
 
@@ -223,8 +238,8 @@ begin
   ResponseText := '';
   for Attempt := 1 to 2 do
   begin
-    SetAccessStatus('Connecting to online service (attempt ' +
-      IntToStr(Attempt) + ' of 2)...', clGray);
+    SetAccessStatus('در حال اتصال به سرویس؛ تلاش ' +
+      IntToStr(Attempt) + ' از ۲…', clGray);
     try
       if FetchWithInternetExplorer(Url, ResponseText) then
       begin
@@ -233,14 +248,14 @@ begin
       end
       else
       begin
-        SetAccessStatus('Internet Explorer connection unavailable. Trying Setup transport...', clGray);
+        SetAccessStatus('اتصال برقرار نشد؛ در حال بررسی روش جایگزین…', clGray);
         if FetchWithSetupDownloader(Url, ResponseText) then
         begin
           Result := True;
           Exit;
         end;
 
-        SetAccessStatus('Setup transport unavailable. Trying Windows compatibility mode...', clGray);
+        SetAccessStatus('در حال تلاش با روش سازگار با ویندوز…', clGray);
         if FetchWithNativeRequest(Url, ResponseText) then
         begin
           Result := True;
@@ -250,9 +265,9 @@ begin
       end;
 
       if Attempt < 2 then
-        SetAccessStatus('Connection was interrupted. Retrying safely...', clGray);
+        SetAccessStatus('ارتباط قطع شد؛ در حال تلاش دوباره…', clGray);
     except
-      OnlineVerificationMessage := 'The service response could not be processed safely.';
+      OnlineVerificationMessage := 'پاسخ سرویس قابل پردازش نیست.';
       Result := False;
     end;
   end;
@@ -262,7 +277,7 @@ function FetchAccessApi(const Query: String; var ResponseText: String): Boolean;
 var
   NormalizedResponse: String;
 begin
-  SetAccessStatus('Connecting to the Allclient access service...', clGray);
+  SetAccessStatus('در حال اتصال به سرویس تأیید Allclient…', clGray);
   Result := FetchAccessResponse(AccessApiUrl + Query, ResponseText);
   if Result then
   begin
@@ -284,33 +299,33 @@ begin
 
   if not IsEightDigitCode(EnteredCode) then
   begin
-    OnlineVerificationMessage := 'Online codes must contain exactly 8 digits.';
+    OnlineVerificationMessage := 'کد آنلاین باید دقیقاً ۸ رقم باشد.';
     Exit;
   end;
 
-  SetAccessStatus('Checking the entered code securely...', clGray);
+  SetAccessStatus('در حال بررسی کد واردشده…', clGray);
   RequestUrl := '?action=verify&code=' + Trim(EnteredCode);
   if FetchAccessApi(RequestUrl, ResponseText) then
   begin
-    SetAccessStatus('Response received. Validating result...', clGray);
+    SetAccessStatus('پاسخ دریافت شد؛ در حال بررسی نتیجه…', clGray);
     if Pos('"valid":true', Lowercase(ResponseText)) > 0 then
     begin
       Result := True;
-      OnlineVerificationMessage := 'Online code accepted.';
+      OnlineVerificationMessage := 'کد آنلاین تأیید شد.';
     end
     else if Pos('"valid":false', Lowercase(ResponseText)) > 0 then
-      OnlineVerificationMessage := 'The online code is invalid or has been revoked.'
+      OnlineVerificationMessage := 'کد آنلاین اشتباه است یا لغو شده است.'
     else
     begin
       OnlineServiceUnavailable := True;
-      OnlineVerificationMessage := 'The online service returned an unrecognized response.';
+      OnlineVerificationMessage := 'پاسخ سرویس آنلاین معتبر نیست.';
     end;
   end
   else
   begin
     OnlineServiceUnavailable := True;
     if OnlineVerificationMessage = '' then
-      OnlineVerificationMessage := 'The online verification service is unavailable.';
+      OnlineVerificationMessage := 'سرویس تأیید آنلاین در دسترس نیست.';
   end;
 end;
 
@@ -318,7 +333,7 @@ function AccessCodeIsValid(const EnteredCode: String): Boolean;
 begin
   Result := CompareText(Trim(EnteredCode), OfflineCode) = 0;
   if Result then
-    OnlineVerificationMessage := 'Access code accepted.'
+    OnlineVerificationMessage := 'کد دسترسی تأیید شد.'
   else
     Result := OnlineAccessCodeIsValid(EnteredCode);
 end;
@@ -329,19 +344,19 @@ var
 begin
   RefreshAccessButton.Enabled := False;
   OnlineVerificationMessage := '';
-  SetAccessStatus('Preparing secure verification component...', clGray);
+  SetAccessStatus('در حال آماده‌سازی بررسی اتصال…', clGray);
   try
     if FetchAccessApi('?action=status', ResponseText) and
        (Pos('"service":"allclient-access"', Lowercase(ResponseText)) > 0) then
-      SetAccessStatus('Online service: connected and responding normally', clGreen)
+      SetAccessStatus('سرویس آنلاین متصل است و پاسخ می‌دهد.', clGreen)
     else
     begin
       if OnlineVerificationMessage = '' then
-        OnlineVerificationMessage := 'Online service did not return a valid status.';
-      SetAccessStatus('Online service unavailable: ' + OnlineVerificationMessage, clRed);
+        OnlineVerificationMessage := 'وضعیت معتبری از سرویس دریافت نشد.';
+      SetAccessStatus('سرویس در دسترس نیست: ' + OnlineVerificationMessage, clRed);
     end;
   except
-    SetAccessStatus('Online service unavailable: recoverable verification error', clRed);
+    SetAccessStatus('بررسی اتصال با خطا مواجه شد؛ دوباره تلاش کنید.', clRed);
   end;
   RefreshAccessButton.Enabled := True;
 end;
@@ -358,13 +373,13 @@ begin
   PreparationProgress.Position := 15;
   PreparationStatusLabel.Font.Color := clGray;
   PreparationStatusLabel.Caption :=
-    'Preparing the online verification connection...';
+    'در حال آماده‌سازی اتصال برای تأیید آنلاین…';
   WizardForm.Update;
 
   try
     PreparationProgress.Position := 55;
     PreparationStatusLabel.Caption :=
-      'Windows transports prepared. Confirming online access...';
+      'اتصال آماده است؛ در حال بررسی دسترسی آنلاین…';
     WizardForm.Update;
 
     if FetchAccessApi('?action=status', ResponseText) and
@@ -374,21 +389,21 @@ begin
       PreparationReady := True;
       PreparationStatusLabel.Font.Color := clGreen;
       PreparationStatusLabel.Caption :=
-        'Configuration complete. Online verification is ready.';
+        'آماده‌سازی کامل شد؛ تأیید آنلاین آماده است.';
     end
     else
     begin
       PreparationProgress.Position := 55;
       PreparationStatusLabel.Font.Color := clRed;
       PreparationStatusLabel.Caption :=
-        'Windows transports are ready, but the online service could not be confirmed. You may retry or continue with offline access.';
+        'سرویس آنلاین پاسخ نداد؛ دوباره تلاش کنید یا با کد آفلاین ادامه دهید.';
       PreparationRetryButton.Visible := True;
     end;
   except
     PreparationProgress.Position := 0;
     PreparationStatusLabel.Font.Color := clRed;
     PreparationStatusLabel.Caption :=
-      'Preparation stopped safely. You may retry or continue with offline access.';
+      'آماده‌سازی انجام نشد؛ دوباره تلاش کنید یا با کد آفلاین ادامه دهید.';
     PreparationRetryButton.Visible := True;
   end;
 
@@ -406,8 +421,8 @@ procedure InitializeWizard;
 begin
   PreparationPage := CreateCustomPage(
     wpWelcome,
-    'Preparing Allclient',
-    'One-time verification setup');
+    'آماده‌سازی Allclient',
+    'آماده‌سازی اولیه اتصال');
 
   PreparationStatusLabel := TNewStaticText.Create(WizardForm);
   PreparationStatusLabel.Parent := PreparationPage.Surface;
@@ -418,7 +433,7 @@ begin
   PreparationStatusLabel.AutoSize := False;
   PreparationStatusLabel.WordWrap := True;
   PreparationStatusLabel.Caption :=
-    'Ready to configure the online verification connection.';
+    'برای بررسی اتصال آنلاین آماده است.';
   PreparationStatusLabel.Font.Color := clGray;
 
   PreparationProgress := TNewProgressBar.Create(WizardForm);
@@ -439,16 +454,16 @@ begin
     PreparationProgress.Height + ScaleY(18);
   PreparationRetryButton.Width := ScaleX(130);
   PreparationRetryButton.Height := ScaleY(30);
-  PreparationRetryButton.Caption := 'Retry preparation';
+  PreparationRetryButton.Caption := 'تلاش دوباره';
   PreparationRetryButton.OnClick := @RunEarlyPreparation;
   PreparationRetryButton.Visible := False;
 
   AccessPage := CreateInputQueryPage(
     PreparationPage.ID,
-    'Installation access',
-    'Enter your Allclient installation code',
-    'Enter the active 8-digit online code or the offline recovery code.');
-  AccessPage.Add('Access code:', True);
+    'تأیید مجوز نصب',
+    'کد نصب Allclient را وارد کنید',
+    'کد آنلاین ۸ رقمی فعال یا کد آفلاین را وارد کنید.');
+  AccessPage.Add('کد دسترسی:', True);
 
   AccessStatusLabel := TNewStaticText.Create(WizardForm);
   AccessStatusLabel.Parent := AccessPage.Surface;
@@ -458,7 +473,7 @@ begin
   AccessStatusLabel.Height := ScaleY(42);
   AccessStatusLabel.AutoSize := False;
   AccessStatusLabel.WordWrap := True;
-  AccessStatusLabel.Caption := 'Online service: not checked';
+  AccessStatusLabel.Caption := 'اتصال آنلاین هنوز بررسی نشده است.';
   AccessStatusLabel.Font.Color := clGray;
 
   RefreshAccessButton := TNewButton.Create(WizardForm);
@@ -467,7 +482,7 @@ begin
   RefreshAccessButton.Top := AccessStatusLabel.Top + AccessStatusLabel.Height + ScaleY(10);
   RefreshAccessButton.Width := ScaleX(150);
   RefreshAccessButton.Height := ScaleY(30);
-  RefreshAccessButton.Caption := 'Refresh connection';
+  RefreshAccessButton.Caption := 'بررسی دوباره اتصال';
   RefreshAccessButton.OnClick := @RefreshAccessStatus;
 end;
 
@@ -553,7 +568,7 @@ begin
     end
     else
       ErrorMessage :=
-        'Some files from the previous Allclient installation are still in use. Close the game and launcher, then try again.';
+        'بعضی فایل‌های نسخه قبلی در حال استفاده‌اند. بازی و لانچر را ببندید و دوباره تلاش کنید.';
     Exit;
   end;
 
@@ -566,17 +581,17 @@ begin
   if not PreviousInstallPathIsSafe(InstallDirectory) then
   begin
     ErrorMessage :=
-      'A previous Allclient installation was detected, but its registered directory is unsafe to remove automatically.';
+      'نسخه قبلی پیدا شد، اما پوشه ثبت‌شده آن برای حذف خودکار مناسب نیست.';
     Exit;
   end;
 
-  SetAccessStatus('Cleaning the previous Allclient installation...', clGray);
+  SetAccessStatus('در حال پاک‌سازی نسخه قبلی Allclient…', clGray);
   PreviousInstallDirectoryPendingCleanup := InstallDirectory;
   if DirExists(InstallDirectory) and
      not DelTree(InstallDirectory, True, True, True) then
   begin
     ErrorMessage :=
-      'Some files from the previous Allclient installation are still in use. Close the game and launcher, then try again.';
+      'بعضی فایل‌های نسخه قبلی در حال استفاده‌اند. بازی و لانچر را ببندید و دوباره تلاش کنید.';
     Exit;
   end;
 
@@ -629,7 +644,7 @@ begin
   if not PreviousInstallPathIsSafe(InstallDirectory) then
   begin
     ErrorMessage :=
-      'The selected installation directory is unsafe to clean automatically.';
+      'پوشه انتخاب‌شده برای پاک‌سازی خودکار مناسب نیست.';
     Exit;
   end;
 
@@ -637,7 +652,7 @@ begin
   if CompareText(InstallDirectory, BuildSourceDirectory) = 0 then
   begin
     ErrorMessage :=
-      'The selected directory is the installer source directory and cannot be cleaned.';
+      'پوشه انتخاب‌شده منبع ساخت نصب‌کننده است و نمی‌توان آن را پاک کرد.';
     Exit;
   end;
 
@@ -651,15 +666,15 @@ begin
      not DirectoryLooksLikeAllclient(InstallDirectory) then
   begin
     ErrorMessage :=
-      'The selected directory contains unrelated files and was not removed. Choose an empty directory or the existing Allclient directory.';
+      'پوشه شامل فایل‌های نامرتبط است و حذف نشد. پوشه خالی یا پوشه نسخه قبلی Allclient را انتخاب کنید.';
     Exit;
   end;
 
-  SetAccessStatus('Cleaning the selected Allclient directory...', clGray);
+  SetAccessStatus('در حال پاک‌سازی پوشه انتخاب‌شده Allclient…', clGray);
   if not DelTree(InstallDirectory, True, True, True) then
   begin
     ErrorMessage :=
-      'The existing Allclient directory could not be removed completely. Close the game and launcher, then try again.';
+      'حذف کامل پوشه قبلی ممکن نشد. بازی و لانچر را ببندید و دوباره تلاش کنید.';
     Exit;
   end;
 
@@ -672,14 +687,14 @@ begin
   if CurPageID = AccessPage.ID then
   begin
     WizardForm.NextButton.Enabled := False;
-    SetAccessStatus('Validating installation access...', clGray);
+    SetAccessStatus('در حال تأیید مجوز نصب…', clGray);
     try
       try
-        Result := AccessCodeIsValid(AccessPage.Values[0]);
+        Result := AccessCodeIsValid(NormalizeAccessCode(AccessPage.Values[0]));
       except
         Result := False;
         OnlineServiceUnavailable := True;
-        OnlineVerificationMessage := 'Verification stopped safely after an unexpected error.';
+        OnlineVerificationMessage := 'تأیید با خطای غیرمنتظره متوقف شد؛ دوباره تلاش کنید.';
       end;
 
       if Result then
@@ -691,7 +706,7 @@ begin
       begin
         AccessApproved := False;
         if OnlineVerificationMessage = '' then
-          OnlineVerificationMessage := 'The installation code was not accepted.';
+          OnlineVerificationMessage := 'کد نصب تأیید نشد.';
         SetAccessStatus(OnlineVerificationMessage, clRed);
         MsgBox(OnlineVerificationMessage, mbError, MB_OK);
         WizardForm.ActiveControl := AccessPage.Edits[0];
@@ -708,7 +723,7 @@ begin
 
   if not AccessApproved then
   begin
-    Result := 'Installation access must be verified before setup can continue.';
+    Result := 'برای ادامه، ابتدا کد نصب را تأیید کنید.';
     Exit;
   end;
 
@@ -734,24 +749,24 @@ var
   ValueStart, CloseRelative: Integer;
 begin
   if not LoadStringFromFile(FileName, Content) then
-    RaiseException('Unable to read configuration file: ' + FileName);
+    RaiseException('خواندن فایل تنظیمات ممکن نشد: ' + FileName);
 
   OpenTag := '<' + ElementName + '>';
   CloseTag := '</' + ElementName + '>';
   ValueStart := Pos(OpenTag, Content);
   if ValueStart = 0 then
-    RaiseException('Missing XML element ' + ElementName + ' in ' + FileName);
+    RaiseException('بخش تنظیمات پیدا نشد: ' + ElementName + ' در ' + FileName);
 
   ValueStart := ValueStart + Length(OpenTag);
   Tail := Copy(Content, ValueStart, MaxInt);
   CloseRelative := Pos(CloseTag, Tail);
   if CloseRelative = 0 then
-    RaiseException('Invalid XML element ' + ElementName + ' in ' + FileName);
+    RaiseException('بخش تنظیمات نامعتبر است: ' + ElementName + ' در ' + FileName);
 
   Delete(Content, ValueStart, CloseRelative - 1);
   Insert(NewValue, Content, ValueStart);
   if not SaveStringToFile(FileName, Content, False) then
-    RaiseException('Unable to update configuration file: ' + FileName);
+    RaiseException('ذخیره فایل تنظیمات ممکن نشد: ' + FileName);
 end;
 
 procedure ConfigureSmartEmu(const ConfigFile: String);

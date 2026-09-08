@@ -124,8 +124,27 @@ ClientLauncher::~ClientLauncher()
     CloseHandle(global_win_mutex_);
 }
 
+void ClientLauncher::ShowModuleError(const std::string& error)
+{
+    const std::wstring details(error.begin(), error.end());
+    const std::wstring message = L"\u0628\u0627\u0631\u06af\u0630\u0627\u0631\u06cc \u0641\u0627\u06cc\u0644\u200c\u0647\u0627\u06cc \u0628\u0627\u0632\u06cc \u0645\u0645\u06a9\u0646 \u0646\u0634\u062f. \u0646\u0635\u0628 \u0628\u0627\u0632\u06cc \u0631\u0627 \u0628\u0631\u0631\u0633\u06cc \u06a9\u0646\u06cc\u062f.\n\n" + details;
+    MessageBoxW(nullptr, message.c_str(), L"\u0631\u0627\u0647\u200c\u0627\u0646\u062f\u0627\u0632 Allclient",
+        MB_OK | MB_ICONERROR | MB_RIGHT | MB_RTLREADING | MB_DEFAULT_DESKTOP_ONLY);
+}
+
 void ClientLauncher::Run()
 {
+    if (!GlobalMutexCheck())
+    {
+        MessageBoxW(
+            NULL,
+            L"\u0628\u0627\u0632\u06cc \u0627\u0632 \u0642\u0628\u0644 \u062f\u0631 \u062d\u0627\u0644 \u0627\u062c\u0631\u0627\u0633\u062a.\n"
+            L"\u0627\u06af\u0631 \u067e\u0646\u062c\u0631\u0647 \u0628\u0627\u0632\u06cc \u0631\u0627 \u0646\u0645\u06cc\u200c\u0628\u06cc\u0646\u06cc\u062f\u060c \u0641\u0631\u0627\u06cc\u0646\u062f \u0622\u0646 \u0631\u0627 \u062f\u0631 \u0645\u062f\u06cc\u0631\u06cc\u062a \u0648\u0638\u0627\u06cc\u0641 \u0648\u06cc\u0646\u062f\u0648\u0632 \u0628\u0628\u0646\u062f\u06cc\u062f.",
+            L"\u0631\u0627\u0647\u200c\u0627\u0646\u062f\u0627\u0632 Allclient",
+            MB_OK | MB_ICONERROR | MB_DEFAULT_DESKTOP_ONLY | MB_RIGHT | MB_RTLREADING);
+        return;
+    }
+
     LOG(INFO) << "Branch: " << user_info_client_->GetUpdateBranch();
 
     // Resolve the package entitlement once per launcher start. GameUI reads
@@ -133,46 +152,32 @@ void ClientLauncher::Run()
     const GameNetAccessStatus online_access = QueryGameNetOnlineAccess();
     if (!online_access.lan_allowed)
     {
-        MessageBoxA(nullptr,
-            "LAN access requires a successful online verification within the last 15 days.\n"
-            "LAN is also disabled 15 days after the subscription expiry date.\n"
-            "Connect to the internet and restart the launcher with an active subscription.\n"
-            "If you already have internet access, check the Windows date and time.",
-            kErrorTitle, MB_OK | MB_ICONWARNING | MB_DEFAULT_DESKTOP_ONLY);
+        MessageBoxW(nullptr,
+            L"\u0645\u0647\u0644\u062a \u062f\u0633\u062a\u0631\u0633\u06cc \u0644\u0646 \u062a\u0645\u0627\u0645 \u0634\u062f\u0647 \u06cc\u0627 \u0647\u0646\u0648\u0632 \u0641\u0639\u0627\u0644 \u0646\u0634\u062f\u0647 \u0627\u0633\u062a.\n"
+            L"\u0628\u0647 \u0627\u06cc\u0646\u062a\u0631\u0646\u062a \u0645\u062a\u0635\u0644 \u0634\u0648\u06cc\u062f \u0648 \u0628\u0627 \u0627\u0634\u062a\u0631\u0627\u06a9 \u0641\u0639\u0627\u0644 \u062f\u0648\u0628\u0627\u0631\u0647 \u0644\u0627\u0646\u0686\u0631 \u0631\u0627 \u0627\u062c\u0631\u0627 \u06a9\u0646\u06cc\u062f.\n"
+            L"\u0627\u06af\u0631 \u0627\u06cc\u0646\u062a\u0631\u0646\u062a \u0645\u062a\u0635\u0644 \u0627\u0633\u062a\u060c \u062a\u0627\u0631\u06cc\u062e \u0648 \u0633\u0627\u0639\u062a \u0648\u06cc\u0646\u062f\u0648\u0632 \u0631\u0627 \u0628\u0631\u0631\u0633\u06cc \u06a9\u0646\u06cc\u062f.",
+            L"\u0631\u0627\u0647\u200c\u0627\u0646\u062f\u0627\u0632 Allclient", MB_OK | MB_ICONWARNING | MB_DEFAULT_DESKTOP_ONLY | MB_RIGHT | MB_RTLREADING);
         return;
     }
     SetEnvironmentVariableA("NEXTCLIENT_ONLINE_ACCESS", online_access.allowed() ? "1" : "0");
     SetEnvironmentVariableA("NEXTCLIENT_PLAYER_NAME_TAG",
         online_access.player_name_tag.c_str());
-    const std::string server_password = online_access.allowed()
-        ? QueryGameNetServerPassword() : std::string{};
-    SetEnvironmentVariableA("NEXTCLIENT_SERVER_PASSWORD", server_password.c_str());
     if (!online_access.allowed())
     {
-        MessageBoxA(nullptr,
-            "Online access is currently unavailable for this installation. LAN play remains available.",
-            kErrorTitle, MB_OK | MB_ICONWARNING | MB_DEFAULT_DESKTOP_ONLY);
+        MessageBoxW(nullptr,
+            L"\u062f\u0633\u062a\u0631\u0633\u06cc \u0622\u0646\u0644\u0627\u06cc\u0646 \u0627\u06cc\u0646 \u0646\u0633\u062e\u0647 \u0641\u0639\u0627\u0644 \u0646\u06cc\u0633\u062a. \u0628\u0627\u0632\u06cc \u062f\u0631 \u0634\u0628\u06a9\u0647 \u0645\u062d\u0644\u06cc \u062a\u0627 \u067e\u0627\u06cc\u0627\u0646 \u0645\u0647\u0644\u062a \u0644\u0646 \u062f\u0631 \u062f\u0633\u062a\u0631\u0633 \u0627\u0633\u062a.",
+            L"\u0631\u0627\u0647\u200c\u0627\u0646\u062f\u0627\u0632 Allclient", MB_OK | MB_ICONWARNING | MB_DEFAULT_DESKTOP_ONLY | MB_RIGHT | MB_RTLREADING);
     }
 
     if (config_provider_->get_value_int("create_console_window", 0))
         CreateConsoleWindowAndRedirectOutput();
-
-    if (!GlobalMutexCheck())
-    {
-        MessageBoxA(
-            NULL,
-            "The game could not be started because it is already running.\n"
-            "If it is not, then end the process in the task manager.",
-            kErrorTitle,
-            MB_OK | MB_ICONERROR | MB_DEFAULT_DESKTOP_ONLY);
-        return;
-    }
 
     // Video-mode changes are applied before the engine starts, avoiding the
     // fragile in-game restart path. Internal engine restarts skip this page.
     if (!is_relaunch_ && !cmd_line_->CheckParm("-novideosettings") &&
         !ShowVideoSettingsDialog(module_instance_, online_access))
         return;
+
 
     [[maybe_unused]] auto cleanup = ncl_utils::MakeScopeExit([this]
     {
@@ -349,7 +354,7 @@ ClientLauncher::EngineSessionResult ClientLauncher::RunEngine()
 
         if (analytics_)
             analytics_->SendCrashMonitoringEvent("LoadModule Error", error.c_str(), true);
-        MessageBoxA(NULL, error.c_str(), kErrorTitle, MB_OK | MB_ICONERROR | MB_DEFAULT_DESKTOP_ONLY);
+        ShowModuleError(error);
         return EngineSessionResult::Exit;
     }
 
@@ -361,7 +366,7 @@ ClientLauncher::EngineSessionResult ClientLauncher::RunEngine()
 
         if (analytics_)
             analytics_->SendCrashMonitoringEvent("LoadModule Error", error.c_str(), true);
-        MessageBoxA(NULL, error.c_str(), kErrorTitle, MB_OK | MB_ICONERROR | MB_DEFAULT_DESKTOP_ONLY);
+        ShowModuleError(error);
         return EngineSessionResult::Exit;
     }
     steam_proxy_set_seh(ExceptionHandler);
@@ -524,12 +529,12 @@ bool ClientLauncher::OnVideoModeFailed()
     hl_registry_->WriteInt("ScreenHeight", kDefaultHeight);
     hl_registry_->WriteString("EngineDLL", "hw.dll");
 
-    return MessageBoxA(
+    return MessageBoxW(
         NULL,
-        "The specified rendering mode is not supported.\n"
-        "Restart the game?",
-        kErrorTitle,
-        MB_OKCANCEL | MB_ICONERROR | MB_ICONQUESTION | MB_DEFAULT_DESKTOP_ONLY) == IDOK;
+        L"\u062d\u0627\u0644\u062a \u0646\u0645\u0627\u06cc\u0634 \u0627\u0646\u062a\u062e\u0627\u0628\u200c\u0634\u062f\u0647 \u067e\u0634\u062a\u06cc\u0628\u0627\u0646\u06cc \u0646\u0645\u06cc\u200c\u0634\u0648\u062f.\n"
+        L"\u0628\u0627\u0632\u06cc \u062f\u0648\u0628\u0627\u0631\u0647 \u0627\u062c\u0631\u0627 \u0634\u0648\u062f\u061f",
+        L"\u0631\u0627\u0647\u200c\u0627\u0646\u062f\u0627\u0632 Allclient",
+        MB_OKCANCEL | MB_ICONERROR | MB_ICONQUESTION | MB_DEFAULT_DESKTOP_ONLY | MB_RIGHT | MB_RTLREADING) == IDOK;
 }
 
 void ClientLauncher::FixScreenResolution()
@@ -745,12 +750,12 @@ void ClientLauncher::CheckVideoModeCrash()
 
     hl_registry_->WriteInt("CrashInitializingVideoMode", 0);
 
-    if (MessageBoxA(
+    if (MessageBoxW(
         NULL,
-        "It looks like a previous attempt to run the game failed due to a rendering subsystem error.\n"
-        "Reset the game resolution settings and run the game again?",
-        kErrorTitle,
-        MB_OKCANCEL | MB_ICONERROR | MB_ICONQUESTION | MB_DEFAULT_DESKTOP_ONLY) != IDOK)
+        L"\u0627\u062c\u0631\u0627\u06cc \u0642\u0628\u0644\u06cc \u0628\u0627\u0632\u06cc \u0628\u0647 \u062f\u0644\u06cc\u0644 \u062e\u0637\u0627\u06cc \u06af\u0631\u0627\u0641\u06cc\u06a9\u06cc \u0646\u0627\u0645\u0648\u0641\u0642 \u0628\u0648\u062f\u0647 \u0627\u0633\u062a.\n"
+        L"\u0648\u0636\u0648\u062d \u062a\u0635\u0648\u06cc\u0631 \u0628\u0627\u0632\u0646\u0634\u0627\u0646\u06cc \u0648 \u0628\u0627\u0632\u06cc \u062f\u0648\u0628\u0627\u0631\u0647 \u0627\u062c\u0631\u0627 \u0634\u0648\u062f\u061f",
+        L"\u0631\u0627\u0647\u200c\u0627\u0646\u062f\u0627\u0632 Allclient",
+        MB_OKCANCEL | MB_ICONERROR | MB_ICONQUESTION | MB_DEFAULT_DESKTOP_ONLY | MB_RIGHT | MB_RTLREADING) != IDOK)
     {
         return;
     }

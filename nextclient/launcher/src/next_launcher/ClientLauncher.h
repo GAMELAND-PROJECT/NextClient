@@ -118,6 +118,7 @@ private:
     void CheckVideoModeCrash();
 
     void Sys_ErrorHandler(const char* error);
+    static void ShowModuleError(const std::string& error);
 
     static std::string CreateVersionsString(nitroapi::NitroApiInterface* nitro_api,
                                             EngineMiniInterface* engine_mini,
@@ -132,7 +133,7 @@ private:
         auto raise_error = [this](const std::string& error) {
             if (analytics_)
                 analytics_->SendCrashMonitoringEvent("LoadModule Error", error.c_str(), true);
-            MessageBoxA(NULL, error.c_str(), kErrorTitle, MB_OK | MB_ICONERROR | MB_DEFAULT_DESKTOP_ONLY);
+            ShowModuleError(error);
         };
 
         CSysModule* module = Sys_LoadModule(module_name);

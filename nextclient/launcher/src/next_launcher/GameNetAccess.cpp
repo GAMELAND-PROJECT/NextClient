@@ -34,14 +34,16 @@ struct OfflineLease
 void ApplyOfflineLease(GameNetAccessStatus& status)
 {
     constexpr uint64_t day = 86400ULL * 10000000ULL;
-    constexpr uint64_t lifetime = 15 * day;
+    constexpr uint64_t lifetime = kGameNetGraceSeconds * 10000000ULL;
     FILETIME time{};
     GetSystemTimeAsFileTime(&time);
     ULARGE_INTEGER ticks{};
     ticks.LowPart = time.dwLowDateTime;
     ticks.HighPart = time.dwHighDateTime;
     const uint64_t now = ticks.QuadPart;
-    const std::string key_name = std::string("Software\\Allclient\\OfflineLease\\") + kGameNetTag;
+    const std::string key_name = std::string(kGameNetOneMinuteTest
+        ? "Software\\Allclient\\OfflineLeaseTest60\\"
+        : "Software\\Allclient\\OfflineLease\\") + kGameNetTag;
     HKEY key{};
     if (RegCreateKeyExA(HKEY_CURRENT_USER, key_name.c_str(), 0, nullptr, 0,
             KEY_QUERY_VALUE | KEY_SET_VALUE, nullptr, &key, nullptr) != ERROR_SUCCESS)
@@ -81,13 +83,15 @@ void ApplyOfflineLease(GameNetAccessStatus& status)
     if (status.state == GameNetAccessState::Active ||
         status.state == GameNetAccessState::Expired)
     {
-        // Expiry dates are inclusive Iran calendar dates. At the beginning
-        // of expiry+15, LAN closes even if an older lease would still allow it.
+        // Apply the configured grace interval to the subscription date.
         // A refreshed expired record never refreshes the last verification.
         constexpr uint64_t iran_offset = 12600ULL * 10000000ULL;
         const uint64_t today_start = ((now + iran_offset) / day) * day - iran_offset;
-        lease.subscription_deadline = status.days_remaining <= -15
-            ? now : today_start + static_cast<uint64_t>(status.days_remaining + 15) * day;
+        const int64_t deadline = static_cast<int64_t>(today_start) +
+            static_cast<int64_t>(status.days_remaining) * static_cast<int64_t>(day) +
+            static_cast<int64_t>(lifetime);
+        lease.subscription_deadline = deadline <= static_cast<int64_t>(now)
+            ? now : static_cast<uint64_t>(deadline);
     }
     status.lan_allowed = valid && now - lease.verified < lifetime &&
         now < lease.subscription_deadline;
@@ -632,10 +636,6 @@ bool DownloadText(
     return false;
 }
 
-bool DownloadSmallText(const wchar_t* url, size_t maximum_size, std::string& response)
-{
-    return DownloadText(url, maximum_size, response);
-}
 }
 
 GameNetAccessStatus QueryGameNetOnlineAccess()
@@ -652,28 +652,4 @@ GameNetAccessStatus QueryGameNetOnlineAccess()
         ? ResponseAccessStatus(response, today) : unavailable();
     ApplyOfflineLease(status);
     return status;
-}
-
-std::string QueryGameNetServerPassword()
-{
-    std::string response;
-    if (!DownloadSmallText(kGameNetServerPasswordUrl, 256, response))
-        return {};
-
-    const std::string_view password = Trim(response);
-    if (password.empty() || password.size() > 31)
-        return {};
-
-    // GoldSrc userinfo uses backslash as a separator. Reject control bytes and
-    // command-string metacharacters even though the value is set via Cvar_Set.
-    if (!std::ranges::all_of(password, [](unsigned char character)
-        {
-            return character >= 33 && character <= 126 &&
-                character != '\\' && character != '"' && character != ';';
-        }))
-    {
-        return {};
-    }
-
-    return std::string(password);
 }

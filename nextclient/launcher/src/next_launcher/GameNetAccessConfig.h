@@ -7,12 +7,11 @@
 // CMake reads this value from the repository-root client_tags.txt file.
 inline constexpr char kGameNetTag[] = NEXTCLIENT_GAME_NET_TAG;
 
+// Production grace period for offline LAN and subscription expiration.
+inline constexpr bool kGameNetOneMinuteTest = false;
+inline constexpr unsigned long long kGameNetGraceSeconds =
+    kGameNetOneMinuteTest ? 60ULL : 10ULL * 86400ULL;
+
 // Subscription list format: build tag | player name tag | expiry (YYYY/MM/DD).
 // Blank lines and lines beginning with '#' are ignored.
 inline constexpr wchar_t kGameNetAccessUrl[] = L"http://gameland.cam/client_tags.txt";
-
-// The response contains one password shared by every managed pinned server.
-// This endpoint intentionally uses HTTP for compatibility with legacy Win7.
-// A public URL does not make the shared value secret.
-inline constexpr wchar_t kGameNetServerPasswordUrl[] =
-    L"http://gameland.cam/server_password.txt";
