@@ -2,6 +2,9 @@
 #define AppVersion "2.5.3"
 #define AppPublisher "GAMELAND PROJECT"
 #define AppExeName "cstrike.exe"
+#define TagFile FileOpen("..\client_tags.txt")
+#define BuildTag Trim(FileRead(TagFile))
+#expr FileClose(TagFile)
 
 #ifndef SourceRoot
   #define SourceRoot "F:\CS 1.6 - AllClient"
@@ -37,7 +40,14 @@ SetupLogging=no
 Name: "farsi"; MessagesFile: "languages\Farsi.isl"
 
 [Files]
+Source: "runtime\vc_redist.x86.exe"; Flags: dontcopy
+Source: "runtime\vc_redist.x64.exe"; Flags: dontcopy
+Source: "runtime\vcredist2010_x86.exe"; Flags: dontcopy
+Source: "runtime\vcredist2010_x64.exe"; Flags: dontcopy
 Source: "{#SourceRoot}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "crashes\*,htmlcache\*,*.log,*.mdmp,debug.log,install.bat,unins000.exe,unins000.dat"
+
+[Registry]
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Uninstall\{{D9E46BD1-52F8-470F-8639-FF31FE7C5E48}_is1"; ValueType: string; ValueName: "GameNetTag"; ValueData: "{#BuildTag}"; Flags: uninsdeletevalue
 
 [Icons]
 Name: "{autodesktop}\Allclient - Voice Enabled"; Filename: "{app}\platform\steam\games\SmartEmu\SSELauncher.exe"; Parameters: "-appid 10"; WorkingDir: "{app}\platform\steam\games\SmartEmu"; IconFilename: "{app}\cstrike.exe"
@@ -71,6 +81,8 @@ var
   PreviousInstallCleanupDone: Boolean;
   PreviousInstallDirectoryPendingCleanup: String;
   DestinationCleanupDone: Boolean;
+  UpdateAccessChecked: Boolean;
+  DependenciesReady: Boolean;
 
 function URLDownloadToFile(Caller: NativeInt; URL, FileName: String;
   Reserved: DWORD; StatusCallback: NativeInt): HResult;
@@ -717,6 +729,41 @@ begin
   end;
 end;
 
+function ShouldSkipPage(PageID: Integer): Boolean;
+var
+  Directory, Version, InstalledTag, Response: String;
+begin
+  Result := False;
+  if PageID <> AccessPage.ID then Exit;
+  if not UpdateAccessChecked then
+  begin
+    UpdateAccessChecked := True;
+    if FindPreviousAllclient(Directory, Version) and
+       FileExists(AddBackslash(Directory) + 'cstrike.exe') and
+       RegQueryStringValue(HKCU, AllclientUninstallKey, 'GameNetTag', InstalledTag) and
+       (CompareText(InstalledTag, '{#BuildTag}') = 0) then
+    begin
+      if FetchAccessResponse('http://gameland.cam/update_access.php?tag={#BuildTag}', Response) then
+        AccessApproved := Trim(Response) = 'ACTIVE|{#BuildTag}';
+    end;
+  end;
+  Result := AccessApproved;
+end;
+
+function InstallRuntime(const FileName, Parameters: String;
+  var NeedsRestart: Boolean): Boolean;
+var
+  Code: Integer;
+begin
+  ExtractTemporaryFile(FileName);
+  Result := ShellExec('runas', ExpandConstant('{tmp}\') + FileName,
+    Parameters, '', SW_HIDE, ewWaitUntilTerminated, Code);
+  if not Result then Exit;
+  if (Code = 3010) or (Code = 1641) then NeedsRestart := True;
+  { 1638 means this runtime family already has a newer installed version. }
+  Result := (Code = 0) or (Code = 3010) or (Code = 1641) or (Code = 1638);
+end;
+
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 begin
   Result := '';
@@ -725,6 +772,23 @@ begin
   begin
     Result := 'برای ادامه، ابتدا کد نصب را تأیید کنید.';
     Exit;
+  end;
+
+  if not DependenciesReady then
+  begin
+    SetAccessStatus('در حال نصب پیش‌نیازها؛ درخواست دسترسی مدیر ویندوز را تأیید کنید.', clGray);
+    DependenciesReady := InstallRuntime('vc_redist.x86.exe', '/install /quiet /norestart', NeedsRestart);
+    if DependenciesReady then
+      DependenciesReady := InstallRuntime('vcredist2010_x86.exe', '/q /norestart', NeedsRestart);
+    if DependenciesReady and IsWin64 then
+      DependenciesReady := InstallRuntime('vc_redist.x64.exe', '/install /quiet /norestart', NeedsRestart);
+    if DependenciesReady and IsWin64 then
+      DependenciesReady := InstallRuntime('vcredist2010_x64.exe', '/q /norestart', NeedsRestart);
+    if not DependenciesReady then
+    begin
+      Result := 'نصب پیش‌نیازها کامل نشد. دسترسی مدیر را تأیید کنید و دوباره تلاش کنید. نسخه قبلی حذف نشده است.';
+      Exit;
+    end;
   end;
 
   if PreviousInstallCleanupDone then
