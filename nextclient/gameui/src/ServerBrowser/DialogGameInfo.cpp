@@ -104,16 +104,34 @@ void CDialogGameInfo::Connect()
     OnConnect();
 }
 
+void CDialogGameInfo::SetKnownServer(const gameserveritem_t& server)
+{
+    server_item_ = server;
+    m_bServerHadSuccessfulResponse = server.m_bHadSuccessfulResponse;
+}
+
 servernetadr_t CDialogGameInfo::GetAddress()
 {
     servernetadr_t addr{};
-    addr.Init(server_ip_, server_port_, server_port_);
+    addr = server_item_.m_NetAdr;
 
     return addr;
 }
 
 void CDialogGameInfo::OnConnect()
 {
+    // The browser already queried this server. Do not gate the game handshake
+    // on another UDP info reply, which can be lost or rate-limited.
+    if (m_bServerHadSuccessfulResponse)
+    {
+        m_bConnecting = false;
+        m_bServerNotResponding = false;
+        CancelPingQuery();
+        CancelPlayerQuery();
+        ConnectToServer();
+        InvalidateLayout();
+        return;
+    }
     m_bConnecting = true;
 
     m_bServerFull = false;
@@ -413,6 +431,7 @@ void CDialogGameInfo::SendPingQueryIfNotAny()
 
 void CDialogGameInfo::CancelPingQuery()
 {
+    m_iRequestRetry = 0;
     if (m_hPingServerQuery)
     {
         SteamMatchmakingServers()->CancelServerQuery(m_hPingServerQuery);
@@ -460,7 +479,8 @@ bool CDialogGameInfo::ConnectToServer()
         return false;
     }
 
-    if (GetHumanPlayerCount(server_item_) >= server_item_.m_nMaxPlayers)
+    if (server_item_.m_nMaxPlayers > 0 &&
+        GetHumanPlayerCount(server_item_) >= server_item_.m_nMaxPlayers)
     {
         m_bServerFull = true;
         m_bShowAutoRetryToggle = true;

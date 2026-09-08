@@ -48,15 +48,9 @@ bool CLanGames::SupportsItem(InterfaceItem item)
 
 void CLanGames::StartRefresh(void)
 {
-    StopRefresh(CancelQueryReason::NewQuery);
-
-    SetRefreshing(true);
-    ServerBrowserDialog().UpdateStatusText("#ServerBrowser_GettingNewServerList");
-
-    if (m_pGameList->GetItemCount() == 0)
-        GetNewServerList();
-    else
-        m_Servers.StartRefresh();
+    // Rediscover listen servers: an old list can contain a previous host/port
+    // and refreshing only its entries never discovers a newly created game.
+    GetNewServerList();
 }
 
 void CLanGames::GetNewServerList(void)

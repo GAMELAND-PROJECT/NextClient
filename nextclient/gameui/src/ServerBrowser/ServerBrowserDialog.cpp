@@ -332,6 +332,7 @@ CDialogGameInfo *CServerBrowserDialog::OpenGameInfoDialog(IGameList *gameList, u
     serveritem_t &server = gameList->GetServer(serverIndex);
 
     auto *gameDialog = new CDialogGameInfo(&ServerBrowserDialog(), server.gs.m_NetAdr.GetIP(), server.gs.m_NetAdr.GetQueryPort());
+    gameDialog->SetKnownServer(server.gs);
     gameDialog->AddActionSignalTarget(this);
     gameDialog->Run(server.gs.GetName().c_str());
     gameDialog->MoveToCenterOfScreen();

@@ -19,6 +19,7 @@ public:
 
     void Run(const char *titleName);
     void Connect();
+    void SetKnownServer(const gameserveritem_t& server);
 
     servernetadr_t GetAddress();
 
