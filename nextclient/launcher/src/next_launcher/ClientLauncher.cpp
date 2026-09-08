@@ -131,6 +131,16 @@ void ClientLauncher::Run()
     // Resolve the package entitlement once per launcher start. GameUI reads
     // only this result and never performs network work during gameplay.
     const GameNetAccessStatus online_access = QueryGameNetOnlineAccess();
+    if (!online_access.lan_allowed)
+    {
+        MessageBoxA(nullptr,
+            "LAN access requires a successful online verification within the last 15 days.\n"
+            "LAN is also disabled 15 days after the subscription expiry date.\n"
+            "Connect to the internet and restart the launcher with an active subscription.\n"
+            "If you already have internet access, check the Windows date and time.",
+            kErrorTitle, MB_OK | MB_ICONWARNING | MB_DEFAULT_DESKTOP_ONLY);
+        return;
+    }
     SetEnvironmentVariableA("NEXTCLIENT_ONLINE_ACCESS", online_access.allowed() ? "1" : "0");
     SetEnvironmentVariableA("NEXTCLIENT_PLAYER_NAME_TAG",
         online_access.player_name_tag.c_str());

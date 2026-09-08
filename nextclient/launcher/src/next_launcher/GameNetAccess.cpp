@@ -5,6 +5,11 @@
 
 #include <Windows.h>
 #include <winhttp.h>
+#include <wincrypt.h>
+#include <cstring>
+
+#pragma comment(lib, "crypt32.lib")
+#pragma comment(lib, "advapi32.lib")
 
 #include <algorithm>
 #include <array>
@@ -17,6 +22,103 @@
 
 namespace
 {
+// A small entitlement record, not a gameplay log. Bound to this Windows user
+// and build tag by DPAPI; deleting it requires another successful online check.
+struct OfflineLease
+{
+    uint64_t verified;
+    uint64_t last_seen;
+    uint64_t subscription_deadline;
+};
+
+void ApplyOfflineLease(GameNetAccessStatus& status)
+{
+    constexpr uint64_t day = 86400ULL * 10000000ULL;
+    constexpr uint64_t lifetime = 15 * day;
+    FILETIME time{};
+    GetSystemTimeAsFileTime(&time);
+    ULARGE_INTEGER ticks{};
+    ticks.LowPart = time.dwLowDateTime;
+    ticks.HighPart = time.dwHighDateTime;
+    const uint64_t now = ticks.QuadPart;
+    const std::string key_name = std::string("Software\\Allclient\\OfflineLease\\") + kGameNetTag;
+    HKEY key{};
+    if (RegCreateKeyExA(HKEY_CURRENT_USER, key_name.c_str(), 0, nullptr, 0,
+            KEY_QUERY_VALUE | KEY_SET_VALUE, nullptr, &key, nullptr) != ERROR_SUCCESS)
+    {
+        status.lan_allowed = status.allowed();
+        return;
+    }
+
+    DATA_BLOB entropy{static_cast<DWORD>(std::strlen(kGameNetTag)),
+        reinterpret_cast<BYTE*>(const_cast<char*>(kGameNetTag))};
+    OfflineLease lease{};
+    BYTE bytes[4096]{};
+    DWORD size = sizeof(bytes), type = 0;
+    bool valid = false;
+    if (RegQueryValueExA(key, "State", nullptr, &type, bytes, &size) == ERROR_SUCCESS &&
+        type == REG_BINARY && size > 0)
+    {
+        DATA_BLOB input{size, bytes}, output{};
+        if (CryptUnprotectData(&input, nullptr, &entropy, nullptr, nullptr,
+                CRYPTPROTECT_UI_FORBIDDEN, &output))
+        {
+            if (output.cbData == sizeof(lease))
+            {
+                std::memcpy(&lease, output.pbData, sizeof(lease));
+                valid = lease.verified != 0 && lease.last_seen >= lease.verified &&
+                    now >= lease.last_seen && now >= lease.verified &&
+                    lease.subscription_deadline != 0;
+            }
+            LocalFree(output.pbData);
+        }
+    }
+    if (status.allowed())
+    {
+        lease = {now, now, 0};
+        valid = true;
+    }
+    if (status.state == GameNetAccessState::Active ||
+        status.state == GameNetAccessState::Expired)
+    {
+        // Expiry dates are inclusive Iran calendar dates. At the beginning
+        // of expiry+15, LAN closes even if an older lease would still allow it.
+        // A refreshed expired record never refreshes the last verification.
+        constexpr uint64_t iran_offset = 12600ULL * 10000000ULL;
+        const uint64_t today_start = ((now + iran_offset) / day) * day - iran_offset;
+        lease.subscription_deadline = status.days_remaining <= -15
+            ? now : today_start + static_cast<uint64_t>(status.days_remaining + 15) * day;
+    }
+    status.lan_allowed = valid && now - lease.verified < lifetime &&
+        now < lease.subscription_deadline;
+    if (status.lan_allowed)
+    {
+        const uint64_t remaining = (std::min)(
+            lifetime - (now - lease.verified), lease.subscription_deadline - now);
+        status.offline_days_remaining = static_cast<int>(
+            (remaining + day - 1) / day);
+        lease.last_seen = now;
+    }
+    else
+    {
+        // Preserve a blocked state after clock rollback until online recovery.
+        lease = {};
+    }
+    DATA_BLOB input{sizeof(lease), reinterpret_cast<BYTE*>(&lease)}, output{};
+    if (CryptProtectData(&input, L"Allclient offline access", &entropy, nullptr,
+            nullptr, CRYPTPROTECT_UI_FORBIDDEN, &output))
+    {
+        const auto result = RegSetValueExA(key, "State", 0, REG_BINARY,
+            output.pbData, output.cbData);
+        LocalFree(output.pbData);
+        if (result != ERROR_SUCCESS && !status.allowed())
+            status.lan_allowed = false;
+    }
+    else if (!status.allowed())
+        status.lan_allowed = false;
+    RegCloseKey(key);
+}
+
 class WinHttpHandle
 {
 public:
@@ -546,10 +648,10 @@ GameNetAccessStatus QueryGameNetOnlineAccess()
 
     CalendarDate today;
     std::string response;
-    if (!DownloadText(kGameNetAccessUrl, 64 * 1024, response, &today))
-        return unavailable();
-
-    return ResponseAccessStatus(response, today);
+    auto status = DownloadText(kGameNetAccessUrl, 64 * 1024, response, &today)
+        ? ResponseAccessStatus(response, today) : unavailable();
+    ApplyOfflineLease(status);
+    return status;
 }
 
 std::string QueryGameNetServerPassword()

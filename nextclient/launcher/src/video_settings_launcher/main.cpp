@@ -344,6 +344,12 @@ void PopulateSubscriptionStatus()
         break;
     }
 
+    if (!g_accessStatus.allowed())
+        remainingText = g_accessStatus.lan_allowed
+            ? L"LAN access remaining: " +
+                std::to_wstring(g_accessStatus.offline_days_remaining) + L" days"
+            : L"LAN locked: online verification required";
+
     SetWindowTextW(g_subscriptionState, stateText.c_str());
     const std::wstring tag = WidenAscii(g_accessStatus.tag);
     SetWindowTextW(g_subscriptionTag, tag.c_str());

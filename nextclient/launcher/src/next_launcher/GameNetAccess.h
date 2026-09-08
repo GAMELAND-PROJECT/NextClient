@@ -18,12 +18,13 @@ struct GameNetAccessStatus
     std::string player_name_tag;
     std::string expiry_date;
     int days_remaining = -1;
+    bool lan_allowed = false;
+    int offline_days_remaining = 0;
 
     [[nodiscard]] bool allowed() const { return state == GameNetAccessState::Active; }
 };
 
-// Performs one bounded HTTPS check during launcher startup.
-// Failure is fail-closed for Online while the rest of the game remains usable.
+// Checks access at startup. LAN requires a successful verification in the last 15 days.
 GameNetAccessStatus QueryGameNetOnlineAccess();
 
 // Downloads the shared managed-server password once during launcher startup.
