@@ -314,6 +314,11 @@ gameserveritem_t MatchmakingService::ConvertToGameServerItem(const SQResponseInf
     {
         const SQ_INFO& info = sq_info.value;
 
+        // A2S queries and game connections need not use the same port. Legacy
+        // replies omit this field, so retain the queried endpoint in that case.
+        if (info.port != 0)
+            server.m_NetAdr.SetConnectionPort(info.port);
+
         server.SetName(info.hostname.c_str());
         server.m_bPassword = info.password;
         server.m_bSecure = info.secure;

@@ -86,7 +86,7 @@ void MatchmakingSteamComp::InitializePinnedServers()
 
 bool MatchmakingSteamComp::IsPinnedServer(uint32 ip, uint16 port) const
 {
-    return pinned_servers_.contains(MakePinnedServerKey(ip, port));
+    return online_endpoints_.Contains(ip, port);
 }
 
 void MatchmakingSteamComp::ApplyPinnedServers(const std::vector<netadr_t>& addresses)
@@ -105,6 +105,7 @@ void MatchmakingSteamComp::ApplyPinnedServers(const std::vector<netadr_t>& addre
     }
 
     pinned_servers_ = std::move(updated_servers);
+    online_endpoints_.UpdatePins(pinned_servers_);
     RestartFavoriteRequests();
 }
 
@@ -486,6 +487,8 @@ void MatchmakingSteamComp::RefreshServer(HServerListRequest request_id, int serv
 
         if (gameserver.m_bHadSuccessfulResponse)
         {
+            online_endpoints_.Observe(gameserver.m_NetAdr.GetIP(),
+                gameserver.m_NetAdr.GetQueryPort(), gameserver.m_NetAdr.GetConnectionPort());
             gameserver.m_ulTimeLastPlayed = request_data.servers[server_id].m_ulTimeLastPlayed;
             request_data.servers[server_id] = gameserver;
 
@@ -608,6 +611,8 @@ void MatchmakingSteamComp::ServerAnsweredHandler(
 
     if (server_info.gameserver.m_bHadSuccessfulResponse)
     {
+        const auto& address = server_info.gameserver.m_NetAdr;
+        online_endpoints_.Observe(address.GetIP(), address.GetQueryPort(), address.GetConnectionPort());
         response_callback->ServerResponded(request_id, server_info.server_index);
     }
     else

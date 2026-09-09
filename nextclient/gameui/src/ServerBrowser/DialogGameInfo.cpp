@@ -86,7 +86,7 @@ CDialogGameInfo::~CDialogGameInfo()
     CancelPlayerQuery();
 }
 
-void CDialogGameInfo::Run(const char *titleName)
+void CDialogGameInfo::Run(const char *titleName, bool queryDetails)
 {
     if (titleName)
         SetTitle("#ServerBrowser_GameInfoWithNameTitle", true);
@@ -95,7 +95,8 @@ void CDialogGameInfo::Run(const char *titleName)
 
     SetDialogVariable("game", titleName);
 
-    SendPingQueryIfNotAny();
+    if (queryDetails)
+        SendPingQueryIfNotAny();
     Activate();
 }
 
@@ -120,25 +121,17 @@ servernetadr_t CDialogGameInfo::GetAddress()
 
 void CDialogGameInfo::OnConnect()
 {
-    // The browser already queried this server. Do not gate the game handshake
-    // on another UDP info reply, which can be lost or rate-limited.
-    if (m_bServerHadSuccessfulResponse)
-    {
-        m_bConnecting = false;
-        m_bServerNotResponding = false;
-        CancelPingQuery();
-        CancelPlayerQuery();
-        ConnectToServer();
-        InvalidateLayout();
-        return;
-    }
-    m_bConnecting = true;
-
+    // An explicit join needs only the selected endpoint, not a fresh A2S
+    // response. Query replies may be blocked, rate-limited or stale while the
+    // actual game handshake still works. Capacity is advisory too: reserved
+    // slots and automix admission must be decided by the server itself.
+    m_bConnecting = false;
     m_bServerFull = false;
     m_bServerNotResponding = false;
-
+    CancelPingQuery();
+    CancelPlayerQuery();
+    ConnectToServer(false);
     InvalidateLayout();
-    SendPingQueryIfNotAny();
 }
 
 void CDialogGameInfo::OnRefresh()
@@ -468,7 +461,7 @@ void CDialogGameInfo::ApplyConnectCommand(const gameserveritem_t &server)
     engine->pfnClientCmd(command);
 }
 
-bool CDialogGameInfo::ConnectToServer()
+bool CDialogGameInfo::ConnectToServer(bool checkCapacity)
 {
     if (server_item_.m_bPassword && !m_szPassword[0])
     {
@@ -479,7 +472,9 @@ bool CDialogGameInfo::ConnectToServer()
         return false;
     }
 
-    if (server_item_.m_nMaxPlayers > 0 &&
+    // Automatic slot watching still honors capacity; a user's direct join
+    // must not be silently suppressed by browser metadata.
+    if (checkCapacity && server_item_.m_nMaxPlayers > 0 &&
         GetHumanPlayerCount(server_item_) >= server_item_.m_nMaxPlayers)
     {
         m_bServerFull = true;

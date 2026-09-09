@@ -5,6 +5,7 @@
 
 #include "CmdChecker.h"
 #include "CmdLoggerAggregator.h"
+#include "ScopedCommandBuffer.h"
 
 namespace
 {
@@ -33,11 +34,12 @@ namespace
             return kEmpty;
         }
 
-        g_CmdChecker->FilterCmd(cmd, g_CommandSource, g_FilteredCmd);
+        ScopedCommandBuffer filtered(g_FilteredCmd);
+        g_CmdChecker->FilterCmd(cmd, g_CommandSource, filtered.value);
 
-        if (!g_FilteredCmd.empty())
+        if (!filtered.value.empty())
         {
-            return next->Invoke(g_FilteredCmd.c_str(), buf);
+            return next->Invoke(filtered.value.c_str(), buf);
         }
 
         return kEmpty;
@@ -55,9 +57,10 @@ namespace
         if (cmd.starts_with(kPrivateResourceMsgMarker))
             return;
 
-        g_CmdChecker->FilterCmd(cmd, g_CommandSource, g_FilteredCmd);
-        if (!g_FilteredCmd.empty())
-            next->Invoke(g_FilteredCmd.c_str());
+        ScopedCommandBuffer filtered(g_FilteredCmd);
+        g_CmdChecker->FilterCmd(cmd, g_CommandSource, filtered.value);
+        if (!filtered.value.empty())
+            next->Invoke(filtered.value.c_str());
     }
 
     void CL_ConnectionlessPacket(nitroapi::NextHandlerInterface<void>* next)

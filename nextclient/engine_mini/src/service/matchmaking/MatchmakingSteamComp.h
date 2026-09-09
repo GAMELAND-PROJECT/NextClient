@@ -8,6 +8,7 @@
 #include "MatchmakingService.h"
 #include "ServerListRequestData.h"
 #include "SteamServerListRequestData.h"
+#include "OnlineServerEndpoints.h"
 
 class FileMasterClient;
 class HttpMasterClient;
@@ -26,6 +27,7 @@ std::shared_ptr<HttpMasterClient> pinned_http_client_{};
 std::shared_ptr<FileMasterClient> pinned_cache_client_{};
 std::shared_ptr<taskcoro::CancellationToken> pinned_cancellation_token_{};
 std::unordered_set<uint64_t> pinned_servers_{};
+OnlineServerEndpoints online_endpoints_{};
 bool pinned_servers_initialized_{};
 
     public:

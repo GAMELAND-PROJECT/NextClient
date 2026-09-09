@@ -872,7 +872,10 @@ void CBaseGamesPage::OnKeyCodePressed(vgui2::KeyCode code)
 
 bool CBaseGamesPage::OnGameListEnterPressed()
 {
-    return false;
+    // Double-click is translated to Enter by ListPanel. Handle it here
+    // explicitly instead of relying on keyboard focus bubbling to the page.
+    OnBeginConnect();
+    return true;
 }
 
 bool CBaseGamesPage::IsRefreshing()
