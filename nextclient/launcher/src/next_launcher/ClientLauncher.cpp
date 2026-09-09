@@ -475,6 +475,13 @@ ClientLauncher::EngineSessionResult ClientLauncher::RunEngine()
 
 void ClientLauncher::PrepareEngineCommandLine()
 {
+    char auto_voice[2]{};
+    if (GetEnvironmentVariableA("NEXTCLIENT_AUTO_VOICE", auto_voice, sizeof(auto_voice)) == 1 &&
+        (auto_voice[0] == '0' || auto_voice[0] == '1'))
+    {
+        cmd_line_->SetParm("+voice_enable", auto_voice);
+        cmd_line_->SetParm("+voice_modenable", auto_voice);
+    }
     if (!cmd_line_->CheckParm("-game"))
         cmd_line_->AppendParm("-game", "cstrike");
 

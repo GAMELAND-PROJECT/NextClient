@@ -20,6 +20,11 @@ if ($installRoot -ne $SourceRoot) {
     throw "Build deploys to '$installRoot', but installer packages '$SourceRoot'. Configure matching paths first."
 }
 if (-not (Test-Path -LiteralPath $Compiler -PathType Leaf)) { throw "Missing Inno Setup compiler: $Compiler" }
+foreach ($required in @('platform\steam\games\SmartEmu\SSELauncher.exe', 'platform\steam\games\SmartEmu\config.xml')) {
+    if (-not (Test-Path -LiteralPath (Join-Path $SourceRoot $required) -PathType Leaf)) {
+        throw "Missing automatic-launch dependency: $required"
+    }
+}
 
 # BUILD_ALL builds and deploys every runtime component and the matching assets.
 # Compiling the ISS alone used to silently distribute yesterday's game binaries.
@@ -27,6 +32,7 @@ if (-not (Test-Path -LiteralPath $Compiler -PathType Leaf)) { throw "Missing Inn
 if ($LASTEXITCODE -ne 0) { throw 'Client build/deployment failed; installer was not created.' }
 
 $binaryMap = [ordered]@{
+    'Allclient.exe' = 'Allclient.exe'
     'cstrike.exe' = 'cstrike.exe'
     'next_engine_mini.dll' = 'next_engine_mini.dll'
     'FileSystem_Proxy.dll' = 'FileSystem_Proxy.dll'

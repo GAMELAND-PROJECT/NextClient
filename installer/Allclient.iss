@@ -54,12 +54,11 @@ Filename: "{app}\allclient-install.ini"; Section: "Allclient"; Key: "GameNetTag"
 Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Uninstall\{{D9E46BD1-52F8-470F-8639-FF31FE7C5E48}_is1"; ValueType: string; ValueName: "GameNetTag"; ValueData: "{#BuildTag}"; Flags: uninsdeletevalue
 
 [Icons]
-Name: "{autodesktop}\Allclient - Voice Enabled"; Filename: "{app}\platform\steam\games\SmartEmu\SSELauncher.exe"; Parameters: "-appid 10"; WorkingDir: "{app}\platform\steam\games\SmartEmu"; IconFilename: "{app}\cstrike.exe"
-Name: "{autodesktop}\Allclient - No Voice"; Filename: "{app}\platform\steam\games\SmartEmu2\SSELauncher.exe"; Parameters: "-appid 10"; WorkingDir: "{app}\platform\steam\games\SmartEmu2"; IconFilename: "{app}\cstrike.exe"
+Name: "{autodesktop}\Allclient"; Filename: "{app}\Allclient.exe"; WorkingDir: "{app}"; IconFilename: "{app}\Allclient.exe"
 Name: "{group}\حذف Allclient"; Filename: "{uninstallexe}"
 
 [Run]
-Filename: "{app}\platform\steam\games\SmartEmu\SSELauncher.exe"; Parameters: "-appid 10"; WorkingDir: "{app}\platform\steam\games\SmartEmu"; Description: "اجرای Allclient با گفت‌وگوی صوتی"; Flags: nowait postinstall skipifsilent unchecked
+Filename: "{app}\Allclient.exe"; WorkingDir: "{app}"; Description: "اجرای Allclient"; Flags: nowait postinstall skipifsilent unchecked
 
 [Code]
 const
@@ -588,6 +587,7 @@ begin
 
   DeleteFile(ExpandConstant('{autodesktop}\Allclient - Voice Enabled.lnk'));
   DeleteFile(ExpandConstant('{autodesktop}\Allclient - No Voice.lnk'));
+  DeleteFile(ExpandConstant('{autodesktop}\Allclient.lnk'));
   DelTree(ExpandConstant('{group}'), True, True, True);
 end;
 
@@ -920,6 +920,5 @@ begin
   if CurStep = ssPostInstall then
   begin
     ConfigureSmartEmu(ExpandConstant('{app}\platform\steam\games\SmartEmu\config.xml'));
-    ConfigureSmartEmu(ExpandConstant('{app}\platform\steam\games\SmartEmu2\config.xml'));
   end;
 end;

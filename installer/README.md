@@ -4,9 +4,24 @@
 
 1. accepts either the rotating Google Apps Script code or the built-in offline code;
 2. installs the complete game;
-3. updates both SmartEmu configuration files for the chosen installation path;
-4. creates Voice and No Voice desktop shortcuts;
+3. updates SmartEmu configuration for the chosen installation path;
+4. creates one Allclient desktop shortcut with automatic microphone detection;
 5. creates a standard Windows uninstaller.
+
+`Allclient.exe` probes the default Windows capture endpoint on every launch,
+without recording audio. A usable endpoint enables voice; an unavailable,
+disabled or inaccessible endpoint selects no voice. It updates the existing
+SmartEmu profile and starts SSELauncher, which starts `cstrike.exe`. No second
+emulator folder is required. Reconnect the microphone and restart the game to
+re-evaluate the mode. `Allclient.exe --probe-microphone` performs only the probe
+(exit code 0 = available, 1 = unavailable).
+
+Regression checks (isolated profile and emulator stub; does not start the game):
+
+```powershell
+rtk proxy cmake --build build/vs2022 --config Release --target auto_launcher auto_launcher_tests
+rtk proxy out/bin/Release/auto_launcher_tests.exe
+```
 
 Online verification uses the first-party endpoint at
 `http://gameland.cam/installer_access.php`. On Windows 7 it first uses URLMon,
