@@ -21,7 +21,7 @@ MinVersion=6.1sp1
 DefaultDirName={localappdata}\Allclient
 DefaultGroupName={#AppName}
 DisableDirPage=no
-UsePreviousAppDir=no
+UsePreviousAppDir=yes
 DisableProgramGroupPage=yes
 OutputDir=output
 OutputBaseFilename=Allclient-Setup
@@ -45,6 +45,10 @@ Source: "runtime\vc_redist.x64.exe"; Flags: dontcopy
 Source: "runtime\vcredist2010_x86.exe"; Flags: dontcopy
 Source: "runtime\vcredist2010_x64.exe"; Flags: dontcopy
 Source: "{#SourceRoot}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "crashes\*,htmlcache\*,*.log,*.mdmp,debug.log,install.bat,unins000.exe,unins000.dat"
+
+[INI]
+Filename: "{app}\allclient-install.ini"; Section: "Allclient"; Key: "Schema"; String: "1"
+Filename: "{app}\allclient-install.ini"; Section: "Allclient"; Key: "GameNetTag"; String: "{#BuildTag}"
 
 [Registry]
 Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Uninstall\{{D9E46BD1-52F8-470F-8639-FF31FE7C5E48}_is1"; ValueType: string; ValueName: "GameNetTag"; ValueData: "{#BuildTag}"; Flags: uninsdeletevalue
@@ -82,6 +86,9 @@ var
   PreviousInstallDirectoryPendingCleanup: String;
   DestinationCleanupDone: Boolean;
   UpdateAccessChecked: Boolean;
+  SubscriptionUpdate: Boolean;
+  DetectedInstallDirectory: String;
+  DetectedInstallRoot: Integer;
   DependenciesReady: Boolean;
 
 function URLDownloadToFile(Caller: NativeInt; URL, FileName: String;
@@ -423,10 +430,32 @@ begin
   WizardForm.Update;
 end;
 
+procedure CheckInstalledSubscription; forward;
+
 procedure CurPageChanged(CurPageID: Integer);
 begin
   if (CurPageID = PreparationPage.ID) and not PreparationStarted then
-    RunEarlyPreparation(nil);
+  begin
+    CheckInstalledSubscription;
+    if SubscriptionUpdate then
+    begin
+      PreparationStarted := True;
+      PreparationReady := True;
+      PreparationProgress.Position := 100;
+      PreparationStatusLabel.Font.Color := clGreen;
+      PreparationStatusLabel.Caption := 'نسخه نصب‌شده شناسایی شد و اشتراک فعال است.' + #13#10 +
+        'برای به‌روزرسانی در همین مسیر، «بعدی» را بزنید:' + #13#10 + DetectedInstallDirectory;
+    end
+    else
+      RunEarlyPreparation(nil);
+  end;
+  if SubscriptionUpdate and (CurPageID = wpReady) then
+  begin
+    WizardForm.NextButton.Caption := 'به‌روزرسانی';
+    WizardForm.ReadyMemo.Text := 'اشتراک گیمنت تأیید شد؛ نیازی به وارد کردن کد نیست.' + #13#10 +
+      'مسیر به‌روزرسانی: ' + DetectedInstallDirectory + #13#10 +
+      'نسخه قبلی و فایل‌های آن پاک و نسخه جدید نصب می‌شود. بازی و لانچر را ببندید.';
+  end;
 end;
 
 procedure InitializeWizard;
@@ -512,7 +541,9 @@ begin
   InstallDirectory := RemoveBackslashUnlessRoot(Trim(InstallDirectory));
   RegQueryStringValue(RootKey, AllclientUninstallKey,
     'DisplayVersion', InstalledVersion);
-  Result := InstallDirectory <> '';
+  Result := (InstallDirectory <> '') and
+    FileExists(AddBackslash(InstallDirectory) + 'cstrike.exe');
+  if Result then DetectedInstallRoot := RootKey;
 end;
 
 function FindPreviousAllclient(var InstallDirectory,
@@ -729,25 +760,62 @@ begin
   end;
 end;
 
-function ShouldSkipPage(PageID: Integer): Boolean;
+function ReadInstalledGameNetTag(const Directory: String; var Tag: String): Boolean;
+var
+  IdentityFile, RegistryTag: String;
+begin
+  IdentityFile := AddBackslash(Directory) + 'allclient-install.ini';
+  Tag := '';
+  RegQueryStringValue(DetectedInstallRoot, AllclientUninstallKey, 'GameNetTag', Tag);
+  RegistryTag := Tag;
+  if FileExists(IdentityFile) then
+  begin
+    if GetIniString('Allclient', 'Schema', '', IdentityFile) <> '1' then
+    begin
+      Result := False;
+      Exit;
+    end;
+    Tag := Trim(GetIniString('Allclient', 'GameNetTag', '', IdentityFile));
+    if (RegistryTag <> '') and (CompareText(RegistryTag, Tag) <> 0) then
+    begin
+      Result := False;
+      Exit;
+    end;
+  end;
+  Result := (Tag <> '') and (CompareText(Tag, '{#BuildTag}') = 0);
+end;
+
+procedure CheckInstalledSubscription;
 var
   Directory, Version, InstalledTag, Response: String;
 begin
-  Result := False;
-  if PageID <> AccessPage.ID then Exit;
   if not UpdateAccessChecked then
   begin
     UpdateAccessChecked := True;
     if FindPreviousAllclient(Directory, Version) and
        FileExists(AddBackslash(Directory) + 'cstrike.exe') and
-       RegQueryStringValue(HKCU, AllclientUninstallKey, 'GameNetTag', InstalledTag) and
+       PreviousInstallPathIsSafe(Directory) and
+       ReadInstalledGameNetTag(Directory, InstalledTag) and
        (CompareText(InstalledTag, '{#BuildTag}') = 0) then
     begin
       if FetchAccessResponse('http://gameland.cam/update_access.php?tag={#BuildTag}', Response) then
-        AccessApproved := Trim(Response) = 'ACTIVE|{#BuildTag}';
+      begin
+        SubscriptionUpdate := Trim(Response) = 'ACTIVE|{#BuildTag}';
+        if SubscriptionUpdate then
+        begin
+          AccessApproved := True;
+          DetectedInstallDirectory := Directory;
+          WizardForm.DirEdit.Text := Directory;
+        end;
+      end;
     end;
   end;
-  Result := AccessApproved;
+end;
+
+function ShouldSkipPage(PageID: Integer): Boolean;
+begin
+  Result := SubscriptionUpdate and
+    ((PageID = AccessPage.ID) or (PageID = wpSelectDir) or (PageID = wpSelectProgramGroup));
 end;
 
 function InstallRuntime(const FileName, Parameters: String;
@@ -771,6 +839,14 @@ begin
   if not AccessApproved then
   begin
     Result := 'برای ادامه، ابتدا کد نصب را تأیید کنید.';
+    Exit;
+  end;
+
+  if SubscriptionUpdate and
+     (CompareText(RemoveBackslashUnlessRoot(ExpandConstant('{app}')),
+       RemoveBackslashUnlessRoot(DetectedInstallDirectory)) <> 0) then
+  begin
+    Result := 'مسیر به‌روزرسانی با نسخه شناسایی‌شده مطابقت ندارد. نصب‌کننده را دوباره اجرا کنید.';
     Exit;
   end;
 

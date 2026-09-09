@@ -69,6 +69,8 @@ if (NEXTCLIENT_GAME_NET_TAG_LENGTH GREATER 64)
 endif ()
 
 message(STATUS "NextClient game-net build tag: ${NEXTCLIENT_GAME_NET_TAG}")
+configure_file("${CMAKE_CURRENT_SOURCE_DIR}/install-identity.ini.in"
+        "${CMAKE_BINARY_DIR}/allclient-install.ini" @ONLY)
 
 target_include_directories(${TARGET_NAME} PRIVATE
         ${NEXT_LAUNCHER_SOURCE_DIR}/include

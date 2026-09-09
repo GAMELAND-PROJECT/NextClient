@@ -1,0 +1,3 @@
+[Allclient]
+Schema=1
+GameNetTag=@NEXTCLIENT_GAME_NET_TAG@

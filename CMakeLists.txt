@@ -135,6 +135,7 @@ if (NOT NEXTCLIENT_BUILD_TESTS)
                 COMMENT "Installing libraries and assets to ${NEXTCLIENT_INSTALL_DIR}..."
                 COMMAND ${CMAKE_COMMAND} -E make_directory ${NEXTCLIENT_INSTALL_DIR}/cstrike/cl_dlls
                 COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:next_launcher> ${NEXTCLIENT_INSTALL_DIR}/cstrike.exe
+                COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_BINARY_DIR}/allclient-install.ini ${NEXTCLIENT_INSTALL_DIR}/allclient-install.ini
                 COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:engine_mini> ${NEXTCLIENT_INSTALL_DIR}/next_engine_mini.dll
                 COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:filesystem_proxy> ${NEXTCLIENT_INSTALL_DIR}/FileSystem_Proxy.dll
                 COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:client_mini> ${NEXTCLIENT_INSTALL_DIR}/cstrike/cl_dlls/client_mini.dll
