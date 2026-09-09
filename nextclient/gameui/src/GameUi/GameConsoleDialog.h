@@ -103,6 +103,7 @@ private:
 
 private:
     CNoKeyboardInputRichText *m_pHistory;
+    vgui2::Panel *m_pLanHostGuide;
     TabCatchingTextEntry *m_pEntry;
     vgui2::Button *m_pSubmit;
     vgui2::Menu *m_pCompletionList;

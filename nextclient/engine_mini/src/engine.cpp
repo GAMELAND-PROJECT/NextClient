@@ -1,4 +1,5 @@
 #include "engine.h"
+#include "common/LocalConnectTarget.h"
 
 #include <algorithm>
 #include <array>
@@ -187,6 +188,11 @@ ConnectTargetKind ClassifyConnectTarget(const char* target)
 {
     if (!target || !target[0])
         return ConnectTargetKind::InvalidAddress;
+
+    // Internal listen-server connections never go through DNS or online
+    // admission. Preserve the original token for GoldSrc's loopback transport.
+    if (IsEngineLocalConnectTarget(target))
+        return ConnectTargetKind::Lan;
 
     std::string endpoint(target);
     if (endpoint.find(':') == std::string::npos)

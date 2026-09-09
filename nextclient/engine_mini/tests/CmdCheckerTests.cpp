@@ -1,4 +1,19 @@
 #include <gtest/gtest.h>
+#include "common/LocalConnectTarget.h"
+
+TEST(LocalConnectTargetTest, RecognizesInternalListenServerWithoutDns)
+{
+    EXPECT_TRUE(IsEngineLocalConnectTarget("local"));
+    EXPECT_TRUE(IsEngineLocalConnectTarget("LOCAL"));
+    EXPECT_TRUE(IsEngineLocalConnectTarget("Local"));
+}
+
+TEST(LocalConnectTargetTest, DoesNotBypassValidationForNetworkTargets)
+{
+    for (const auto* target : {"", "localhost", "local.example.org", "local:27015",
+                              "local;connect example.org", "127.0.0.1", "192.168.1.5:27015", " local"})
+        EXPECT_FALSE(IsEngineLocalConnectTarget(target)) << target;
+}
 
 #include "console/CmdChecker.h"
 #include "console/ScopedCommandBuffer.h"
