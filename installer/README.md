@@ -28,19 +28,24 @@ page includes a connection-status indicator and a manual refresh button.
 
 ## Build
 
-Install Inno Setup 7, then run from the repository root:
+Install Inno Setup 7, then run from the repository root. This builds and deploys
+the current client before packaging and verifies every deployed DLL against the
+build output. It also writes a SHA-256 manifest beside the installer:
 
 ```powershell
-& "C:\Program Files\Inno Setup 7\ISCC.exe" ".\installer\Allclient.iss"
+rtk proxy powershell -NoProfile -ExecutionPolicy Bypass -File .\installer\Build-Installer.ps1
 ```
 
 The default game source is `F:\CS 1.6 - AllClient`. To use another clean source folder:
 
 ```powershell
-& "C:\Program Files\Inno Setup 7\ISCC.exe" "/DSourceRoot=F:\Path\To\Allclient" ".\installer\Allclient.iss"
+rtk proxy powershell -NoProfile -ExecutionPolicy Bypass -File .\installer\Build-Installer.ps1 -SourceRoot "F:\Path\To\Allclient"
 ```
 
 The compiled installer is written to `installer\output\Allclient-Setup.exe`.
+The configured `NEXTCLIENT_INSTALL_DIR` must match `SourceRoot`. Running ISCC
+directly only repackages the files already in that directory; it does not build
+or deploy connection fixes from this repository.
 
 Before building, deploy `hosting/installer_access.php` and the management panel
 to the first-party host, then generate an active installation code.
