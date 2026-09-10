@@ -17,8 +17,9 @@ public:
     CDialogGameInfo(vgui2::Panel *parent, uint32 ip, uint16 port);
     ~CDialogGameInfo() override;
 
-    void Run(const char *titleName);
+    void Run(const char *titleName, bool queryDetails = true);
     void Connect();
+    void SetKnownServer(const gameserveritem_t& server);
 
     servernetadr_t GetAddress();
 
@@ -56,7 +57,7 @@ private:
 
     void ClearPlayerList();
 
-    bool ConnectToServer();
+    bool ConnectToServer(bool checkCapacity = true);
     void ApplyConnectCommand(const gameserveritem_t &server);
 
     static int PlayerTimeColumnSortFunc(vgui2::ListPanel *pPanel, const vgui2::ListPanelItem &p1, const vgui2::ListPanelItem &p2);

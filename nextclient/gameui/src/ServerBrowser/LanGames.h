@@ -22,6 +22,7 @@ public:
 public:
     void OnPageShow() override;
     void OnPageHide() override;
+    void OnThink() override;
     void OnViewGameInfo() override;
 
 public:
@@ -41,6 +42,7 @@ private:
 
 private:
     bool auto_refresh_;
+    int refresh_deadline_ms_{};
 };
 
 #endif

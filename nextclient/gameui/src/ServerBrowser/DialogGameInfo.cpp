@@ -86,7 +86,7 @@ CDialogGameInfo::~CDialogGameInfo()
     CancelPlayerQuery();
 }
 
-void CDialogGameInfo::Run(const char *titleName)
+void CDialogGameInfo::Run(const char *titleName, bool queryDetails)
 {
     if (titleName)
         SetTitle("#ServerBrowser_GameInfoWithNameTitle", true);
@@ -95,7 +95,8 @@ void CDialogGameInfo::Run(const char *titleName)
 
     SetDialogVariable("game", titleName);
 
-    SendPingQueryIfNotAny();
+    if (queryDetails)
+        SendPingQueryIfNotAny();
     Activate();
 }
 
@@ -104,23 +105,33 @@ void CDialogGameInfo::Connect()
     OnConnect();
 }
 
+void CDialogGameInfo::SetKnownServer(const gameserveritem_t& server)
+{
+    server_item_ = server;
+    m_bServerHadSuccessfulResponse = server.m_bHadSuccessfulResponse;
+}
+
 servernetadr_t CDialogGameInfo::GetAddress()
 {
     servernetadr_t addr{};
-    addr.Init(server_ip_, server_port_, server_port_);
+    addr = server_item_.m_NetAdr;
 
     return addr;
 }
 
 void CDialogGameInfo::OnConnect()
 {
-    m_bConnecting = true;
-
+    // An explicit join needs only the selected endpoint, not a fresh A2S
+    // response. Query replies may be blocked, rate-limited or stale while the
+    // actual game handshake still works. Capacity is advisory too: reserved
+    // slots and automix admission must be decided by the server itself.
+    m_bConnecting = false;
     m_bServerFull = false;
     m_bServerNotResponding = false;
-
+    CancelPingQuery();
+    CancelPlayerQuery();
+    ConnectToServer(false);
     InvalidateLayout();
-    SendPingQueryIfNotAny();
 }
 
 void CDialogGameInfo::OnRefresh()
@@ -413,6 +424,7 @@ void CDialogGameInfo::SendPingQueryIfNotAny()
 
 void CDialogGameInfo::CancelPingQuery()
 {
+    m_iRequestRetry = 0;
     if (m_hPingServerQuery)
     {
         SteamMatchmakingServers()->CancelServerQuery(m_hPingServerQuery);
@@ -449,19 +461,8 @@ void CDialogGameInfo::ApplyConnectCommand(const gameserveritem_t &server)
     engine->pfnClientCmd(command);
 }
 
-bool CDialogGameInfo::ConnectToServer()
+bool CDialogGameInfo::ConnectToServer(bool checkCapacity)
 {
-    if (server_item_.m_bPassword && !m_szPassword[0] && EngineMini() &&
-        EngineMini()->IsPinnedServer(
-            server_item_.m_NetAdr.GetIP(), server_item_.m_NetAdr.GetConnectionPort()))
-    {
-        if (const char* managed_password = std::getenv("NEXTCLIENT_SERVER_PASSWORD");
-            managed_password && managed_password[0])
-        {
-            Q_strncpy(m_szPassword, managed_password, sizeof(m_szPassword));
-        }
-    }
-
     if (server_item_.m_bPassword && !m_szPassword[0])
     {
         auto *box = new CDialogServerPassword(this);
@@ -471,7 +472,10 @@ bool CDialogGameInfo::ConnectToServer()
         return false;
     }
 
-    if (GetHumanPlayerCount(server_item_) >= server_item_.m_nMaxPlayers)
+    // Automatic slot watching still honors capacity; a user's direct join
+    // must not be silently suppressed by browser metadata.
+    if (checkCapacity && server_item_.m_nMaxPlayers > 0 &&
+        GetHumanPlayerCount(server_item_) >= server_item_.m_nMaxPlayers)
     {
         m_bServerFull = true;
         m_bShowAutoRetryToggle = true;

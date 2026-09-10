@@ -529,6 +529,8 @@ void CL_ReadPackets()
         {
             MSG_BeginReading();
             CL_ParseServerMessage(TRUE);
+            if (cls->state == ca_disconnected)
+                return;
             continue;
         }
 
@@ -541,6 +543,10 @@ void CL_ReadPackets()
         if (Netchan_Process(&cls->netchan))
         {
             CL_ParseServerMessage(TRUE);
+            // Parsing can disconnect and release the entity array (including
+            // the guarded legacy-codec failure path). Stop this receive pass.
+            if (cls->state == ca_disconnected)
+                return;
         }
 
     }
@@ -549,14 +555,14 @@ void CL_ReadPackets()
     // removed from the OS queue is therefore always handled, while unread
     // sequenced packets remain queued in their original order.
 
-    CL_SetSolidEntities();
-
     if (cls->state != ca_dedicated && cls->state != ca_disconnected && Netchan_IncomingReady(&cls->netchan))
     {
         if (Netchan_CopyNormalFragments(&cls->netchan))
         {
             MSG_BeginReading();
             CL_ParseServerMessage(FALSE);
+            if (cls->state == ca_disconnected)
+                return;
         }
 
         if (Netchan_CopyFileFragments(&cls->netchan))
@@ -585,6 +591,11 @@ void CL_ReadPackets()
             }
         }
     }
+
+    // Build prediction collision data only after all messages for this frame,
+    // including reliable fragments, have updated the entity state.
+    if (cls->state >= ca_connected)
+        CL_SetSolidEntities();
 
     if (cls->state < ca_connected || cls->demoplayback || *realtime - cls->netchan.last_received <= cl_timeout->value)
     {

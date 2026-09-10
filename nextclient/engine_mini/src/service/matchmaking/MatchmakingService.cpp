@@ -2,6 +2,7 @@
 
 #include <optick.h>
 #include <ranges>
+#include <unordered_set>
 #include <utility>
 
 #include <ppl.h>
@@ -12,6 +13,7 @@
 #include "master/MasterClientFactory.h"
 #include "master/MasterClientFactoryInterface.h"
 #include "master/MasterClientInterface.h"
+#include "sourcequery/netadr_hasher.h"
 
 using namespace service::matchmaking;
 using namespace concurrencpp;
@@ -139,6 +141,7 @@ result<std::vector<MatchmakingService::ServerInfo>> MatchmakingService::RequestS
 
     std::shared_ptr<concurrency::concurrent_queue<netadr_s>> addresses_to_process = std::make_shared<concurrency::concurrent_queue<netadr_s>>();
     std::vector<SQInfoTask> server_info_tasks{};
+    std::unordered_set<netadr_t> queued_addresses;
     size_t server_index = 0;
 
     result<std::vector<netadr_t>> addresses_task =
@@ -156,6 +159,9 @@ result<std::vector<MatchmakingService::ServerInfo>> MatchmakingService::RequestS
         netadr_t server_address{};
         while (server_info_tasks.size() < kMaxSimultaneousSQRequests && addresses_to_process->try_pop(server_address))
         {
+            if (!queued_addresses.insert(server_address).second)
+                continue;
+
             result<SQResponseInfo<SQ_INFO>> sq_task = source_query_->GetInfoAsync(server_address);
             server_info_tasks.emplace_back(server_index++, std::move(sq_task));
         }
@@ -313,6 +319,11 @@ gameserveritem_t MatchmakingService::ConvertToGameServerItem(const SQResponseInf
     if (sq_info.error_code == SQErrorCode::Ok)
     {
         const SQ_INFO& info = sq_info.value;
+
+        // A2S queries and game connections need not use the same port. Legacy
+        // replies omit this field, so retain the queried endpoint in that case.
+        if (info.port != 0)
+            server.m_NetAdr.SetConnectionPort(info.port);
 
         server.SetName(info.hostname.c_str());
         server.m_bPassword = info.password;

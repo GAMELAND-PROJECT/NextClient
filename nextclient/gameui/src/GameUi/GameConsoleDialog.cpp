@@ -29,6 +29,40 @@
 #include "LoadingDialog.h"
 #include <Windows.h>
 #undef PostMessage
+#include "LanHostGuideBitmap.h"
+
+class CLanHostGuidePanel : public vgui2::Panel
+{
+public:
+    CLanHostGuidePanel(vgui2::Panel* parent) : Panel(parent, "LanHostGuide")
+    {
+        SetMouseInputEnabled(false);
+        SetKeyBoardInputEnabled(false);
+        SetPaintBackgroundEnabled(false);
+    }
+    ~CLanHostGuidePanel() override
+    {
+        if (texture_) vgui2::surface()->DeleteTextureByID(texture_);
+    }
+    void Paint() override
+    {
+        const int width = GetWide(), height = GetTall();
+        if (!texture_ || width != width_ || height != height_)
+        {
+            const auto rgba = RenderLanHostGuide(width, height);
+            if (rgba.empty()) return;
+            if (!texture_) texture_ = vgui2::surface()->CreateNewTextureID(true);
+            vgui2::surface()->DrawSetTextureRGBA(texture_, rgba.data(), width, height, 0, true);
+            width_ = width;
+            height_ = height;
+        }
+        vgui2::surface()->DrawSetColor(255, 255, 255, 255);
+        vgui2::surface()->DrawSetTexture(texture_);
+        vgui2::surface()->DrawTexturedRect(0, 0, width, height);
+    }
+private:
+    int texture_ = 0, width_ = 0, height_ = 0;
+};
 
 // memdbgon must be the last include file in a .cpp file!!!
 #include <tier0/memdbgon.h>
@@ -226,6 +260,8 @@ CGameConsoleDialog::CGameConsoleDialog() : BaseClass(NULL, "GameConsole", false)
     m_pEntry->SetTabPosition(1);
 
     m_pHistory = new CNoKeyboardInputRichText(this, "ConsoleHistory", m_pEntry);
+    m_pLanHostGuide = new CLanHostGuidePanel(this);
+    m_pLanHostGuide->SetVisible(false);
     // Keep command input available, but do not paint or lay out the live engine
     // log over the 3D scene. RichText repainting is disproportionately costly.
     m_pHistory->SetVisible(false);
@@ -264,35 +300,26 @@ void CGameConsoleDialog::Activate()
 void CGameConsoleDialog::Clear()
 {
     m_pHistory->SetText("");
+    m_pLanHostGuide->SetVisible(false);
 }
 
 void CGameConsoleDialog::ShowLanHostGuide(bool show)
 {
-    m_pHistory->SetVisible(show);
+    m_pHistory->SetVisible(false);
+    m_pLanHostGuide->SetVisible(show);
     m_pHistory->SetVerticalScrollbar(false);
 
     if (!show)
     {
+        SetMinimumSize(100, 100);
         m_pHistory->SetMaximumCharCount(1);
         m_pHistory->SetText("");
         return;
     }
 
-    static constexpr char kLanHostGuide[] =
-        "LAN HOST COMMANDS\n"
-        "\n"
-        "mix   Start match settings\n"
-        "warm  Start warmup mode\n"
-        "1v1   Aim-map duel mode\n"
-        "r     Restart current round\n"
-        "lv    Countdown and go LIVE\n"
-        "\n"
-        "ff0 / ff1    Friendly fire OFF / ON\n"
-        "fr0 - fr12   Set freeze time (seconds)\n";
-
-    m_pHistory->SetMaximumCharCount(sizeof(kLanHostGuide));
-    m_pHistory->SetText(kLanHostGuide);
-    m_pHistory->GotoTextStart();
+    // Keep the command and explanation columns readable, including on 640x480.
+    SetMinimumSize(620, 440);
+    SetSize(std::max(GetWide(), 620), std::max(GetTall(), 440));
 }
 
 //-----------------------------------------------------------------------------
@@ -693,6 +720,8 @@ void CGameConsoleDialog::PerformLayout()
 
     m_pHistory->SetPos(inset, inset + topHeight);
     m_pHistory->SetSize(wide - (inset * 2), tall - (entryInset * 2 + inset * 2 + topHeight + entryHeight));
+    m_pLanHostGuide->SetBounds(inset, inset + topHeight, wide - inset * 2,
+        tall - (entryInset * 2 + inset * 2 + topHeight + entryHeight));
 
     m_pEntry->SetPos(inset, tall - (entryInset * 2 + entryHeight));
     m_pEntry->SetSize(wide - (inset * 3 + submitWide), entryHeight);

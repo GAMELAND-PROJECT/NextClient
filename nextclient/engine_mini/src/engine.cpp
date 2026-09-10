@@ -1,4 +1,5 @@
 #include "engine.h"
+#include "common/LocalConnectTarget.h"
 
 #include <algorithm>
 #include <array>
@@ -168,8 +169,9 @@ constexpr size_t kMaxPlayerNameBytes = 31;
 enum class ConnectTargetKind
 {
     Denied,
+    InvalidAddress,
     Lan,
-    ManagedOnline,
+    Online,
 };
 
 bool g_OnlinePlayerNameTagActive = false;
@@ -177,14 +179,20 @@ std::string g_OriginalPlayerName;
 
 bool LauncherAllowsOnlineAccess()
 {
-    const char* value = std::getenv("NEXTCLIENT_ONLINE_ACCESS");
-    return value != nullptr && value[0] == '1' && value[1] == '\0';
+    char value[2]{};
+    return GetEnvironmentVariableA("NEXTCLIENT_ONLINE_ACCESS", value, sizeof(value)) == 1 &&
+        value[0] == '1';
 }
 
 ConnectTargetKind ClassifyConnectTarget(const char* target)
 {
     if (!target || !target[0])
-        return ConnectTargetKind::Denied;
+        return ConnectTargetKind::InvalidAddress;
+
+    // Internal listen-server connections never go through DNS or online
+    // admission. Preserve the original token for GoldSrc's loopback transport.
+    if (IsEngineLocalConnectTarget(target))
+        return ConnectTargetKind::Lan;
 
     std::string endpoint(target);
     if (endpoint.find(':') == std::string::npos)
@@ -193,29 +201,24 @@ ConnectTargetKind ClassifyConnectTarget(const char* target)
     netadr_t address;
     address.SetFromString(endpoint.c_str(), true);
     if (!address.IsValid())
-        return ConnectTargetKind::Denied;
+        return ConnectTargetKind::InvalidAddress;
 
     // Preserve listen-server and cafe LAN play without requiring an online
     // subscription or a managed pin.
     if (address.IsLocalhost() || address.IsLoopback() || address.IsReservedAdr())
         return ConnectTargetKind::Lan;
 
-    // Public endpoints require both an active launcher entitlement and an
-    // exact IP:port entry from the remotely managed pinned-server list.
-    if (LauncherAllowsOnlineAccess() && g_pMatchmakingServers &&
-        g_pMatchmakingServers->IsPinnedServer(
-            address.GetIPHostByteOrder(), address.GetPortHostByteOrder()))
-    {
-        return ConnectTargetKind::ManagedOnline;
-    }
-
-    return ConnectTargetKind::Denied;
+    // Pins control browser discovery and presentation, not game admission.
+    // An entitled user's connect must work even if the list/cache is stale,
+    // unavailable, or the selected server advertises a different endpoint.
+    return LauncherAllowsOnlineAccess() ? ConnectTargetKind::Online : ConnectTargetKind::Denied;
 }
 
 std::string OnlineNamePrefix()
 {
-    const char* value = std::getenv("NEXTCLIENT_PLAYER_NAME_TAG");
-    if (!value)
+    char value[13]{};
+    const DWORD length = GetEnvironmentVariableA("NEXTCLIENT_PLAYER_NAME_TAG", value, sizeof(value));
+    if (length == 0 || length >= sizeof(value))
         return {};
 
     const std::string_view tag(value);
@@ -229,25 +232,6 @@ std::string OnlineNamePrefix()
     }
 
     return std::string("[") + std::string(tag) + "] ";
-}
-
-const char* ManagedServerPassword()
-{
-    const char* value = std::getenv("NEXTCLIENT_SERVER_PASSWORD");
-    if (!value)
-        return nullptr;
-
-    const std::string_view password(value);
-    if (password.empty() || password.size() > 31 ||
-        !std::ranges::all_of(password, [](unsigned char character)
-        {
-            return character >= 33 && character <= 126 &&
-                character != '\\' && character != '"' && character != ';';
-        }))
-    {
-        return nullptr;
-    }
-    return value;
 }
 
 std::string RemoveOwnOnlineNamePrefix(std::string_view name)
@@ -675,23 +659,32 @@ static void OnGameInitializing(void* mainwindow, HDC* pmaindc, HGLRC* pbaseRC, c
         }
 
         const ConnectTargetKind target_kind = ClassifyConnectTarget(Cmd_Argv(1));
+        if (target_kind == ConnectTargetKind::InvalidAddress)
+        {
+            MessageBoxW(GetActiveWindow(),
+                L"The server address is invalid or its hostname could not be resolved. Check the address and network connection, then retry.",
+                L"Allclient - Invalid server address", MB_OK | MB_ICONWARNING);
+            return;
+        }
         if (target_kind == ConnectTargetKind::Denied)
         {
-            Con_Printf("Connection blocked: use a managed Online server or a LAN address.\n");
+            // Console output is disabled in this build. Surface an actionable
+            // denial instead of silently swallowing the user's join request.
+            MessageBoxW(GetActiveWindow(),
+                L"Online access was not granted by the launcher. Close the game and start it through the Allclient launcher with an active subscription.",
+                L"Allclient - Connection blocked", MB_OK | MB_ICONWARNING);
             return;
         }
 
         if (target_kind == ConnectTargetKind::Lan)
             RestoreOriginalPlayerName();
-        else if (const char* password = ManagedServerPassword())
-            Cvar_Set("password", password);
 
         next->Invoke();
 
         // GoldSrc's original connect command disconnects the previous session
         // internally. Apply the online tag afterwards so that cleanup cannot
         // immediately restore and remove it before the handshake begins.
-        if (target_kind == ConnectTargetKind::ManagedOnline)
+        if (target_kind == ConnectTargetKind::Online)
             EnableOnlinePlayerNameTag();
     });
     g_Unsubs.emplace_back(eng()->Host_Map_f |= [](const auto& next) {

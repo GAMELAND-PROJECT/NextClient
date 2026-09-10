@@ -198,6 +198,34 @@ jobs:
             "- Output: installer EXE only"
           ) | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
 
+      - name: Prepare hosting panel package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $hostingStage = Join-Path $env:RUNNER_TEMP "allclient-hosting"
+          $hostingZip = Join-Path $env:GITHUB_WORKSPACE "tagged-output\Allclient-$env:CLIENT_TAG-Hosting.zip"
+
+          Remove-Item -LiteralPath $hostingStage -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force -Path $hostingStage | Out-Null
+          New-Item -ItemType Directory -Force -Path (Join-Path $hostingStage "admin") | Out-Null
+
+          Copy-Item -Path "hosting\admin\*" -Destination (Join-Path $hostingStage "admin") -Recurse -Force
+          Copy-Item -LiteralPath "hosting\installer_access.php" -Destination $hostingStage -Force
+          Copy-Item -LiteralPath "hosting\update_access.php" -Destination $hostingStage -Force
+          Copy-Item -LiteralPath "pinned_servers.txt" -Destination $hostingStage -Force
+          Copy-Item -LiteralPath "mix_servers.txt" -Destination $hostingStage -Force
+          Copy-Item -LiteralPath "client_tags.txt" -Destination $hostingStage -Force
+
+          Remove-Item -LiteralPath $hostingZip -Force -ErrorAction SilentlyContinue
+          Compress-Archive -Path (Join-Path $hostingStage "*") -DestinationPath $hostingZip -Force
+
+          @(
+            ""
+            "### Hosting package"
+            "- Upload/extract ``Allclient-$env:CLIENT_TAG-Hosting.zip`` into ``public_html`` before testing installer updates."
+            "- Includes ``update_access.php``, ``installer_access.php``, admin panel, ``pinned_servers.txt``, ``mix_servers.txt`` and ``client_tags.txt``."
+          ) | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+
       - name: Install Inno Setup 7.1
         shell: pwsh
         run: |
@@ -219,6 +247,10 @@ jobs:
           if ($process.ExitCode -ne 0) {
             throw "Inno Setup installation failed with exit code $($process.ExitCode)."
           }
+
+      - name: Prepare bundled Microsoft runtimes
+        shell: pwsh
+        run: ./installer/Prepare-Runtimes.ps1
 
       - name: Build tagged Allclient installer
         shell: pwsh
@@ -255,6 +287,15 @@ jobs:
         with:
           name: Allclient-${{ env.CLIENT_TAG }}-Setup-${{ github.run_number }}
           path: tagged-output/Allclient-${{ env.CLIENT_TAG }}-Setup.exe
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+
+      - name: Upload tagged hosting package
+        uses: actions/upload-artifact@v4
+        with:
+          name: Allclient-${{ env.CLIENT_TAG }}-Hosting-${{ github.run_number }}
+          path: tagged-output/Allclient-${{ env.CLIENT_TAG }}-Hosting.zip
           if-no-files-found: error
           compression-level: 0
           retention-days: 14

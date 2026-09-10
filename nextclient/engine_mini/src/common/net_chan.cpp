@@ -11,6 +11,8 @@
 #include "../client/download.h"
 
 #include <cstdint>
+#include <cstring>
+#include <memory>
 
 namespace
 {
@@ -74,7 +76,7 @@ qboolean Netchan_CopyFileFragments(netchan_t *chan)
     qboolean bCompressed = FALSE;
     unsigned int uncompressedSize;
 
-    if (!chan->incomingready[FRAG_FILE_STREAM])
+    if (!chan || !chan->incomingready[FRAG_FILE_STREAM])
         return FALSE;
 
     p = chan->incomingbufs[FRAG_FILE_STREAM];
@@ -85,10 +87,36 @@ qboolean Netchan_CopyFileFragments(netchan_t *chan)
         return FALSE;
     }
 
-    // File transfers have no place on the active gameplay path. Reject the
-    // stream before reading filenames, constructing descriptors or touching
-    // the download logger, so a server cannot turn fragments into disk I/O.
-    if (cls->state == ca_active)
+    // Match CL_CheckFile's policy. An explicitly permitted in-game transfer
+    // must not be discarded after the resource requester has queued it.
+    if (cls->state == ca_active &&
+        (!cl_download_ingame || cl_download_ingame->value == 0.0f))
+    {
+        Netchan_FlushIncoming(chan, FRAG_FILE_STREAM);
+        return FALSE;
+    }
+
+    // Validate the first fragment before copying or using the engine string
+    // reader. Its header must contain two terminated strings and a size.
+    const int header_size = p->frag_message.cursize;
+    if (!net_message || !net_message->data || !p->frag_message.data ||
+        header_size <= 0 || header_size > p->frag_message.maxsize ||
+        header_size > static_cast<int>(sizeof(p->frag_message_buf)) ||
+        header_size > net_message->maxsize)
+    {
+        Netchan_FlushIncoming(chan, FRAG_FILE_STREAM);
+        return FALSE;
+    }
+    const auto* header = reinterpret_cast<const char*>(p->frag_message.data);
+    const auto* filename_end = static_cast<const char*>(std::memchr(header, 0, header_size));
+    const auto* compressor_start = filename_end ? filename_end + 1 : nullptr;
+    const auto* compressor_end = compressor_start
+        ? static_cast<const char*>(std::memchr(compressor_start, 0,
+            static_cast<size_t>(header + header_size - compressor_start))) : nullptr;
+    if (!filename_end || filename_end == header ||
+        filename_end - header >= static_cast<int>(sizeof(filename)) ||
+        !compressor_end || compressor_end - compressor_start >= static_cast<int>(sizeof(compressor)) ||
+        header + header_size - (compressor_end + 1) < static_cast<int>(sizeof(int32_t)))
     {
         Netchan_FlushIncoming(chan, FRAG_FILE_STREAM);
         return FALSE;
@@ -288,7 +316,11 @@ qboolean Netchan_CopyFileFragments(netchan_t *chan)
         client_stateex.privateResListState = PrivateResListState::RerunBatchResources;
         Con_DPrintf(ConLogType::Info, "privateResListState = RerunBatchResources\n");
 
-        PrivateRes_ParseList((const char *)buffer, pos);
+        // The parser copies its descriptors; it does not own the transfer
+        // buffer. Release it on both normal return and parse exceptions.
+        const auto free_buffer = [](unsigned char* data) { Mem_Free(data); };
+        const std::unique_ptr<unsigned char, decltype(free_buffer)> owned_buffer(buffer, free_buffer);
+        PrivateRes_ParseList((const char *)owned_buffer.get(), pos);
     }
     else if (filename[0] == '!')
     {

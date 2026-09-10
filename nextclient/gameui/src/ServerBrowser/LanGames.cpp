@@ -7,6 +7,7 @@
 
 #include <KeyValues.h>
 #include <vgui/ISchemeNext.h>
+#include <vgui/ISystem.h>
 #include <vgui/IVGui.h>
 
 #include <vgui_controls/Button.h>
@@ -15,6 +16,11 @@
 #include <vgui_controls/ListPanel.h>
 
 using namespace vgui2;
+
+namespace
+{
+constexpr int kFastLanRefreshTimeoutMs = 900;
+}
 
 CLanGames::CLanGames(vgui2::Panel *parent, bool bAutoRefresh, const char *pCustomResFilename) :
     CBaseGamesPage(parent, "LanGames", pCustomResFilename),
@@ -29,11 +35,28 @@ CLanGames::~CLanGames(void)
 void CLanGames::OnPageShow(void)
 {
     BaseClass::OnPageShow();
+
+    if (auto_refresh_ && ServerBrowserDialog().IsVisible())
+        GetNewServerList();
 }
 
 void CLanGames::OnPageHide(void)
 {
+    refresh_deadline_ms_ = 0;
     BaseClass::OnPageHide();
+}
+
+void CLanGames::OnThink()
+{
+    BaseClass::OnThink();
+
+    if (refresh_deadline_ms_ > 0 && system()->GetTimeMillis() >= refresh_deadline_ms_)
+    {
+        refresh_deadline_ms_ = 0;
+        SetRefreshing(false);
+        UpdateFilterSettings();
+        UpdateRefreshStatusText();
+    }
 }
 
 bool CLanGames::SupportsItem(InterfaceItem item)
@@ -48,15 +71,9 @@ bool CLanGames::SupportsItem(InterfaceItem item)
 
 void CLanGames::StartRefresh(void)
 {
-    StopRefresh(CancelQueryReason::NewQuery);
-
-    SetRefreshing(true);
-    ServerBrowserDialog().UpdateStatusText("#ServerBrowser_GettingNewServerList");
-
-    if (m_pGameList->GetItemCount() == 0)
-        GetNewServerList();
-    else
-        m_Servers.StartRefresh();
+    // Rediscover listen servers: an old list can contain a previous host/port
+    // and refreshing only its entries never discovers a newly created game.
+    GetNewServerList();
 }
 
 void CLanGames::GetNewServerList(void)
@@ -74,6 +91,7 @@ void CLanGames::GetNewServerList(void)
 
     UpdateRefreshStatusText();
     SetRefreshing(true);
+    refresh_deadline_ms_ = system()->GetTimeMillis() + kFastLanRefreshTimeoutMs;
     ServerBrowserDialog().UpdateStatusText("#ServerBrowser_GettingNewServerList");
 }
 
@@ -87,6 +105,7 @@ void CLanGames::ServerFailedToRespond(serveritem_t &server)
 
 void CLanGames::RefreshComplete()
 {
+    refresh_deadline_ms_ = 0;
     SetRefreshing(false);
     UpdateFilterSettings();
 

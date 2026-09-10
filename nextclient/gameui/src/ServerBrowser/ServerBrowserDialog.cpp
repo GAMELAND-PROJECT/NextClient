@@ -6,6 +6,14 @@
 #include <cstdarg>
 #include <cassert>
 #include <ctime>
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <Windows.h>
+#undef PostMessage
 
 #include <vgui/IInput.h>
 #include <vgui/ISurfaceNext.h>
@@ -46,8 +54,9 @@ namespace
 {
 bool IsOnlineAccessAllowed()
 {
-    const char* value = std::getenv("NEXTCLIENT_ONLINE_ACCESS");
-    return value != nullptr && value[0] == '1' && value[1] == '\0';
+    char value[2]{};
+    return GetEnvironmentVariableA("NEXTCLIENT_ONLINE_ACCESS", value, sizeof(value)) == 1 &&
+        value[0] == '1';
 }
 
 class COnlineAccessPage final : public vgui2::EditablePanel
@@ -332,6 +341,7 @@ CDialogGameInfo *CServerBrowserDialog::OpenGameInfoDialog(IGameList *gameList, u
     serveritem_t &server = gameList->GetServer(serverIndex);
 
     auto *gameDialog = new CDialogGameInfo(&ServerBrowserDialog(), server.gs.m_NetAdr.GetIP(), server.gs.m_NetAdr.GetQueryPort());
+    gameDialog->SetKnownServer(server.gs);
     gameDialog->AddActionSignalTarget(this);
     gameDialog->Run(server.gs.GetName().c_str());
     gameDialog->MoveToCenterOfScreen();
@@ -391,11 +401,19 @@ void CServerBrowserDialog::AddServerToFavorites(const gameserveritem_t& serverit
 
 CDialogGameInfo *CServerBrowserDialog::JoinGame(IGameList *gameList, unsigned int serverIndex, GuiConnectionSource connection_source)
 {
-    serveritem_t& server = gameList->GetServer(serverIndex);
+    // Snapshot the selected endpoint before activating any dialog. Opening
+    // the details dialog starts Steam queries and can dispatch callbacks;
+    // explicit joins must not depend on those queries (notably legacy replies).
+    const gameserveritem_t server = gameList->GetServer(serverIndex).gs;
 
-    GameUINext().SetLastConnectionInfo(server.gs.m_NetAdr, connection_source, server.gs.m_szMap);
+    GameUINext().SetLastConnectionInfo(server.m_NetAdr, connection_source, server.m_szMap);
 
-    CDialogGameInfo *gameDialog = OpenGameInfoDialog(gameList, serverIndex);
+    auto *gameDialog = new CDialogGameInfo(this, server.m_NetAdr.GetIP(), server.m_NetAdr.GetQueryPort());
+    gameDialog->SetKnownServer(server);
+    gameDialog->AddActionSignalTarget(this);
+    gameDialog->Run(server.GetName().c_str(), false);
+    gameDialog->MoveToCenterOfScreen();
+    m_GameInfoDialogs[m_GameInfoDialogs.AddToTail()] = gameDialog;
     gameDialog->Connect();
 
     return gameDialog;
@@ -408,7 +426,11 @@ CDialogGameInfo *CServerBrowserDialog::JoinGame(uint32 serverIP, uint16 serverPo
 
     GameUINext().SetLastConnectionInfo(addr, GuiConnectionSource::Unknown, "");
 
-    CDialogGameInfo *gameDialog = OpenGameInfoDialog(serverIP, serverPort, titleName);
+    auto *gameDialog = new CDialogGameInfo(this, serverIP, serverPort);
+    gameDialog->AddActionSignalTarget(this);
+    gameDialog->Run(titleName, false);
+    gameDialog->MoveToCenterOfScreen();
+    m_GameInfoDialogs[m_GameInfoDialogs.AddToTail()] = gameDialog;
     gameDialog->Connect();
 
     return gameDialog;
@@ -468,6 +490,9 @@ void CServerBrowserDialog::OnGameListChanged()
     UpdateStatusText("");
     InvalidateLayout();
     Repaint();
+
+    if (IsVisible() && m_pGameList)
+        m_pGameList->StartRefresh();
 }
 
 void CServerBrowserDialog::OnActiveGameName(KeyValues *pKV)

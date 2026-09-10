@@ -43,7 +43,8 @@ bool CL_RemoveDonwloadFileLogger(DownloadFileLoggerInterface* logger)
 
 void CL_HTTPSetDownloadUrl(const std::string& url)
 {
-    if (cls->state == cactive_t::ca_active)
+    if (cls->state == cactive_t::ca_active &&
+        (!cl_download_ingame || cl_download_ingame->value == 0.0f))
         return;
 
     g_HttpDownloadManager->SetUrl(url);
@@ -56,7 +57,8 @@ int CL_HttpGetDownloadQueueSize()
 
 void CL_QueueHTTPDownload(const ResourceDescriptor& file_resource)
 {
-    if (cls != nullptr && cls->state == ca_active)
+    if (cls != nullptr && cls->state == ca_active &&
+        (!cl_download_ingame || cl_download_ingame->value == 0.0f))
         return;
 
     g_HttpDownloadManager->Queue(file_resource);
@@ -64,7 +66,8 @@ void CL_QueueHTTPDownload(const ResourceDescriptor& file_resource)
 
 void CL_HTTPUpdate()
 {
-    if (cls != nullptr && cls->state == ca_active)
+    if (cls != nullptr && cls->state == ca_active &&
+        (!cl_download_ingame || cl_download_ingame->value == 0.0f))
     {
         if (g_HttpDownloadManager->GetDownloadQueueSize() != 0)
             g_HttpDownloadManager->Stop();

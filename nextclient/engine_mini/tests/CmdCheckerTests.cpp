@@ -1,12 +1,88 @@
 #include <gtest/gtest.h>
+#include "common/LocalConnectTarget.h"
+
+TEST(LocalConnectTargetTest, RecognizesInternalListenServerWithoutDns)
+{
+    EXPECT_TRUE(IsEngineLocalConnectTarget("local"));
+    EXPECT_TRUE(IsEngineLocalConnectTarget("LOCAL"));
+    EXPECT_TRUE(IsEngineLocalConnectTarget("Local"));
+}
+
+TEST(LocalConnectTargetTest, DoesNotBypassValidationForNetworkTargets)
+{
+    for (const auto* target : {"", "localhost", "local.example.org", "local:27015",
+                              "local;connect example.org", "127.0.0.1", "192.168.1.5:27015", " local"})
+        EXPECT_FALSE(IsEngineLocalConnectTarget(target)) << target;
+}
 
 #include "console/CmdChecker.h"
+#include "console/ScopedCommandBuffer.h"
+#include "service/matchmaking/OnlineServerEndpoints.h"
 
 #include "mocks/LoggerMock.h"
 #include "mocks/CmdCheckerConfigProviderMock.h"
 
 using ::testing::_;
 using ::testing::StrEq;
+
+TEST(OnlineServerEndpointsTest, AllowsManagedGamePortWithoutAllowingUnlistedServers)
+{
+    using service::matchmaking::OnlineServerEndpoints;
+    OnlineServerEndpoints endpoints;
+    constexpr uint32_t ip = 0xCB00710A;
+    endpoints.UpdatePins({OnlineServerEndpoints::Key(ip, 27015)});
+    EXPECT_TRUE(endpoints.Contains(ip, 27015));
+    EXPECT_FALSE(endpoints.Contains(ip, 27016));
+    endpoints.Observe(ip, 27015, 27016);
+    EXPECT_TRUE(endpoints.Contains(ip, 27016));
+    EXPECT_FALSE(endpoints.Contains(ip + 1, 27016));
+    endpoints.Observe(ip + 1, 27015, 27016);
+    EXPECT_FALSE(endpoints.Contains(ip + 1, 27016));
+    endpoints.Observe(ip, 27017, 27018);
+    EXPECT_FALSE(endpoints.Contains(ip, 27018));
+}
+
+TEST(OnlineServerEndpointsTest, RefreshPreservesAssociationsAndRemovedPinsRevokeThem)
+{
+    using service::matchmaking::OnlineServerEndpoints;
+    OnlineServerEndpoints endpoints;
+    constexpr uint32_t ip = 0xCB00710A;
+    const std::unordered_set<uint64_t> pins{OnlineServerEndpoints::Key(ip, 27015)};
+    endpoints.UpdatePins(pins);
+    endpoints.Observe(ip, 27015, 27016);
+    endpoints.UpdatePins(pins);
+    EXPECT_TRUE(endpoints.Contains(ip, 27016));
+    endpoints.Observe(ip, 27015, 0);
+    EXPECT_FALSE(endpoints.Contains(ip, 0));
+    endpoints.Observe(ip, 27015, 27017);
+    EXPECT_FALSE(endpoints.Contains(ip, 27016));
+    EXPECT_TRUE(endpoints.Contains(ip, 27017));
+    endpoints.UpdatePins({});
+    EXPECT_FALSE(endpoints.Contains(ip, 27015));
+    EXPECT_FALSE(endpoints.Contains(ip, 27017));
+}
+
+TEST(CommandBufferTest, NestedHookPreservesConnectCommand)
+{
+    std::string spare;
+    spare.reserve(8192);
+    {
+        ScopedCommandBuffer outer(spare);
+        outer.value = "connect 185.86.181.250:20000\n";
+        const char* input = outer.value.c_str();
+        {
+            ScopedCommandBuffer inner(spare);
+            inner.value = input;
+            EXPECT_EQ(inner.value, outer.value);
+            inner.value.assign(16384, 'x');
+            EXPECT_STREQ(input, "connect 185.86.181.250:20000\n");
+        }
+        EXPECT_STREQ(input, "connect 185.86.181.250:20000\n");
+    }
+    EXPECT_GE(spare.capacity(), 16384u);
+    ScopedCommandBuffer next(spare);
+    EXPECT_TRUE(next.value.empty());
+}
 
 class ParseCmdTest : public testing::Test
 {

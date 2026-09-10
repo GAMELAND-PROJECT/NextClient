@@ -73,7 +73,12 @@ void FileMasterClient::WriteToFile(const std::wstring& file_name, const std::vec
     if (directory.empty() || destination.empty())
         return;
 
-    std::filesystem::create_directories(directory);
+    // Cache persistence is optional. A read-only profile must not throw out
+    // of the asynchronous server-list task after its network response arrived.
+    std::error_code directory_error;
+    std::filesystem::create_directories(directory, directory_error);
+    if (directory_error)
+        return;
     const auto temporary = destination + L".tmp";
 
     std::ofstream file(temporary, std::ios::binary | std::ios::out | std::ios::trunc);

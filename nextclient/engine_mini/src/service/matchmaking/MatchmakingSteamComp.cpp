@@ -16,8 +16,13 @@ namespace
 {
 constexpr char kPinnedServersUrl[] =
     "http://gameland.cam/pinned_servers.txt";
+constexpr char kMixServersUrl[] =
+    "http://gameland.cam/mix_servers.txt";
 constexpr wchar_t kPinnedServersCacheFile[] = L"pinned_servers.dat";
+constexpr wchar_t kMixServersCacheFile[] = L"mix_servers.dat";
 constexpr size_t kMaxPinnedServers = 64;
+constexpr size_t kMaxMixServers = 64;
+constexpr uint32 kManagedOnlineMixMarker = 0x4D495858u; // "MIXX"
 }
 
 MatchmakingSteamComp::MatchmakingSteamComp()
@@ -48,16 +53,23 @@ void MatchmakingSteamComp::InitializePinnedServers()
     pinned_servers_initialized_ = true;
     pinned_cancellation_token_ = CancellationToken::Create();
     pinned_cache_client_ = std::make_shared<FileMasterClient>(kPinnedServersCacheFile);
+    mix_cache_client_ = std::make_shared<FileMasterClient>(kMixServersCacheFile);
     pinned_http_client_ = std::make_shared<HttpMasterClient>(
         g_NextClientVersion,
         kPinnedServersUrl,
+        true);
+    mix_http_client_ = std::make_shared<HttpMasterClient>(
+        g_NextClientVersion,
+        kMixServersUrl,
         true);
 
     const auto cancellation_token = pinned_cancellation_token_;
     const auto cache_client = pinned_cache_client_;
     const auto http_client = pinned_http_client_;
+    const auto mix_cache_client = mix_cache_client_;
+    const auto mix_http_client = mix_http_client_;
 
-    TaskCoro::RunInMainThread([this, cancellation_token, cache_client, http_client]() -> result<void>
+    TaskCoro::RunInMainThread([this, cancellation_token, cache_client, http_client, mix_cache_client, mix_http_client]() -> result<void>
     {
         auto cached_addresses = co_await cache_client->GetServerAddressesAsync({}, cancellation_token);
         cancellation_token->ThrowIfCancelled();
@@ -65,28 +77,19 @@ void MatchmakingSteamComp::InitializePinnedServers()
             cached_addresses.resize(kMaxPinnedServers);
         ApplyPinnedServers(cached_addresses);
 
-        auto downloaded_addresses = co_await http_client->GetServerAddressesAsync({}, cancellation_token);
+        auto cached_mix_addresses = co_await mix_cache_client->GetServerAddressesAsync({}, cancellation_token);
         cancellation_token->ThrowIfCancelled();
+        if (cached_mix_addresses.size() > kMaxMixServers)
+            cached_mix_addresses.resize(kMaxMixServers);
+        ApplyMixServers(cached_mix_addresses);
 
-        // An empty response is treated as a failed/invalid update. It must not
-        // erase a previously working cache or managed server list.
-        if (downloaded_addresses.empty())
-            co_return;
-
-        if (downloaded_addresses.size() > kMaxPinnedServers)
-            downloaded_addresses.resize(kMaxPinnedServers);
-
-        ApplyPinnedServers(downloaded_addresses);
-        co_await TaskCoro::RunIO([cache_client, downloaded_addresses]
-        {
-            cache_client->Save(downloaded_addresses);
-        });
+        RefreshManagedServerLists();
     });
 }
 
 bool MatchmakingSteamComp::IsPinnedServer(uint32 ip, uint16 port) const
 {
-    return pinned_servers_.contains(MakePinnedServerKey(ip, port));
+    return online_endpoints_.Contains(ip, port);
 }
 
 void MatchmakingSteamComp::ApplyPinnedServers(const std::vector<netadr_t>& addresses)
@@ -104,14 +107,107 @@ void MatchmakingSteamComp::ApplyPinnedServers(const std::vector<netadr_t>& addre
         updated_servers.emplace(MakePinnedServerKey(ip, port));
     }
 
+    if (pinned_servers_ == updated_servers)
+        return;
+
     pinned_servers_ = std::move(updated_servers);
+    UpdateOnlineEndpointPins();
     RestartFavoriteRequests();
+}
+
+void MatchmakingSteamComp::ApplyMixServers(const std::vector<netadr_t>& addresses)
+{
+    std::unordered_set<uint64_t> updated_servers;
+    updated_servers.reserve(addresses.size());
+
+    for (const auto& address : addresses)
+    {
+        if (!address.IsValid())
+            continue;
+
+        const auto ip = address.GetIPHostByteOrder();
+        const auto port = address.GetPortHostByteOrder();
+        updated_servers.emplace(MakePinnedServerKey(ip, port));
+    }
+
+    if (mix_servers_ == updated_servers)
+        return;
+
+    mix_servers_ = std::move(updated_servers);
+    UpdateOnlineEndpointPins();
+    RestartFavoriteRequests();
+}
+
+void MatchmakingSteamComp::UpdateOnlineEndpointPins()
+{
+    std::unordered_set<uint64_t> online_servers;
+    online_servers.reserve(pinned_servers_.size() + mix_servers_.size());
+    online_servers.insert(pinned_servers_.begin(), pinned_servers_.end());
+    online_servers.insert(mix_servers_.begin(), mix_servers_.end());
+    online_endpoints_.UpdatePins(online_servers);
+}
+
+void MatchmakingSteamComp::RefreshManagedServerLists()
+{
+    if (!pinned_servers_initialized_ || !pinned_http_client_ || !pinned_cache_client_ ||
+        !mix_http_client_ || !mix_cache_client_)
+        return;
+
+    if (managed_refresh_in_progress_)
+        return;
+    managed_refresh_in_progress_ = true;
+
+    const auto cancellation_token = pinned_cancellation_token_;
+    const auto cache_client = pinned_cache_client_;
+    const auto http_client = pinned_http_client_;
+    const auto mix_cache_client = mix_cache_client_;
+    const auto mix_http_client = mix_http_client_;
+
+    TaskCoro::RunInMainThread([this, cancellation_token, cache_client, http_client, mix_cache_client, mix_http_client]() -> result<void>
+    {
+        struct ManagedRefreshGuard
+        {
+            bool& value;
+            ~ManagedRefreshGuard() { value = false; }
+        } guard{managed_refresh_in_progress_};
+
+        auto downloaded_addresses = co_await http_client->GetServerAddressesAsync({}, cancellation_token);
+        cancellation_token->ThrowIfCancelled();
+
+        // An empty response is treated as a failed/invalid update. It must not
+        // erase a previously working cache or managed server list.
+        if (!downloaded_addresses.empty())
+        {
+            if (downloaded_addresses.size() > kMaxPinnedServers)
+                downloaded_addresses.resize(kMaxPinnedServers);
+
+            ApplyPinnedServers(downloaded_addresses);
+            co_await TaskCoro::RunIO([cache_client, downloaded_addresses]
+            {
+                cache_client->Save(downloaded_addresses);
+            });
+        }
+
+        auto downloaded_mix_addresses = co_await mix_http_client->GetServerAddressesAsync({}, cancellation_token);
+        cancellation_token->ThrowIfCancelled();
+        if (!downloaded_mix_addresses.empty())
+        {
+            if (downloaded_mix_addresses.size() > kMaxMixServers)
+                downloaded_mix_addresses.resize(kMaxMixServers);
+
+            ApplyMixServers(downloaded_mix_addresses);
+            co_await TaskCoro::RunIO([mix_cache_client, downloaded_mix_addresses]
+            {
+                mix_cache_client->Save(downloaded_mix_addresses);
+            });
+        }
+    });
 }
 
 std::vector<gameserveritem_t> MatchmakingSteamComp::BuildFavoriteServerList()
 {
     std::vector<gameserveritem_t> servers;
-    servers.reserve(pinned_servers_.size());
+    servers.reserve(pinned_servers_.size() + mix_servers_.size());
 
     // Online/Favorites is an administratively managed list. Steam's local
     // user favorites are deliberately excluded so only remote pins appear.
@@ -119,11 +215,27 @@ std::vector<gameserveritem_t> MatchmakingSteamComp::BuildFavoriteServerList()
     std::ranges::sort(pinned_endpoints);
     for (const auto endpoint : pinned_endpoints)
     {
+        if (mix_servers_.contains(endpoint))
+            continue;
+
         const auto ip = static_cast<uint32>(endpoint >> 16);
         const auto port = static_cast<uint16>(endpoint & 0xFFFFu);
 
         gameserveritem_t server{};
         InitEmptyGameServerItem(server, ip, port);
+        servers.push_back(server);
+    }
+
+    std::vector<uint64_t> mix_endpoints(mix_servers_.begin(), mix_servers_.end());
+    std::ranges::sort(mix_endpoints);
+    for (const auto endpoint : mix_endpoints)
+    {
+        const auto ip = static_cast<uint32>(endpoint >> 16);
+        const auto port = static_cast<uint16>(endpoint & 0xFFFFu);
+
+        gameserveritem_t server{};
+        InitEmptyGameServerItem(server, ip, port);
+        server.m_ulTimeLastPlayed = kManagedOnlineMixMarker;
         servers.push_back(server);
     }
 
@@ -247,6 +359,8 @@ HServerListRequest MatchmakingSteamComp::RequestFavoritesServerList(
         ct->ThrowIfCancelled();
         co_await RefreshServerList(request_id, servers, response_callback, ct);
     });
+
+    RefreshManagedServerLists();
 
     return request_id;
 }
@@ -383,6 +497,9 @@ void MatchmakingSteamComp::RefreshQuery(HServerListRequest request_id)
     }
 
     auto& request_data = std::get<ServerListRequestData>(request);
+    if (request_data.favorites_request)
+        RefreshManagedServerLists();
+
     request_data.cancellation_token->SetCanceled();
     request_data.cancellation_token = CancellationToken::Create();
     request_data.in_progress = true;
@@ -486,6 +603,8 @@ void MatchmakingSteamComp::RefreshServer(HServerListRequest request_id, int serv
 
         if (gameserver.m_bHadSuccessfulResponse)
         {
+            online_endpoints_.Observe(gameserver.m_NetAdr.GetIP(),
+                gameserver.m_NetAdr.GetQueryPort(), gameserver.m_NetAdr.GetConnectionPort());
             gameserver.m_ulTimeLastPlayed = request_data.servers[server_id].m_ulTimeLastPlayed;
             request_data.servers[server_id] = gameserver;
 
@@ -603,11 +722,15 @@ void MatchmakingSteamComp::ServerAnsweredHandler(
             }
         }
 
+        const auto online_category_marker = request_data.servers[server_info.server_index].m_ulTimeLastPlayed;
         request_data.servers[server_info.server_index] = server_info.gameserver;
+        request_data.servers[server_info.server_index].m_ulTimeLastPlayed = online_category_marker;
     }
 
     if (server_info.gameserver.m_bHadSuccessfulResponse)
     {
+        const auto& address = server_info.gameserver.m_NetAdr;
+        online_endpoints_.Observe(address.GetIP(), address.GetQueryPort(), address.GetConnectionPort());
         response_callback->ServerResponded(request_id, server_info.server_index);
     }
     else

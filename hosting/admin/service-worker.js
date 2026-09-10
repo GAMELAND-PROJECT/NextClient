@@ -1,6 +1,6 @@
 'use strict';
 
-const CACHE_NAME = 'allclient-admin-static-v5';
+const CACHE_NAME = 'allclient-admin-static-v6';
 const STATIC_ASSETS = [
   './style.css',
   './panel.js',
@@ -33,6 +33,7 @@ self.addEventListener('fetch', event => {
   // Never cache PHP pages, navigations, sessions, form responses or data files.
   if (request.mode === 'navigate' || url.pathname.endsWith('.php') ||
       url.pathname.endsWith('pinned_servers.txt') ||
+      url.pathname.endsWith('mix_servers.txt') ||
       url.pathname.endsWith('client_tags.txt') ||
       url.pathname.endsWith('server_password.txt')) {
     event.respondWith(fetch(request, { cache: 'no-store' }));
