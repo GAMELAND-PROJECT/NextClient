@@ -9,6 +9,10 @@
 
 #include "IGameList.h"
 #include "serveritem.h"
+#include <unordered_set>
+#include <string>
+
+namespace vgui2 { class Label; }
 
 class CFavoriteGames : public CBaseGamesPage
 {
@@ -23,6 +27,10 @@ public:
     void OnPageShow() override;
     void OnPageHide() override;
     void OnViewGameInfo() override;
+    void PerformLayout() override;
+    void OnThink() override;
+    void ApplySchemeSettings(vgui2::IScheme* scheme) override;
+    void SelectOnlineServer(CGameListPanel* source);
 
     bool SupportsItem(InterfaceItem item) override;
     void StartRefresh() override;
@@ -35,6 +43,8 @@ protected:
     // IServerRefreshResponse
     void RefreshComplete() override;
     void ServerFailedToRespond(serveritem_t &server) override;
+    void ServerResponded(serveritem_t &server) override;
+    void ApplyFilters() override;
 
 private:
     MESSAGE_FUNC_INT(OnOpenContextMenu, "OpenContextMenu", itemID);
@@ -42,6 +52,17 @@ private:
     MESSAGE_FUNC(OnAddServerByName, "AddServerByName");
 
 private:
+    void UpdateCategoryLists();
+    void LoadCategories();
+    CGameListPanel* m_publicList{};
+    CGameListPanel* m_mixList{};
+    vgui2::Label* m_publicHeading{};
+    vgui2::Label* m_mixHeading{};
+    vgui2::Panel* m_separator{};
+    struct CategoryRow { bool mix; int item; };
+    std::unordered_map<int, CategoryRow> m_categoryRows;
+    std::unordered_set<std::string> m_mixEndpoints;
+    bool m_categoriesDirty = true;
     void OnRefreshServer(int serverID);
     void OnAddCurrentServer();
     void OnCommand(const char *command);

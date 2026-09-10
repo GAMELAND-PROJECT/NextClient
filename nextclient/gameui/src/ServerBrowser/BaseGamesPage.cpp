@@ -431,7 +431,7 @@ void CBaseGamesPage::ServerResponded(serveritem_t &server)
         kv = m_pGameList->GetItem(server.listEntryID);
 
     const bool isPinned = EngineMini()->IsPinnedServer(server.gs.m_NetAdr.GetIP(), server.gs.m_NetAdr.GetConnectionPort());
-    const auto displayName = isPinned ? std::format("[PINNED]  {}", server.gs.GetName()) : server.gs.GetName();
+    const auto displayName = server.gs.GetName();
     kv->SetString("name", displayName.c_str());
     kv->SetInt("_pinned", isPinned ? 1 : 0);
     kv->SetString("map", server.gs.m_szMap);
@@ -573,7 +573,7 @@ void CBaseGamesPage::ApplyGameFilters()
             {
                 auto *kv = new KeyValues("Server");
                 const bool isPinned = EngineMini()->IsPinnedServer(server.gs.m_NetAdr.GetIP(), server.gs.m_NetAdr.GetConnectionPort());
-                const auto displayName = isPinned ? std::format("[PINNED]  {}", server.gs.GetName()) : server.gs.GetName();
+                const auto displayName = server.gs.GetName();
                 kv->SetString("name", displayName.c_str());
                 kv->SetInt("_pinned", isPinned ? 1 : 0);
                 kv->SetString("map", server.gs.m_szMap);
