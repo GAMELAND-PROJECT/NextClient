@@ -545,6 +545,16 @@ begin
   if Result then DetectedInstallRoot := RootKey;
 end;
 
+function ReadPreviousInstallFromDirectory(const CandidateDirectory: String;
+  var InstallDirectory, InstalledVersion: String): Boolean;
+begin
+  InstallDirectory := RemoveBackslashUnlessRoot(ExpandFileName(CandidateDirectory));
+  InstalledVersion := '';
+  Result := (InstallDirectory <> '') and
+    FileExists(AddBackslash(InstallDirectory) + 'cstrike.exe');
+  if Result then DetectedInstallRoot := HKCU;
+end;
+
 function FindPreviousAllclient(var InstallDirectory,
   InstalledVersion: String): Boolean;
 begin
@@ -555,6 +565,14 @@ begin
       InstalledVersion);
   if not Result then
     Result := ReadPreviousInstallFromRoot(HKLM32, InstallDirectory,
+      InstalledVersion);
+  if not Result then
+    Result := ReadPreviousInstallFromDirectory(
+      ExpandConstant('{localappdata}\Allclient'), InstallDirectory,
+      InstalledVersion);
+  if not Result then
+    Result := ReadPreviousInstallFromDirectory(
+      ExpandConstant('{userappdata}\Allclient'), InstallDirectory,
       InstalledVersion);
 end;
 
@@ -787,16 +805,14 @@ end;
 
 procedure CheckInstalledSubscription;
 var
-  Directory, Version, InstalledTag, Response: String;
+  Directory, Version, Response: String;
 begin
   if not UpdateAccessChecked then
   begin
     UpdateAccessChecked := True;
     if FindPreviousAllclient(Directory, Version) and
        FileExists(AddBackslash(Directory) + 'cstrike.exe') and
-       PreviousInstallPathIsSafe(Directory) and
-       ReadInstalledGameNetTag(Directory, InstalledTag) and
-       (CompareText(InstalledTag, '{#BuildTag}') = 0) then
+       PreviousInstallPathIsSafe(Directory) then
     begin
       if FetchAccessResponse('http://gameland.cam/update_access.php?tag={#BuildTag}', Response) then
       begin
