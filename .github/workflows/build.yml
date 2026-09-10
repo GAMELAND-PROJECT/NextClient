@@ -248,6 +248,13 @@ jobs:
             throw "Inno Setup installation failed with exit code $($process.ExitCode)."
           }
 
+      - name: Cache bundled Microsoft runtimes
+        uses: actions/cache@v4
+        with:
+          path: installer/runtime/*.exe
+          key: microsoft-runtimes-v2
+          restore-keys: microsoft-runtimes-
+
       - name: Prepare bundled Microsoft runtimes
         shell: pwsh
         run: ./installer/Prepare-Runtimes.ps1
