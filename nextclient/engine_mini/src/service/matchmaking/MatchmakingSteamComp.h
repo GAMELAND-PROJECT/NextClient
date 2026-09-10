@@ -32,6 +32,7 @@ std::unordered_set<uint64_t> pinned_servers_{};
 std::unordered_set<uint64_t> mix_servers_{};
 OnlineServerEndpoints online_endpoints_{};
 bool pinned_servers_initialized_{};
+bool managed_refresh_in_progress_{};
 
     public:
 explicit MatchmakingSteamComp();

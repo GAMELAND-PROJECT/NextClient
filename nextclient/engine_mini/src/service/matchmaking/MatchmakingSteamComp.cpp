@@ -107,6 +107,9 @@ void MatchmakingSteamComp::ApplyPinnedServers(const std::vector<netadr_t>& addre
         updated_servers.emplace(MakePinnedServerKey(ip, port));
     }
 
+    if (pinned_servers_ == updated_servers)
+        return;
+
     pinned_servers_ = std::move(updated_servers);
     UpdateOnlineEndpointPins();
     RestartFavoriteRequests();
@@ -126,6 +129,9 @@ void MatchmakingSteamComp::ApplyMixServers(const std::vector<netadr_t>& addresse
         const auto port = address.GetPortHostByteOrder();
         updated_servers.emplace(MakePinnedServerKey(ip, port));
     }
+
+    if (mix_servers_ == updated_servers)
+        return;
 
     mix_servers_ = std::move(updated_servers);
     UpdateOnlineEndpointPins();
@@ -147,6 +153,10 @@ void MatchmakingSteamComp::RefreshManagedServerLists()
         !mix_http_client_ || !mix_cache_client_)
         return;
 
+    if (managed_refresh_in_progress_)
+        return;
+    managed_refresh_in_progress_ = true;
+
     const auto cancellation_token = pinned_cancellation_token_;
     const auto cache_client = pinned_cache_client_;
     const auto http_client = pinned_http_client_;
@@ -155,6 +165,12 @@ void MatchmakingSteamComp::RefreshManagedServerLists()
 
     TaskCoro::RunInMainThread([this, cancellation_token, cache_client, http_client, mix_cache_client, mix_http_client]() -> result<void>
     {
+        struct ManagedRefreshGuard
+        {
+            bool& value;
+            ~ManagedRefreshGuard() { value = false; }
+        } guard{managed_refresh_in_progress_};
+
         auto downloaded_addresses = co_await http_client->GetServerAddressesAsync({}, cancellation_token);
         cancellation_token->ThrowIfCancelled();
 
