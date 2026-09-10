@@ -490,6 +490,9 @@ void CServerBrowserDialog::OnGameListChanged()
     UpdateStatusText("");
     InvalidateLayout();
     Repaint();
+
+    if (IsVisible() && m_pGameList)
+        m_pGameList->StartRefresh();
 }
 
 void CServerBrowserDialog::OnActiveGameName(KeyValues *pKV)
