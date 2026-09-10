@@ -9,8 +9,7 @@
 
 #include "IGameList.h"
 #include "serveritem.h"
-#include <unordered_set>
-#include <string>
+#include <unordered_map>
 
 namespace vgui2 { class Label; }
 
@@ -38,6 +37,7 @@ public:
     void StopRefresh(CancelQueryReason reason) override;
 
     GuiConnectionSource GetConnectionSource() override;
+    serveritem_t &GetServer(int serverID) override;
 
 protected:
     // IServerRefreshResponse
@@ -53,7 +53,6 @@ private:
 
 private:
     void UpdateCategoryLists();
-    void LoadCategories();
     CGameListPanel* m_publicList{};
     CGameListPanel* m_mixList{};
     vgui2::Label* m_publicHeading{};
@@ -61,7 +60,6 @@ private:
     vgui2::Panel* m_separator{};
     struct CategoryRow { bool mix; int item; };
     std::unordered_map<int, CategoryRow> m_categoryRows;
-    std::unordered_set<std::string> m_mixEndpoints;
     bool m_categoriesDirty = true;
     void OnRefreshServer(int serverID);
     void OnAddCurrentServer();

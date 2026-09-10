@@ -1,10 +1,8 @@
 #pragma once
-#include <string_view>
+#include <cstdint>
 
-inline bool IsOnlineMixCategory(std::string_view category)
-{
-    return category == "m" || category == "M";
-}
+inline constexpr std::uint32_t kOnlineMixServerMarker = 0x4D495858u; // "MIXX"
+#include <string_view>
 
 inline int CompareOnlinePopulation(int firstPlayers, int firstPing, std::string_view firstEndpoint,
                                    int secondPlayers, int secondPing, std::string_view secondEndpoint)

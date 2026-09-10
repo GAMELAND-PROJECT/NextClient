@@ -3,6 +3,7 @@
 پنل سبک PHP برای مدیریت مستقیم فایل‌های زیر روی `gameland.cam`:
 
 - `pinned_servers.txt`
+- `mix_servers.txt`
 - `client_tags.txt`
 - `server_password.txt`
 - کد ۸ رقمی نصب و وضعیت فعال/لغوشده آن

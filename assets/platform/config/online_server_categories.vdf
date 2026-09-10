@@ -1,9 +1,0 @@
-// Use the numeric connection IP:port shown by the server details dialog.
-// Values: "p" = public, "m" = mix. Unlisted endpoints default to public.
-// Refresh the Online page after editing this file.
-"OnlineServerCategories"
-{
-    "5.57.32.203:44000" "p"
-    "5.57.32.203:45000" "p"
-    // Example: "203.0.113.10:27015" "m"
-}

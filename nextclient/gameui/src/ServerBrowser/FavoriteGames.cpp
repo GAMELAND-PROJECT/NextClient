@@ -21,6 +21,7 @@
 #include <vgui_controls/Label.h>
 #include <GameServerHelpers.h>
 #include <algorithm>
+#include <unordered_set>
 
 using namespace vgui2;
 
@@ -39,6 +40,7 @@ class COnlineCategoryList : public CGameListPanel
 public:
     COnlineCategoryList(CFavoriteGames* owner, const char* name) : CGameListPanel(owner, name), owner_(owner)
     {
+        AddActionSignalTarget(owner);
         AddColumnHeader(0, "Name", "Server", 180, 80, 4000, COLUMN_RESIZEWITHWINDOW | COLUMN_UNHIDABLE);
         AddColumnHeader(1, "Players", "Players", 62, COLUMN_FIXEDSIZE | COLUMN_UNHIDABLE);
         AddColumnHeader(2, "Ping", "Ping", 45, COLUMN_FIXEDSIZE | COLUMN_UNHIDABLE);
@@ -123,16 +125,6 @@ void CFavoriteGames::SelectOnlineServer(CGameListPanel* source)
     m_pConnect->SetEnabled(true);
 }
 
-void CFavoriteGames::LoadCategories()
-{
-    m_mixEndpoints.clear();
-    KeyValues::AutoDelete categories("OnlineServerCategories");
-    if (categories->LoadFromFile(g_pFullFileSystem, "platform/config/online_server_categories.vdf", "ROOT"))
-        for (auto* item = categories->GetFirstSubKey(); item; item = item->GetNextKey())
-            if (IsOnlineMixCategory(item->GetString())) m_mixEndpoints.emplace(item->GetName());
-    m_categoriesDirty = true;
-}
-
 void CFavoriteGames::OnThink()
 {
     BaseClass::OnThink();
@@ -165,7 +157,7 @@ void CFavoriteGames::UpdateCategoryLists()
         if (!m_Servers.IsServerExists(serverID)) continue;
         const auto& server = m_Servers.GetServer(serverID).gs;
         const auto endpoint = server.m_NetAdr.GetConnectionAddressString();
-        const bool mix = m_mixEndpoints.contains(endpoint);
+        const bool mix = server.m_ulTimeLastPlayed == kOnlineMixServerMarker;
         auto* list = mix ? m_mixList : m_publicList;
         present.insert(serverID);
         auto existing = m_categoryRows.find(serverID);
@@ -273,7 +265,6 @@ bool CFavoriteGames::SupportsItem(InterfaceItem item)
 void CFavoriteGames::StartRefresh()
 {
     StopRefresh(CancelQueryReason::NewQuery);
-    LoadCategories();
 
     // A quick refresh only works while the page still owns a valid request.
     // Rebuild the list after first open, cancellation, or request release.
@@ -293,7 +284,6 @@ void CFavoriteGames::GetNewServerList()
 
     StopRefresh(CancelQueryReason::NewQuery);
 
-    LoadCategories();
     m_publicList->DeleteAllItems();
     m_mixList->DeleteAllItems();
     m_categoryRows.clear();
@@ -315,6 +305,11 @@ void CFavoriteGames::StopRefresh(CancelQueryReason reason)
 GuiConnectionSource CFavoriteGames::GetConnectionSource()
 {
     return GuiConnectionSource::ServersFavorites;
+}
+
+serveritem_t &CFavoriteGames::GetServer(int serverID)
+{
+    return CBaseGamesPage::GetServer(serverID);
 }
 
 void CFavoriteGames::AddNewServer(uint32_t ip, uint16_t port)

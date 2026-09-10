@@ -1,0 +1,3 @@
+# Mix servers shown in the Mix column of the Online page.
+# Put one numeric game address per line:
+# 5.57.32.203:45000

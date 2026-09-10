@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 const FILE_SERVERS = 'pinned_servers.txt';
+const FILE_MIX_SERVERS = 'mix_servers.txt';
 const FILE_TAGS = 'client_tags.txt';
 const FILE_PASSWORD = 'server_password.txt';
 const FILE_INSTALLER_ACCESS = '.installer_access.php';
@@ -243,6 +244,80 @@ function validateServers(string $input): array
     return array_values($result);
 }
 
+function readMixServersText(): string
+{
+    return implode("\n", validateServers(readTextFile(FILE_MIX_SERVERS)));
+}
+
+function sendPanelBackup(): never
+{
+    $backup = [
+        'format' => 'allclient-admin-backup',
+        'version' => 2,
+        'created_at' => gmdate('c'),
+        'public_servers' => normalizedLines(readTextFile(FILE_SERVERS)),
+        'mix_servers' => normalizedLines(readMixServersText()),
+        'client_tags' => normalizedLines(readTextFile(FILE_TAGS)),
+        'server_password' => trim(readTextFile(FILE_PASSWORD)),
+        'installer_access' => readInstallerAccessState(),
+        'suspended_subscriptions' => readSuspendedSubscriptionRows(),
+    ];
+
+    header('Content-Type: application/json; charset=UTF-8');
+    header('Content-Disposition: attachment; filename="allclient-panel-backup-' . gmdate('Ymd-His') . '.json"');
+    echo json_encode($backup, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
+function restorePanelBackup(array $upload): void
+{
+    if (($upload['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK || !is_uploaded_file((string)$upload['tmp_name'])) {
+        throw new RuntimeException('Backup file was not uploaded correctly.');
+    }
+    if ((int)($upload['size'] ?? 0) > 1024 * 1024) {
+        throw new RuntimeException('Backup file is too large.');
+    }
+
+    $payload = json_decode((string)file_get_contents((string)$upload['tmp_name']), true);
+    if (!is_array($payload) || ($payload['format'] ?? '') !== 'allclient-admin-backup') {
+        throw new RuntimeException('Backup file format is invalid.');
+    }
+
+    $publicServers = validateServers(implode("\n", (array)($payload['public_servers'] ?? [])));
+    $mixServers = validateServers(implode("\n", (array)($payload['mix_servers'] ?? [])));
+    $tagRows = validateTagsFromLines((array)($payload['client_tags'] ?? []));
+    $password = trim((string)($payload['server_password'] ?? ''));
+    if ($password !== '' && !preg_match('/^[A-Za-z0-9_!@#$%^&*.\-]{1,31}$/', $password)) {
+        throw new RuntimeException('Server password in backup is invalid.');
+    }
+
+    backupAndAtomicWrite(FILE_SERVERS, implode("\n", $publicServers) . ($publicServers ? "\n" : ''));
+    backupAndAtomicWrite(FILE_MIX_SERVERS, implode("\n", $mixServers) . ($mixServers ? "\n" : ''));
+    backupAndAtomicWrite(FILE_TAGS, implode("\n", $tagRows) . ($tagRows ? "\n" : ''));
+    backupAndAtomicWrite(FILE_PASSWORD, $password . ($password !== '' ? "\n" : ''));
+
+    $installer = is_array($payload['installer_access'] ?? null) ? $payload['installer_access'] : [];
+    $plainCode = (string)($installer['plain_code'] ?? '');
+    if (!empty($installer['active']) && preg_match('/\A\d{8}\z/', $plainCode)) {
+        writeInstallerAccessState(true, hash('sha256', $plainCode), $plainCode);
+    } else {
+        writeInstallerAccessState(false);
+    }
+
+    $rows = [];
+    foreach (parseTagRows(readTextFile(FILE_TAGS)) as $row) {
+        $rows[strtoupper($row['build'])] = $row;
+    }
+    foreach ((array)($payload['suspended_subscriptions'] ?? []) as $row) {
+        if (!is_array($row)) { continue; }
+        $validated = validateTags([(string)($row['build'] ?? '')], [(string)($row['player'] ?? '')], [(string)($row['expiry'] ?? '')]);
+        if (!$validated) { continue; }
+        [$build, $player, $expiry] = array_map('trim', explode('|', $validated[0]));
+        $rows[strtoupper($build)] = ['build' => $build, 'player' => $player, 'expiry' => $expiry, 'suspended' => true];
+    }
+    writeSubscriptionRows($rows);
+}
+
 function jalaliToGregorian(int $jy, int $jm, int $jd): array
 {
     $jy += 1595;
@@ -335,6 +410,23 @@ function validateTags(array $buildTags, array $playerTags, array $expiries): arr
         $result[$key] = $build . ' | ' . $player . ' | ' . $expiry;
     }
     return array_values($result);
+}
+
+function validateTagsFromLines(array $lines): array
+{
+    $buildTags = [];
+    $playerTags = [];
+    $expiries = [];
+    foreach ($lines as $line) {
+        $parts = array_map('trim', explode('|', (string)$line));
+        if (count($parts) !== 3) {
+            throw new RuntimeException('Subscription row in backup is invalid.');
+        }
+        $buildTags[] = $parts[0];
+        $playerTags[] = $parts[1];
+        $expiries[] = $parts[2];
+    }
+    return validateTags($buildTags, $playerTags, $expiries);
 }
 
 function parseTagRows(string $content): array
@@ -497,7 +589,7 @@ function readInstallerAccessState(): array
 {
     $path = dataPath(FILE_INSTALLER_ACCESS);
     if (!is_file($path)) {
-        return ['active' => false, 'code_hash' => '', 'created_at' => ''];
+        return ['active' => false, 'code_hash' => '', 'plain_code' => '', 'created_at' => ''];
     }
 
     if (!defined('ALLCLIENT_INSTALLER_ACCESS_INTERNAL')) {
@@ -510,19 +602,27 @@ function readInstallerAccessState(): array
     return [
         'active' => !empty($state['active']),
         'code_hash' => (string)($state['code_hash'] ?? ''),
+        'plain_code' => preg_match('/\A\d{8}\z/', (string)($state['plain_code'] ?? '')) === 1
+            ? (string)$state['plain_code']
+            : '',
         'created_at' => (string)($state['created_at'] ?? ''),
     ];
 }
 
-function writeInstallerAccessState(bool $active, string $codeHash = ''): void
+function writeInstallerAccessState(bool $active, string $codeHash = '', string $plainCode = ''): void
 {
     if ($active && !preg_match('/\A[a-f0-9]{64}\z/', $codeHash)) {
         throw new RuntimeException('هش کد نصب معتبر نیست.');
     }
 
+    if ($active && !preg_match('/\A\d{8}\z/', $plainCode)) {
+        throw new RuntimeException('Installer code must be exactly 8 digits.');
+    }
+
     $state = [
         'active' => $active,
         'code_hash' => $active ? $codeHash : '',
+        'plain_code' => $active ? $plainCode : '',
         'created_at' => $active ? gmdate('c') : '',
     ];
     $content = "<?php\ndeclare(strict_types=1);\n\n" .
@@ -604,6 +704,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $servers = validateServers((string)($_POST['servers'] ?? ''));
             backupAndAtomicWrite(FILE_SERVERS, implode("\n", $servers) . ($servers ? "\n" : ''));
             flash('success', count($servers) . ' سرور با موفقیت ذخیره شد.');
+        } elseif ($action === 'save_mix_servers') {
+            $servers = validateServers((string)($_POST['mix_servers'] ?? ''));
+            backupAndAtomicWrite(FILE_MIX_SERVERS, implode("\n", $servers) . ($servers ? "\n" : ''));
+            flash('success', count($servers) . ' Mix servers saved successfully.');
+        } elseif ($action === 'download_backup') {
+            sendPanelBackup();
+        } elseif ($action === 'restore_backup') {
+            restorePanelBackup((array)($_FILES['panel_backup'] ?? []));
+            flash('success', 'Panel backup restored successfully.');
         } elseif ($action === 'save_tags') {
             $tags = validateTags((array)($_POST['build_tag'] ?? []),
                 (array)($_POST['player_tag'] ?? []), (array)($_POST['expiry'] ?? []));
@@ -693,7 +802,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             flash('success', 'رمز مشترک سرورها جایگزین شد.');
         } elseif ($action === 'generate_installer_code') {
             $installerCode = str_pad((string)random_int(0, 99999999), 8, '0', STR_PAD_LEFT);
-            writeInstallerAccessState(true, hash('sha256', $installerCode));
+            writeInstallerAccessState(true, hash('sha256', $installerCode), $installerCode);
             $_SESSION['generated_installer_code'] = $installerCode;
             flash('success', 'کد نصب جدید فعال شد. همین حالا آن را کپی کنید.');
         } elseif ($action === 'revoke_installer_code') {
@@ -712,16 +821,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 $flash = takeFlash();
 $authenticated = $configured && !empty($_SESSION['authenticated']);
 $serverText = '';
+$mixServerText = '';
 $tagRows = [];
 $activeSubscriptions = 0;
 $suspendedSubscriptions = 0;
 $expiringSubscriptions = 0;
 $passwordConfigured = false;
-$installerAccessState = ['active' => false, 'code_hash' => '', 'created_at' => ''];
+$installerAccessState = ['active' => false, 'code_hash' => '', 'plain_code' => '', 'created_at' => ''];
 $generatedInstallerCode = '';
 if ($authenticated) {
     try {
         $serverText = trim(readTextFile(FILE_SERVERS));
+        $mixServerText = trim(readMixServersText());
         $tagRows = array_map('decorateSubscriptionRow', array_values(subscriptionRowsByKey()));
         usort($tagRows, static function (array $left, array $right): int {
             $priority = ['expired' => 0, 'urgent' => 1, 'suspended' => 2, 'active' => 3];
@@ -736,6 +847,9 @@ if ($authenticated) {
         $passwordConfigured = trim(readTextFile(FILE_PASSWORD, 256)) !== '';
         $installerAccessState = readInstallerAccessState();
         $generatedInstallerCode = (string)($_SESSION['generated_installer_code'] ?? '');
+        if ($generatedInstallerCode === '' && $installerAccessState['active']) {
+            $generatedInstallerCode = (string)($installerAccessState['plain_code'] ?? '');
+        }
         unset($_SESSION['generated_installer_code']);
     } catch (Throwable $error) {
         $flash = ['type' => 'error', 'message' => $error->getMessage()];
@@ -815,6 +929,14 @@ if ($authenticated) {
         <form method="post"><input type="hidden" name="csrf" value="<?= escape(csrfToken()) ?>"><input type="hidden" name="action" value="save_servers">
           <textarea name="servers" class="code" rows="11" spellcheck="false" placeholder="5.57.32.203:27015"><?= escape($serverText) ?></textarea>
           <button class="button primary" type="submit">ذخیره سرورها</button>
+        </form>
+      </article>
+
+      <article class="card">
+        <div class="card-title"><div><h2>Mix Servers</h2><p>Only these IP:PORT rows are shown in the Mix column.</p></div><span class="pill">MIX</span></div>
+        <form method="post"><input type="hidden" name="csrf" value="<?= escape(csrfToken()) ?>"><input type="hidden" name="action" value="save_mix_servers">
+          <textarea name="mix_servers" class="code" rows="11" spellcheck="false" placeholder="5.57.32.203:45000"><?= escape($mixServerText) ?></textarea>
+          <button class="button primary" type="submit">Save Mix Servers</button>
         </form>
       </article>
 
@@ -912,6 +1034,22 @@ if ($authenticated) {
             <div class="settings-fields"><label>رمز فعلی<input type="password" name="current_password" required autocomplete="current-password"></label><label>رمز ۸ کاراکتری جدید<input type="password" name="new_password" minlength="8" maxlength="8" required autocomplete="new-password"></label><label>تکرار رمز جدید<input type="password" name="confirm_password" minlength="8" maxlength="8" required autocomplete="new-password"></label></div>
             <button class="button primary" type="submit">ذخیره رمز جدید</button>
           </form>
+        </div>
+      </article>
+      <article class="card settings-card">
+        <div class="settings-mark">↧</div>
+        <div class="settings-content">
+          <div class="card-title"><div><h2>Backup / Restore</h2><p>Public servers, Mix servers, subscriptions, server password and installer-code state are saved in one JSON backup.</p></div><span class="status-badge active">SAFE</span></div>
+          <div class="settings-fields">
+            <form method="post"><input type="hidden" name="csrf" value="<?= escape(csrfToken()) ?>"><input type="hidden" name="action" value="download_backup">
+              <button class="button primary" type="submit">Download Panel Backup</button>
+            </form>
+            <form method="post" enctype="multipart/form-data" class="confirm-form" data-confirm="Restore this backup and replace current panel data?">
+              <input type="hidden" name="csrf" value="<?= escape(csrfToken()) ?>"><input type="hidden" name="action" value="restore_backup">
+              <label>Backup JSON<input class="ltr" type="file" name="panel_backup" accept="application/json,.json" required></label>
+              <button class="button warning" type="submit">Restore Backup</button>
+            </form>
+          </div>
         </div>
       </article>
     </section>

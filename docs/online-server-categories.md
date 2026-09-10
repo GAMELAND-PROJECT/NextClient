@@ -1,23 +1,21 @@
-# Online server categories
+# Online mix servers
 
-Edit `assets/platform/config/online_server_categories.vdf` before building.
+Edit `mix_servers.txt` on the host next to `pinned_servers.txt`.
 The incremental `BUILD_ALL` target copies it to
-`<game>/platform/config/online_server_categories.vdf`.
+`https://gameland.cam/mix_servers.txt`.
 
-Use the numeric connection address (IP and game port), with one letter:
+Use the numeric connection address (IP and game port). The normal Online feed
+continues to fill the Public column. Only addresses in this file appear in Mix:
 
 ```text
-"OnlineServerCategories"
+"OnlineMixServers"
 {
-    "5.57.32.203:44000" "p"
-    "5.57.32.203:45000" "m"
+    "5.57.32.203:45000" "5.57.32.203:45000"
 }
 ```
 
-`p` means Public; `m` means Mix. The example does not assert the actual modes
-of these servers. Unlisted addresses appear in Public. Server names do not
-determine categories. DNS names are not category keys: use the numeric game
-address from the server details dialog.
+There is no `p` or `m` classification. The key and value may both be the same
+address; the value is what the client reads.
 
 For a local change without rebuilding, edit the installed file and press
 Refresh or reopen Online. A subsequent build copies the repository file over
