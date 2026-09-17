@@ -1,8 +1,6 @@
 name: Build
 
 on:
-  push:
-    branches: [ main ]
   workflow_dispatch:
     inputs:
       client_tag:
@@ -97,14 +95,14 @@ jobs:
           New-Item -ItemType Directory -Force -Path (Split-Path -Parent $env:BASE_GAME_ARCHIVE) | Out-Null
 
           Write-Host "Downloading the base game from GitHub Releases..."
-          gh release download -R ${{ github.repository }} -p "Allclient.rar" -O $env:BASE_GAME_ARCHIVE
+          gh release download base_game -R ${{ github.repository }} -p "CS.1.6.-.AllClient.rar" -O $env:BASE_GAME_ARCHIVE
 
           if ($LASTEXITCODE -eq 0 -and
               (Test-Path -LiteralPath $env:BASE_GAME_ARCHIVE -PathType Leaf) -and
               (Get-Item -LiteralPath $env:BASE_GAME_ARCHIVE).Length -gt 100MB) {
             Write-Host "Download successful."
           } else {
-            throw "The base game could not be downloaded from GitHub Releases. Please ensure a release exists and contains 'Allclient.rar'."
+            throw "The base game could not be downloaded from GitHub Releases. Please ensure the release 'base_game' exists and contains 'CS.1.6.-.AllClient.rar'."
           }
 
       - name: Validate and extract base game
