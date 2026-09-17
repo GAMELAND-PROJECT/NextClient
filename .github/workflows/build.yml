@@ -8,8 +8,13 @@ on:
       client_tag:
         description: Client/game-net tag (letters, numbers, _ and - only)
         required: true
-        default: IMORTAL_GONBAD
+        default: GAMELAND
         type: string
+      force_redownload:
+        description: Force redownload base game (ignore cache)
+        required: false
+        type: boolean
+        default: false
   workflow_call:
     inputs:
       client_tag:
@@ -31,8 +36,7 @@ jobs:
 
     env:
       VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/vcpkg_bincache
-      BASE_GAME_FILE_ID: 1gYzFPCnlmn_eb0tj7XdaUyytAyrWsrT1
-      BASE_GAME_CACHE_VERSION: v1
+      BASE_GAME_CACHE_VERSION: v2
       BASE_GAME_ARCHIVE: ${{ github.workspace }}/base-game-cache/Allclient.rar
 
     steps:
@@ -77,41 +81,30 @@ jobs:
 
       - name: Cache base game archive
         id: base-game-cache
+        if: inputs.force_redownload != true
         uses: actions/cache@v4
         with:
           path: base-game-cache/Allclient.rar
           key: base-game-${{ runner.os }}-${{ env.BASE_GAME_CACHE_VERSION }}
 
-      - name: Install Google Drive downloader
-        shell: pwsh
-        run: python -m pip install --disable-pip-version-check --no-warn-script-location "gdown==5.2.0"
-
-      - name: Download base game from Google Drive
+      - name: Download base game from GitHub Release
         if: steps.base-game-cache.outputs.cache-hit != 'true'
         shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           $ErrorActionPreference = "Stop"
           New-Item -ItemType Directory -Force -Path (Split-Path -Parent $env:BASE_GAME_ARCHIVE) | Out-Null
 
-          $downloaded = $false
-          for ($attempt = 1; $attempt -le 4; $attempt++) {
-            Write-Host "Downloading the base game (attempt $attempt of 4)..."
-            python -m gdown $env:BASE_GAME_FILE_ID --output $env:BASE_GAME_ARCHIVE
-            if ($LASTEXITCODE -eq 0 -and
-                (Test-Path -LiteralPath $env:BASE_GAME_ARCHIVE -PathType Leaf) -and
-                (Get-Item -LiteralPath $env:BASE_GAME_ARCHIVE).Length -gt 100MB) {
-              $downloaded = $true
-              break
-            }
+          Write-Host "Downloading the base game from GitHub Releases..."
+          gh release download -R ${{ github.repository }} -p "Allclient.rar" -O $env:BASE_GAME_ARCHIVE
 
-            Remove-Item -LiteralPath $env:BASE_GAME_ARCHIVE -Force -ErrorAction SilentlyContinue
-            if ($attempt -lt 4) {
-              Start-Sleep -Seconds (10 * $attempt)
-            }
-          }
-
-          if (-not $downloaded) {
-            throw "The base game could not be downloaded or the downloaded file was unexpectedly small. Verify the Google Drive sharing permission."
+          if ($LASTEXITCODE -eq 0 -and
+              (Test-Path -LiteralPath $env:BASE_GAME_ARCHIVE -PathType Leaf) -and
+              (Get-Item -LiteralPath $env:BASE_GAME_ARCHIVE).Length -gt 100MB) {
+            Write-Host "Download successful."
+          } else {
+            throw "The base game could not be downloaded from GitHub Releases. Please ensure a release exists and contains 'Allclient.rar'."
           }
 
       - name: Validate and extract base game
