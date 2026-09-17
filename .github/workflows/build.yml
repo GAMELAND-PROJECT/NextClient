@@ -297,3 +297,40 @@ jobs:
           if-no-files-found: error
           compression-level: 0
           retention-days: 14
+
+      - name: Send installer to Telegram Saved Messages
+        shell: pwsh
+        env:
+          TELEGRAM_SESSION: ${{ secrets.TELEGRAM_SESSION }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:TELEGRAM_SESSION)) {
+            Write-Host "TELEGRAM_SESSION secret is not set. Skipping Telegram upload."
+            exit 0
+          }
+          
+          Write-Host "Installing Telethon..."
+          python -m pip install --disable-pip-version-check --no-warn-script-location telethon
+          
+          $script = @"
+          import asyncio, os
+          from telethon.sync import TelegramClient
+          from telethon.sessions import StringSession
+
+          api_id = 2040
+          api_hash = 'b18441a1ff607e10a989891a5462e627'
+          session_string = os.environ.get('TELEGRAM_SESSION')
+          client_tag = os.environ.get('CLIENT_TAG')
+          file_path = f'tagged-output/Allclient-{client_tag}-Setup.exe'
+
+          async def main():
+              print('Connecting to Telegram...')
+              async with TelegramClient(StringSession(session_string), api_id, api_hash) as client:
+                  print(f'Uploading {file_path} to Saved Messages...')
+                  await client.send_file('me', file_path, caption=f'NextClient Build: {client_tag}\\nWorkflow Run: {os.environ.get("GITHUB_RUN_NUMBER")}')
+                  print('Upload complete!')
+
+          asyncio.run(main())
+          "@
+
+          Set-Content -Path "send_to_telegram.py" -Value $script -Encoding utf8
+          python send_to_telegram.py
