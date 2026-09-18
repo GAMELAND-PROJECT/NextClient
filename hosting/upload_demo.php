@@ -1,85 +1,116 @@
 <?php
-// F:\NextClient-1\hosting\upload_demo.php
-// Receives .dem files uploaded from NextClient's Demo Manager and transfers them to FTP
+declare(strict_types=1);
 
-// First, read the FTP configuration from the admin panel data directory
-$ftpConfigFile = __DIR__ . '/ftp_config.txt';
+const FILE_TAGS = 'client_tags.txt';
+const FILE_FTP_CONFIG = 'ftp_config.txt';
 
-if (!file_exists($ftpConfigFile)) {
-    http_response_code(500);
-    exit("ERROR: FTP is not configured in the AllClient panel.");
+header('Content-Type: text/plain; charset=UTF-8');
+
+function panelDataDir(): string
+{
+    $configFile = __DIR__ . '/admin/config.php';
+    $loadedConfig = is_file($configFile) ? require $configFile : null;
+    return (is_array($loadedConfig) && !empty($loadedConfig['data_dir']))
+        ? (string)$loadedConfig['data_dir']
+        : __DIR__;
 }
 
-$ftpLines = file($ftpConfigFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
-if (count($ftpLines) < 4) {
-    http_response_code(500);
-    exit("ERROR: Incomplete FTP configuration.");
+function normalizedLines(string $content): array
+{
+    return array_values(array_filter(array_map('trim',
+        explode("\n", str_replace(["\r\n", "\r"], "\n", $content))),
+        static fn(string $line): bool => $line !== '' && strpos($line, '#') !== 0));
 }
 
-$ftpHost = $ftpLines[0];
-$ftpUser = $ftpLines[1];
-$ftpPass = $ftpLines[2];
-$ftpPath = $ftpLines[3];
-
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    // The raw POST body contains the file contents if sent directly via WinINet
-    $fileData = file_get_contents('php://input');
-    
-    // Check if filename was sent via header (Custom header or query string)
-    $filename = isset($_GET['name']) ? $_GET['name'] : 'uploaded_demo_' . time() . '.dem';
-    $filename = basename($filename);
-    
-    if (strlen($fileData) > 0) {
-        // Save locally first as a temporary file
-        $tempFile = sys_get_temp_dir() . '/' . $filename;
-        if (!file_put_contents($tempFile, $fileData)) {
-            http_response_code(500);
-            exit("ERROR: Could not save temp file.");
-        }
-        
-        // Connect to FTP
-        $conn_id = ftp_connect($ftpHost);
-        if (!$conn_id) {
-            @unlink($tempFile);
-            http_response_code(500);
-            exit("ERROR: Could not connect to FTP host.");
-        }
-        
-        $login_result = ftp_login($conn_id, $ftpUser, $ftpPass);
-        if (!$login_result) {
-            ftp_close($conn_id);
-            @unlink($tempFile);
-            http_response_code(500);
-            exit("ERROR: FTP login failed.");
-        }
-        
-        // Turn passive mode on
-        ftp_pasv($conn_id, true);
-        
-        // Ensure path ends with slash
-        if (substr($ftpPath, -1) !== '/') {
-            $ftpPath .= '/';
-        }
-        
-        $remote_file = $ftpPath . $filename;
-        
-        // Upload the file
-        if (ftp_put($conn_id, $remote_file, $tempFile, FTP_BINARY)) {
-            echo "SUCCESS: Demo uploaded to FTP storage.";
-        } else {
-            http_response_code(500);
-            echo "ERROR: Failed to upload file to FTP.";
-        }
-        
-        // Close the connection and delete temp file
-        ftp_close($conn_id);
-        @unlink($tempFile);
-    } else {
-        http_response_code(400);
-        echo "ERROR: Empty file data.";
+function uploadPasswordValid(string $buildTag, string $password): bool
+{
+    $tagsFile = panelDataDir() . DIRECTORY_SEPARATOR . FILE_TAGS;
+    if (!is_file($tagsFile)) {
+        return false;
     }
-} else {
-    http_response_code(405);
-    echo "ERROR: Invalid request method.";
+
+    $content = file_get_contents($tagsFile);
+    if ($content === false) {
+        return false;
+    }
+
+    foreach (normalizedLines($content) as $line) {
+        $parts = array_map('trim', explode('|', $line));
+        if (count($parts) < 4) {
+            continue;
+        }
+        if (strcasecmp($parts[0], $buildTag) === 0) {
+            return hash_equals($parts[3], $password);
+        }
+    }
+    return false;
 }
-?>
+
+if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+    http_response_code(405);
+    exit('FAIL: Method Not Allowed');
+}
+
+$buildTag = trim((string)($_POST['build'] ?? ''));
+$password = trim((string)($_POST['password'] ?? ''));
+
+if ($buildTag === '' || $password === '') {
+    exit('FAIL: Missing build or password');
+}
+if (!uploadPasswordValid($buildTag, $password)) {
+    exit('FAIL: Incorrect password or subscription');
+}
+if (!isset($_FILES['demo']) || $_FILES['demo']['error'] !== UPLOAD_ERR_OK) {
+    exit('FAIL: File upload error');
+}
+
+$filename = preg_replace('/[^A-Za-z0-9_.-]/', '_', basename((string)$_FILES['demo']['name']));
+if ($filename === '' || !preg_match('/\.dem$/i', $filename)) {
+    exit('FAIL: Invalid demo file');
+}
+
+$safeBuild = preg_replace('/[^A-Za-z0-9_-]/', '_', $buildTag);
+$storedName = $safeBuild . '_' . date('Ymd_His') . '_' . $filename;
+$dataDir = panelDataDir();
+$ftpConfigFile = $dataDir . DIRECTORY_SEPARATOR . FILE_FTP_CONFIG;
+
+if (is_file($ftpConfigFile)) {
+    $ftpLines = normalizedLines((string)file_get_contents($ftpConfigFile));
+    if (count($ftpLines) >= 4) {
+        $host = $ftpLines[0];
+        $user = $ftpLines[1];
+        $pass = $ftpLines[2];
+        $path = rtrim($ftpLines[3], '/');
+        $port = 21;
+        if (substr($host, 0, 6) === 'ftp://') {
+            $host = substr($host, 6);
+        }
+        if (strpos($host, ':') !== false) {
+            [$host, $portText] = explode(':', $host, 2);
+            $port = max(1, (int)$portText);
+        }
+
+        $conn = @ftp_connect($host, $port, 20);
+        if ($conn && @ftp_login($conn, $user, $pass)) {
+            ftp_pasv($conn, true);
+            if (@ftp_put($conn, $path . '/' . $storedName, $_FILES['demo']['tmp_name'], FTP_BINARY)) {
+                ftp_close($conn);
+                exit('OK');
+            }
+        }
+        if ($conn) {
+            ftp_close($conn);
+        }
+    }
+}
+
+$localDir = __DIR__ . '/demos';
+if (!is_dir($localDir) && !mkdir($localDir, 0755, true) && !is_dir($localDir)) {
+    exit('FAIL: Cannot create local demo storage');
+}
+
+if (move_uploaded_file($_FILES['demo']['tmp_name'], $localDir . '/' . $storedName)) {
+    exit('OK');
+}
+
+exit('FAIL: Failed to save demo');

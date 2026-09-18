@@ -311,10 +311,12 @@ function restorePanelBackup(array $upload): void
     }
     foreach ((array)($payload['suspended_subscriptions'] ?? []) as $row) {
         if (!is_array($row)) { continue; }
-        $validated = validateTags([(string)($row['build'] ?? '')], [(string)($row['player'] ?? '')], [(string)($row['expiry'] ?? '')]);
+        $validated = validateTags([(string)($row['build'] ?? '')], [(string)($row['player'] ?? '')],
+            [(string)($row['expiry'] ?? '')], [(string)($row['upload_password'] ?? '')]);
         if (!$validated) { continue; }
-        [$build, $player, $expiry] = array_map('trim', explode('|', $validated[0]));
-        $rows[strtoupper($build)] = ['build' => $build, 'player' => $player, 'expiry' => $expiry, 'suspended' => true];
+        [$build, $player, $expiry, $uploadPassword] = array_map('trim', explode('|', $validated[0]));
+        $rows[strtoupper($build)] = ['build' => $build, 'player' => $player, 'expiry' => $expiry,
+            'upload_password' => $uploadPassword, 'suspended' => true];
     }
     writeSubscriptionRows($rows);
 }
@@ -382,9 +384,9 @@ function validJalaliDate(string $value): bool
     return gregorianToJalali($gy, $gm, $gd) === [$year, $month, $day];
 }
 
-function validateTags(array $buildTags, array $playerTags, array $expiries): array
+function validateTags(array $buildTags, array $playerTags, array $expiries, array $uploadPasswords = []): array
 {
-    $rowCount = max(count($buildTags), count($playerTags), count($expiries));
+    $rowCount = max(count($buildTags), count($playerTags), count($expiries), count($uploadPasswords));
     if ($rowCount > MAX_TAGS) {
         throw new RuntimeException('تعداد گیمنت‌ها بیش از حد مجاز است.');
     }
@@ -394,7 +396,8 @@ function validateTags(array $buildTags, array $playerTags, array $expiries): arr
         $build = trim((string)($buildTags[$index] ?? ''));
         $player = trim((string)($playerTags[$index] ?? ''));
         $expiry = trim((string)($expiries[$index] ?? ''));
-        if ($build === '' && $player === '' && $expiry === '') { continue; }
+        $uploadPassword = trim((string)($uploadPasswords[$index] ?? ''));
+        if ($build === '' && $player === '' && $expiry === '' && $uploadPassword === '') { continue; }
         if (!preg_match('/^[A-Za-z0-9_-]{1,64}$/', $build)) {
             throw new RuntimeException('تگ Build در ردیف ' . ($index + 1) . ' نامعتبر است.');
         }
@@ -404,11 +407,14 @@ function validateTags(array $buildTags, array $playerTags, array $expiries): arr
         if (!validJalaliDate($expiry)) {
             throw new RuntimeException('تاریخ شمسی ردیف ' . ($index + 1) . ' نامعتبر است؛ نمونه: 1405/06/25');
         }
+        if ($uploadPassword !== '' && !preg_match('/^[A-Za-z0-9_!@#$%^&*.\-]{1,31}$/', $uploadPassword)) {
+            throw new RuntimeException('Upload password in row ' . ($index + 1) . ' is invalid.');
+        }
         $key = strtoupper($build);
         if (isset($result[$key])) {
             throw new RuntimeException('تگ Build تکراری است: ' . $build);
         }
-        $result[$key] = $build . ' | ' . $player . ' | ' . $expiry;
+        $result[$key] = $build . ' | ' . $player . ' | ' . $expiry . ' | ' . $uploadPassword;
     }
     return array_values($result);
 }
@@ -418,16 +424,18 @@ function validateTagsFromLines(array $lines): array
     $buildTags = [];
     $playerTags = [];
     $expiries = [];
+    $uploadPasswords = [];
     foreach ($lines as $line) {
         $parts = array_map('trim', explode('|', (string)$line));
-        if (count($parts) !== 3) {
+        if (count($parts) !== 3 && count($parts) !== 4) {
             throw new RuntimeException('Subscription row in backup is invalid.');
         }
         $buildTags[] = $parts[0];
         $playerTags[] = $parts[1];
         $expiries[] = $parts[2];
+        $uploadPasswords[] = $parts[3] ?? '';
     }
-    return validateTags($buildTags, $playerTags, $expiries);
+    return validateTags($buildTags, $playerTags, $expiries, $uploadPasswords);
 }
 
 function parseTagRows(string $content): array
@@ -435,9 +443,9 @@ function parseTagRows(string $content): array
     $rows = [];
     foreach (normalizedLines($content) as $line) {
         $parts = array_map('trim', explode('|', $line));
-        if (count($parts) === 3) {
+        if (count($parts) === 3 || count($parts) === 4) {
             $rows[] = ['build' => $parts[0], 'player' => $parts[1],
-                'expiry' => $parts[2], 'suspended' => false];
+                'expiry' => $parts[2], 'upload_password' => $parts[3] ?? '', 'suspended' => false];
         }
     }
     return $rows;
@@ -461,11 +469,12 @@ function readSuspendedSubscriptionRows(): array
     foreach ($stored as $row) {
         if (!is_array($row)) { continue; }
         $validated = validateTags([(string)($row['build'] ?? '')],
-            [(string)($row['player'] ?? '')], [(string)($row['expiry'] ?? '')]);
+            [(string)($row['player'] ?? '')], [(string)($row['expiry'] ?? '')],
+            [(string)($row['upload_password'] ?? '')]);
         if (!$validated) { continue; }
-        [$build, $player, $expiry] = array_map('trim', explode('|', $validated[0]));
+        [$build, $player, $expiry, $uploadPassword] = array_map('trim', explode('|', $validated[0]));
         $rows[] = ['build' => $build, 'player' => $player,
-            'expiry' => $expiry, 'suspended' => true];
+            'expiry' => $expiry, 'upload_password' => $uploadPassword, 'suspended' => true];
     }
     return $rows;
 }
@@ -489,13 +498,15 @@ function writeSubscriptionRows(array $rows): void
     $suspended = [];
     foreach ($rows as $row) {
         $validated = validateTags([(string)($row['build'] ?? '')],
-            [(string)($row['player'] ?? '')], [(string)($row['expiry'] ?? '')]);
+            [(string)($row['player'] ?? '')], [(string)($row['expiry'] ?? '')],
+            [(string)($row['upload_password'] ?? '')]);
         if (!$validated) { continue; }
         if (!empty($row['suspended'])) {
             $suspended[] = [
                 'build' => (string)$row['build'],
                 'player' => (string)$row['player'],
                 'expiry' => (string)$row['expiry'],
+                'upload_password' => (string)($row['upload_password'] ?? ''),
             ];
         } else {
             $active[] = $validated[0];
@@ -724,21 +735,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             flash('success', 'Panel backup restored successfully.');
         } elseif ($action === 'save_tags') {
             $tags = validateTags((array)($_POST['build_tag'] ?? []),
-                (array)($_POST['player_tag'] ?? []), (array)($_POST['expiry'] ?? []));
+                (array)($_POST['player_tag'] ?? []), (array)($_POST['expiry'] ?? []),
+                (array)($_POST['upload_password'] ?? []));
             $rows = subscriptionRowsByKey();
             foreach ($rows as $key => $row) {
                 if (empty($row['suspended'])) { unset($rows[$key]); }
             }
             foreach ($tags as $tag) {
-                [$build, $player, $expiry] = array_map('trim', explode('|', $tag));
-                $rows[strtoupper($build)] = compact('build', 'player', 'expiry') + ['suspended' => false];
+                [$build, $player, $expiry, $uploadPassword] = array_map('trim', explode('|', $tag));
+                $rows[strtoupper($build)] = compact('build', 'player', 'expiry') +
+                    ['upload_password' => $uploadPassword, 'suspended' => false];
             }
             writeSubscriptionRows($rows);
             flash('success', count($tags) . ' اشتراک با موفقیت ذخیره شد.');
         } elseif ($action === 'add_subscription' || $action === 'save_subscription') {
             $validated = validateTags([(string)($_POST['build_tag'] ?? '')],
-                [(string)($_POST['player_tag'] ?? '')], [(string)($_POST['expiry'] ?? '')]);
-            [$build, $player, $expiry] = array_map('trim', explode('|', $validated[0]));
+                [(string)($_POST['player_tag'] ?? '')], [(string)($_POST['expiry'] ?? '')],
+                [(string)($_POST['upload_password'] ?? '')]);
+            [$build, $player, $expiry, $uploadPassword] = array_map('trim', explode('|', $validated[0]));
             $rows = subscriptionRowsByKey();
             $newKey = strtoupper($build);
             $originalKey = strtoupper(trim((string)($_POST['original_build'] ?? $build)));
@@ -753,7 +767,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
             $suspended = $action === 'save_subscription' && !empty($rows[$originalKey]['suspended']);
             unset($rows[$originalKey]);
-            $rows[$newKey] = compact('build', 'player', 'expiry', 'suspended');
+            $rows[$newKey] = compact('build', 'player', 'expiry', 'uploadPassword', 'suspended');
+            $rows[$newKey]['upload_password'] = $uploadPassword;
+            unset($rows[$newKey]['uploadPassword']);
             writeSubscriptionRows($rows);
             flash('success', $action === 'add_subscription' ?
                 'گیمنت جدید با موفقیت اضافه شد.' : 'مشخصات اشتراک ذخیره شد.');
@@ -1006,7 +1022,7 @@ if ($authenticated) {
       <form class="card add-subscription" id="add-subscription" method="post" hidden>
         <input type="hidden" name="csrf" value="<?= escape(csrfToken()) ?>"><input type="hidden" name="action" value="add_subscription">
         <div class="form-heading"><div><h3>افزودن گیمنت</h3><p>اشتراک پس از ذخیره فوراً برای کلاینت قابل استفاده است.</p></div><button class="icon-button" id="close-add-subscription" type="button" aria-label="بستن">×</button></div>
-        <div class="subscription-fields"><label>نام یا تگ Build<input class="ltr" name="build_tag" maxlength="64" pattern="[A-Za-z0-9_-]+" placeholder="IMORTAL_GONBAD" required></label><label>تگ بازیکن<input class="ltr" name="player_tag" maxlength="12" pattern="[A-Za-z0-9_-]+" placeholder="IM" required></label><label>انقضای شمسی<input class="ltr" name="expiry" maxlength="10" pattern="\d{4}/\d{2}/\d{2}" placeholder="1405/06/25" required></label></div>
+        <div class="subscription-fields"><label>نام یا تگ Build<input class="ltr" name="build_tag" maxlength="64" pattern="[A-Za-z0-9_-]+" placeholder="IMORTAL_GONBAD" required></label><label>تگ بازیکن<input class="ltr" name="player_tag" maxlength="12" pattern="[A-Za-z0-9_-]+" placeholder="IM" required></label><label>انقضای شمسی<input class="ltr" name="expiry" maxlength="10" pattern="\d{4}/\d{2}/\d{2}" placeholder="1405/06/25" required></label><label>رمز آپلود دمو<input class="ltr" name="upload_password" maxlength="31" pattern="[A-Za-z0-9_!@#$%^&*.\-]{0,31}" autocomplete="new-password"></label></div>
         <button class="button primary" type="submit">ساخت اشتراک</button>
       </form>
 
@@ -1036,12 +1052,12 @@ if ($authenticated) {
             <button class="open-profile-modal" type="button" data-modal="profile-modal-<?= (int)$rowIndex ?>"><span>مدیریت پروفایل</span><i>←</i></button>
             <dialog class="profile-modal" id="profile-modal-<?= (int)$rowIndex ?>" aria-labelledby="profile-title-<?= (int)$rowIndex ?>">
               <div class="modal-shell">
-                <header class="modal-header"><div class="modal-profile"><span class="profile-avatar"><?= escape(strtoupper(substr($row['player'], 0, 2))) ?></span><div><span class="status-badge <?= escape($row['state']) ?>"><?= escape($row['state_label']) ?></span><h3 id="profile-title-<?= (int)$rowIndex ?>"><?= escape($row['build']) ?></h3><p>تگ بازیکن: <b class="ltr"><?= escape($row['player']) ?></b> · انقضا: <b class="ltr"><?= escape($row['expiry']) ?></b></p></div></div><button class="modal-close" type="button" data-close-modal aria-label="بستن پنجره">×</button></header>
+                <header class="modal-header"><div class="modal-profile"><span class="profile-avatar"><?= escape(strtoupper(substr($row['player'], 0, 2))) ?></span><div><span class="status-badge <?= escape($row['state']) ?>"><?= escape($row['state_label']) ?></span><h3 id="profile-title-<?= (int)$rowIndex ?>"><?= escape($row['build']) ?></h3><p>تگ بازیکن: <b class="ltr"><?= escape($row['player']) ?></b> · انقضا: <b class="ltr"><?= escape($row['expiry']) ?></b> · رمز دمو: <b class="ltr"><?= escape($row['upload_password'] !== '' ? $row['upload_password'] : 'not set') ?></b></p></div></div><button class="modal-close" type="button" data-close-modal aria-label="بستن پنجره">×</button></header>
                 <div class="modal-overview"><div><span>وضعیت فعلی</span><strong class="<?= escape($row['state']) ?>"><?= escape($row['state_label']) ?></strong></div><div><span>اعتبار</span><strong><?= abs((int)$row['days_remaining']) ?> روز <?= $row['days_remaining'] < 0 ? 'گذشته' : 'باقی‌مانده' ?></strong></div><div><span>تاریخ انقضا</span><strong class="ltr"><?= escape($row['expiry']) ?></strong></div></div>
                 <div class="manage-panel">
                 <section class="manage-block renewal-block"><div class="manage-title"><strong>تمدید اعتبار</strong><span>از تاریخ فعلی یا امروز محاسبه می‌شود</span></div><div class="quick-actions"><form method="post" class="month-actions"><input type="hidden" name="csrf" value="<?= escape(csrfToken()) ?>"><input type="hidden" name="action" value="adjust_subscription"><input type="hidden" name="operation" value="extend_months"><input type="hidden" name="build" value="<?= escape($row['build']) ?>"><button type="submit" name="months" value="1">+ ۱ ماه</button><button type="submit" name="months" value="2">+ ۲ ماه</button><button type="submit" name="months" value="3">+ ۳ ماه</button></form><form method="post" class="days-action"><input type="hidden" name="csrf" value="<?= escape(csrfToken()) ?>"><input type="hidden" name="action" value="adjust_subscription"><input type="hidden" name="operation" value="extend_days"><input type="hidden" name="build" value="<?= escape($row['build']) ?>"><input type="number" name="days" min="1" max="3650" inputmode="numeric" placeholder="تعداد روز" required><button class="button secondary" type="submit">تمدید دلخواه</button></form></div></section>
                 <section class="manage-block access-block"><div class="manage-title"><strong>کنترل دسترسی</strong><span>تغییر وضعیت بلافاصله روی فایل کلاینت اعمال می‌شود</span></div><form method="post" class="confirm-form" data-confirm="<?= $row['suspended'] ? 'اشتراک دوباره فعال شود؟' : 'دسترسی آنلاین این گیمنت فوراً معلق شود؟' ?>"><input type="hidden" name="csrf" value="<?= escape(csrfToken()) ?>"><input type="hidden" name="action" value="adjust_subscription"><input type="hidden" name="operation" value="<?= $row['suspended'] ? 'resume' : 'suspend' ?>"><input type="hidden" name="build" value="<?= escape($row['build']) ?>"><button class="button <?= $row['suspended'] ? 'primary' : 'warning' ?>" type="submit"><?= $row['suspended'] ? 'فعال‌سازی مجدد' : 'تعلیق دسترسی آنلاین' ?></button></form></section>
-                <details class="subscription-edit"><summary>ویرایش اطلاعات پروفایل</summary><div class="edit-actions"><form method="post" class="edit-form"><input type="hidden" name="csrf" value="<?= escape(csrfToken()) ?>"><input type="hidden" name="action" value="save_subscription"><input type="hidden" name="original_build" value="<?= escape($row['build']) ?>"><div class="subscription-fields"><label>تگ Build<input class="ltr" name="build_tag" maxlength="64" pattern="[A-Za-z0-9_-]+" value="<?= escape($row['build']) ?>" required></label><label>تگ بازیکن<input class="ltr" name="player_tag" maxlength="12" pattern="[A-Za-z0-9_-]+" value="<?= escape($row['player']) ?>" required></label><label>انقضای شمسی<input class="ltr" name="expiry" maxlength="10" pattern="\d{4}/\d{2}/\d{2}" value="<?= escape($row['expiry']) ?>" required></label></div><button class="button secondary" type="submit">ذخیره اطلاعات</button></form><form method="post" class="confirm-form delete-form" data-confirm="این اشتراک برای همیشه حذف شود؟"><input type="hidden" name="csrf" value="<?= escape(csrfToken()) ?>"><input type="hidden" name="action" value="delete_subscription"><input type="hidden" name="build" value="<?= escape($row['build']) ?>"><button class="button danger" type="submit">حذف کامل پروفایل</button></form></div></details>
+                <details class="subscription-edit"><summary>ویرایش اطلاعات پروفایل</summary><div class="edit-actions"><form method="post" class="edit-form"><input type="hidden" name="csrf" value="<?= escape(csrfToken()) ?>"><input type="hidden" name="action" value="save_subscription"><input type="hidden" name="original_build" value="<?= escape($row['build']) ?>"><div class="subscription-fields"><label>تگ Build<input class="ltr" name="build_tag" maxlength="64" pattern="[A-Za-z0-9_-]+" value="<?= escape($row['build']) ?>" required></label><label>تگ بازیکن<input class="ltr" name="player_tag" maxlength="12" pattern="[A-Za-z0-9_-]+" value="<?= escape($row['player']) ?>" required></label><label>انقضای شمسی<input class="ltr" name="expiry" maxlength="10" pattern="\d{4}/\d{2}/\d{2}" value="<?= escape($row['expiry']) ?>" required></label><label>رمز آپلود دمو<input class="ltr" name="upload_password" maxlength="31" pattern="[A-Za-z0-9_!@#$%^&*.\-]{0,31}" value="<?= escape($row['upload_password']) ?>" autocomplete="new-password"></label></div><button class="button secondary" type="submit">ذخیره اطلاعات</button></form><form method="post" class="confirm-form delete-form" data-confirm="این اشتراک برای همیشه حذف شود؟"><input type="hidden" name="csrf" value="<?= escape(csrfToken()) ?>"><input type="hidden" name="action" value="delete_subscription"><input type="hidden" name="build" value="<?= escape($row['build']) ?>"><button class="button danger" type="submit">حذف کامل پروفایل</button></form></div></details>
                 </div>
               </div>
             </dialog>

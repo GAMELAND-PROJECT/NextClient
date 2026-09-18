@@ -15,11 +15,11 @@ class CDemoUploaderDialog : public vgui2::Frame
 public:
     CDemoUploaderDialog(vgui2::Panel *parent);
     virtual ~CDemoUploaderDialog();
+    virtual void Activate();
 
 protected:
     virtual void OnCommand(const char *command);
     virtual void ApplySchemeSettings(vgui2::IScheme *pScheme);
-    virtual void Activate();
 
 private:
     void RefreshDemoList();

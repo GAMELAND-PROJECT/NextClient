@@ -1,13 +1,19 @@
 #include <Windows.h>
 #include <CommCtrl.h>
+#include <WinInet.h>
 #include <windowsx.h>
 
 #include <algorithm>
 #include <compare>
+#include <cstring>
 #include <cstdlib>
+#include <cwctype>
+#include <filesystem>
+#include <fstream>
 #include <iterator>
 #include <ranges>
 #include <set>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -37,6 +43,15 @@ enum ControlId
     IdSubscriptionTag,
     IdSubscriptionDetails,
     IdSubscriptionRemaining,
+    IdDemoManager,
+    IdDemoPassword,
+    IdDemoVerify,
+    IdDemoList,
+    IdDemoUpload,
+    IdDemoDelete,
+    IdDemoRefresh,
+    IdDemoClose,
+    IdDemoStatus,
 };
 
 struct Resolution
@@ -115,6 +130,23 @@ bool g_launchRequested{};
 GameNetAccessStatus g_accessStatus;
 SystemMouseSettings g_mouseAtLastApply{};
 bool g_mousePreviewChanged{};
+
+constexpr wchar_t kDemoWindowClass[] = L"AllclientDemoManagerWindow";
+constexpr char kUploadHost[] = "gameland.cam";
+constexpr char kVerifyPath[] = "/verify_upload_password.php";
+constexpr char kUploadPath[] = "/upload_demo.php";
+constexpr char kMultipartBoundary[] = "----AllclientDemoBoundary7MA4YW";
+constexpr DWORD kNetworkTimeoutMs = 30000;
+constexpr DWORD kUploadBufferSize = 64 * 1024;
+
+HWND g_demoPassword{};
+HWND g_demoList{};
+HWND g_demoUpload{};
+HWND g_demoDelete{};
+HWND g_demoStatus{};
+std::wstring g_demoRoot;
+std::wstring g_demoPasswordValue;
+std::vector<std::filesystem::path> g_demoFiles;
 
 class RegistryKey
 {
@@ -300,6 +332,258 @@ void SetStatus(const wchar_t* text, bool error = false)
 std::wstring WidenAscii(const std::string& value)
 {
     return std::wstring(value.begin(), value.end());
+}
+
+std::string NarrowUtf8(const std::wstring& value)
+{
+    if (value.empty())
+        return {};
+
+    const int size = WideCharToMultiByte(CP_UTF8, 0, value.c_str(), static_cast<int>(value.size()),
+        nullptr, 0, nullptr, nullptr);
+    std::string result(size, '\0');
+    WideCharToMultiByte(CP_UTF8, 0, value.c_str(), static_cast<int>(value.size()),
+        result.data(), size, nullptr, nullptr);
+    return result;
+}
+
+std::string UrlEncode(const std::string& value)
+{
+    std::ostringstream out;
+    constexpr char hex[] = "0123456789ABCDEF";
+    for (unsigned char ch : value)
+    {
+        if ((ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') ||
+            (ch >= '0' && ch <= '9') || ch == '_' || ch == '-' || ch == '.')
+            out << static_cast<char>(ch);
+        else
+            out << '%' << hex[ch >> 4] << hex[ch & 0x0F];
+    }
+    return out.str();
+}
+
+std::filesystem::path ExecutableRoot()
+{
+    std::wstring path(32768, L'\0');
+    const DWORD length = GetModuleFileNameW(nullptr, path.data(), static_cast<DWORD>(path.size()));
+    if (!length || length >= path.size())
+        return {};
+
+    path.resize(length);
+    return std::filesystem::path(path).parent_path();
+}
+
+std::string ReadInstallGameNetTag()
+{
+    const auto iniPath = ExecutableRoot() / L"allclient-install.ini";
+    char tag[128] = {};
+    GetPrivateProfileStringA("Allclient", "GameNetTag", "", tag, sizeof(tag), iniPath.string().c_str());
+    return tag;
+}
+
+bool IsUploadPasswordTextValid(const std::wstring& password)
+{
+    if (password.empty() || password.size() > 31)
+        return false;
+
+    for (wchar_t ch : password)
+    {
+        if ((ch >= L'A' && ch <= L'Z') || (ch >= L'a' && ch <= L'z') ||
+            (ch >= L'0' && ch <= L'9') || ch == L'_' || ch == L'!' ||
+            ch == L'@' || ch == L'#' || ch == L'$' || ch == L'%' ||
+            ch == L'^' || ch == L'&' || ch == L'*' || ch == L'.' || ch == L'-')
+            continue;
+
+        return false;
+    }
+
+    return true;
+}
+
+void SetDemoStatus(const wchar_t* text, bool error = false)
+{
+    SetWindowTextW(g_demoStatus, text);
+    if (error)
+        MessageBeep(MB_ICONERROR);
+}
+
+bool ReadHttpResponse(HINTERNET request, std::string& response)
+{
+    char buffer[1024];
+    DWORD read = 0;
+    response.clear();
+    while (InternetReadFile(request, buffer, sizeof(buffer), &read) && read > 0)
+        response.append(buffer, buffer + read);
+
+    return true;
+}
+
+bool PostUrlEncoded(const char* path, const std::string& body, std::string& response)
+{
+    HINTERNET session = InternetOpenA("Allclient-DemoManager/1.0", INTERNET_OPEN_TYPE_PRECONFIG, nullptr, nullptr, 0);
+    if (!session)
+        return false;
+
+    InternetSetOptionA(session, INTERNET_OPTION_CONNECT_TIMEOUT, (LPVOID)&kNetworkTimeoutMs, sizeof(kNetworkTimeoutMs));
+    InternetSetOptionA(session, INTERNET_OPTION_SEND_TIMEOUT, (LPVOID)&kNetworkTimeoutMs, sizeof(kNetworkTimeoutMs));
+    InternetSetOptionA(session, INTERNET_OPTION_RECEIVE_TIMEOUT, (LPVOID)&kNetworkTimeoutMs, sizeof(kNetworkTimeoutMs));
+
+    HINTERNET connect = InternetConnectA(session, kUploadHost, INTERNET_DEFAULT_HTTP_PORT,
+        nullptr, nullptr, INTERNET_SERVICE_HTTP, 0, 0);
+    if (!connect)
+    {
+        InternetCloseHandle(session);
+        return false;
+    }
+
+    HINTERNET request = HttpOpenRequestA(connect, "POST", path, nullptr, nullptr, nullptr,
+        INTERNET_FLAG_RELOAD | INTERNET_FLAG_NO_CACHE_WRITE, 0);
+    if (!request)
+    {
+        InternetCloseHandle(connect);
+        InternetCloseHandle(session);
+        return false;
+    }
+
+    const char headers[] = "Content-Type: application/x-www-form-urlencoded\r\n";
+    const BOOL sent = HttpSendRequestA(request, headers, static_cast<DWORD>(strlen(headers)),
+        (LPVOID)body.data(), static_cast<DWORD>(body.size()));
+    if (sent)
+        ReadHttpResponse(request, response);
+
+    InternetCloseHandle(request);
+    InternetCloseHandle(connect);
+    InternetCloseHandle(session);
+    return sent != FALSE;
+}
+
+bool VerifyDemoPassword(const std::wstring& password, std::string& response)
+{
+    const std::string tag = ReadInstallGameNetTag();
+    if (tag.empty())
+    {
+        response = "FAIL: Missing GameNetTag";
+        return false;
+    }
+
+    const std::string body = "build=" + UrlEncode(tag) + "&password=" + UrlEncode(NarrowUtf8(password));
+    return PostUrlEncoded(kVerifyPath, body, response) && response.find("OK") != std::string::npos;
+}
+
+bool InternetWriteAll(HINTERNET request, const void* data, DWORD size)
+{
+    const auto* cursor = static_cast<const char*>(data);
+    DWORD remaining = size;
+    while (remaining > 0)
+    {
+        DWORD written = 0;
+        if (!InternetWriteFile(request, cursor, remaining, &written) || written == 0)
+            return false;
+        cursor += written;
+        remaining -= written;
+    }
+    return true;
+}
+
+bool InternetWriteAll(HINTERNET request, const std::string& data)
+{
+    return InternetWriteAll(request, data.data(), static_cast<DWORD>(data.size()));
+}
+
+bool UploadDemoFile(const std::filesystem::path& filePath, const std::wstring& password, std::string& response)
+{
+    const std::string tag = ReadInstallGameNetTag();
+    if (tag.empty())
+    {
+        response = "FAIL: Missing GameNetTag";
+        return false;
+    }
+
+    HANDLE file = CreateFileW(filePath.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING,
+        FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN, nullptr);
+    if (file == INVALID_HANDLE_VALUE)
+    {
+        response = "FAIL: Cannot open demo";
+        return false;
+    }
+
+    LARGE_INTEGER size{};
+    if (!GetFileSizeEx(file, &size) || size.QuadPart <= 0)
+    {
+        CloseHandle(file);
+        response = "FAIL: Empty demo";
+        return false;
+    }
+
+    const std::string filename = NarrowUtf8(filePath.filename().wstring());
+    std::string prefix = "--" + std::string(kMultipartBoundary) + "\r\n";
+    prefix += "Content-Disposition: form-data; name=\"build\"\r\n\r\n" + tag + "\r\n";
+    prefix += "--" + std::string(kMultipartBoundary) + "\r\n";
+    prefix += "Content-Disposition: form-data; name=\"password\"\r\n\r\n" + NarrowUtf8(password) + "\r\n";
+    prefix += "--" + std::string(kMultipartBoundary) + "\r\n";
+    prefix += "Content-Disposition: form-data; name=\"demo\"; filename=\"" + filename + "\"\r\n";
+    prefix += "Content-Type: application/octet-stream\r\n\r\n";
+    const std::string suffix = "\r\n--" + std::string(kMultipartBoundary) + "--\r\n";
+    const auto total = static_cast<unsigned long long>(prefix.size()) +
+        static_cast<unsigned long long>(size.QuadPart) + static_cast<unsigned long long>(suffix.size());
+
+    HINTERNET session = InternetOpenA("Allclient-DemoManager/1.0", INTERNET_OPEN_TYPE_PRECONFIG, nullptr, nullptr, 0);
+    if (!session)
+    {
+        CloseHandle(file);
+        return false;
+    }
+
+    InternetSetOptionA(session, INTERNET_OPTION_CONNECT_TIMEOUT, (LPVOID)&kNetworkTimeoutMs, sizeof(kNetworkTimeoutMs));
+    InternetSetOptionA(session, INTERNET_OPTION_SEND_TIMEOUT, (LPVOID)&kNetworkTimeoutMs, sizeof(kNetworkTimeoutMs));
+    InternetSetOptionA(session, INTERNET_OPTION_RECEIVE_TIMEOUT, (LPVOID)&kNetworkTimeoutMs, sizeof(kNetworkTimeoutMs));
+
+    HINTERNET connect = InternetConnectA(session, kUploadHost, INTERNET_DEFAULT_HTTP_PORT,
+        nullptr, nullptr, INTERNET_SERVICE_HTTP, 0, 0);
+    HINTERNET request = connect ? HttpOpenRequestA(connect, "POST", kUploadPath, nullptr, nullptr, nullptr,
+        INTERNET_FLAG_RELOAD | INTERNET_FLAG_NO_CACHE_WRITE, 0) : nullptr;
+    bool ok = request && total <= MAXDWORD;
+    if (ok)
+    {
+        const std::string headers = "Content-Type: multipart/form-data; boundary=" + std::string(kMultipartBoundary) + "\r\n";
+        INTERNET_BUFFERSA buffers{};
+        buffers.dwStructSize = sizeof(buffers);
+        buffers.lpcszHeader = headers.c_str();
+        buffers.dwHeadersLength = static_cast<DWORD>(headers.size());
+        buffers.dwBufferTotal = static_cast<DWORD>(total);
+        ok = HttpSendRequestExA(request, &buffers, nullptr, 0, 0) != FALSE;
+    }
+    if (ok)
+        ok = InternetWriteAll(request, prefix);
+
+    char buffer[kUploadBufferSize];
+    while (ok)
+    {
+        DWORD read = 0;
+        if (!ReadFile(file, buffer, sizeof(buffer), &read, nullptr))
+        {
+            ok = false;
+            break;
+        }
+        if (read == 0)
+            break;
+        ok = InternetWriteAll(request, buffer, read);
+    }
+    CloseHandle(file);
+
+    if (ok)
+        ok = InternetWriteAll(request, suffix);
+    if (ok)
+        ok = HttpEndRequestA(request, nullptr, 0, 0) != FALSE;
+    if (ok)
+        ReadHttpResponse(request, response);
+
+    if (request)
+        InternetCloseHandle(request);
+    if (connect)
+        InternetCloseHandle(connect);
+    InternetCloseHandle(session);
+    return ok && response.find("OK") != std::string::npos;
 }
 
 void PopulateSubscriptionStatus()
@@ -494,6 +778,241 @@ bool ApplySettings()
     return true;
 }
 
+void RefreshDemoList()
+{
+    g_demoFiles.clear();
+    SendMessageW(g_demoList, LB_RESETCONTENT, 0, 0);
+
+    const auto demoDir = ExecutableRoot() / L"cstrike";
+    if (!std::filesystem::is_directory(demoDir))
+    {
+        SetDemoStatus(L"Demo folder was not found.", true);
+        return;
+    }
+
+    for (const auto& entry : std::filesystem::directory_iterator(demoDir))
+    {
+        if (!entry.is_regular_file())
+            continue;
+
+        std::wstring extension = entry.path().extension().wstring();
+        for (wchar_t& ch : extension)
+            ch = static_cast<wchar_t>(towlower(ch));
+        if (extension != L".dem")
+            continue;
+
+        g_demoFiles.push_back(entry.path());
+    }
+
+    std::ranges::sort(g_demoFiles, [](const auto& left, const auto& right)
+    {
+        return left.filename().wstring() < right.filename().wstring();
+    });
+
+    for (const auto& path : g_demoFiles)
+        SendMessageW(g_demoList, LB_ADDSTRING, 0, reinterpret_cast<LPARAM>(path.filename().c_str()));
+
+    if (!g_demoFiles.empty())
+        SendMessageW(g_demoList, LB_SETCURSEL, 0, 0);
+
+    SetDemoStatus(g_demoFiles.empty() ? L"No local .dem files found in cstrike." : L"Ready.");
+}
+
+bool ReadDemoPassword(HWND window, std::wstring& password)
+{
+    wchar_t buffer[64]{};
+    GetWindowTextW(g_demoPassword, buffer, static_cast<int>(std::size(buffer)));
+    password = buffer;
+    if (!IsUploadPasswordTextValid(password))
+    {
+        MessageBoxW(window, L"Enter the upload password saved for this subscription.", L"Demo Manager", MB_OK | MB_ICONERROR);
+        return false;
+    }
+    return true;
+}
+
+void SetDemoActionsEnabled(bool enabled)
+{
+    EnableWindow(g_demoList, enabled);
+    EnableWindow(g_demoUpload, enabled);
+    EnableWindow(g_demoDelete, enabled);
+    EnableWindow(GetDlgItem(GetParent(g_demoList), IdDemoRefresh), enabled);
+}
+
+void VerifyPasswordAndUnlock(HWND window)
+{
+    std::wstring password;
+    if (!ReadDemoPassword(window, password))
+        return;
+
+    SetDemoStatus(L"Checking password...");
+    std::string response;
+    if (!VerifyDemoPassword(password, response))
+    {
+        const std::wstring message = response.empty() ? L"Password verification failed." : WidenAscii(response);
+        SetDemoStatus(message.c_str(), true);
+        return;
+    }
+
+    g_demoPasswordValue = password;
+    SetDemoActionsEnabled(true);
+    RefreshDemoList();
+}
+
+std::filesystem::path SelectedDemoPath()
+{
+    const LRESULT selected = SendMessageW(g_demoList, LB_GETCURSEL, 0, 0);
+    if (selected == LB_ERR || static_cast<size_t>(selected) >= g_demoFiles.size())
+        return {};
+    return g_demoFiles[static_cast<size_t>(selected)];
+}
+
+void UploadSelectedDemo(HWND window)
+{
+    const auto path = SelectedDemoPath();
+    if (path.empty())
+    {
+        MessageBoxW(window, L"Select a demo first.", L"Demo Manager", MB_OK | MB_ICONERROR);
+        return;
+    }
+
+    EnableWindow(g_demoUpload, FALSE);
+    SetDemoStatus(L"Uploading selected demo...");
+    std::string response;
+    const bool ok = UploadDemoFile(path, g_demoPasswordValue, response);
+    EnableWindow(g_demoUpload, TRUE);
+
+    const std::wstring status = response.empty() ? (ok ? L"Upload completed." : L"Upload failed.") : WidenAscii(response);
+    SetDemoStatus(status.c_str(), !ok);
+    MessageBoxW(window, ok ? L"Demo uploaded successfully." : status.c_str(), L"Demo Manager",
+        MB_OK | (ok ? MB_ICONINFORMATION : MB_ICONERROR));
+}
+
+void DeleteSelectedDemo(HWND window)
+{
+    const auto path = SelectedDemoPath();
+    if (path.empty())
+    {
+        MessageBoxW(window, L"Select a demo first.", L"Demo Manager", MB_OK | MB_ICONERROR);
+        return;
+    }
+
+    const std::wstring question = L"Delete this local demo?\n\n" + path.filename().wstring();
+    if (MessageBoxW(window, question.c_str(), L"Demo Manager", MB_YESNO | MB_ICONWARNING | MB_DEFBUTTON2) != IDYES)
+        return;
+
+    std::error_code error;
+    if (!std::filesystem::remove(path, error))
+    {
+        MessageBoxW(window, L"Could not delete the selected demo.", L"Demo Manager", MB_OK | MB_ICONERROR);
+        return;
+    }
+
+    RefreshDemoList();
+}
+
+LRESULT CALLBACK DemoManagerProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam)
+{
+    switch (message)
+    {
+    case WM_CREATE:
+    {
+        auto add = [&](const wchar_t* type, const wchar_t* text, DWORD style, int x, int y, int w, int h, int id = 0, DWORD ex = 0)
+        {
+            HWND control = CreateWindowExW(ex, type, text, WS_CHILD | WS_VISIBLE | style,
+                x, y, w, h, window, reinterpret_cast<HMENU>(static_cast<INT_PTR>(id)), g_instance, nullptr);
+            SendMessageW(control, WM_SETFONT, reinterpret_cast<WPARAM>(g_font), TRUE);
+            return control;
+        };
+
+        add(L"STATIC", L"Upload password", SS_LEFT, 18, 18, 150, 22);
+        g_demoPassword = add(L"EDIT", L"", ES_PASSWORD | ES_AUTOHSCROLL | WS_BORDER | WS_TABSTOP, 170, 14, 210, 26, IdDemoPassword, WS_EX_CLIENTEDGE);
+        add(L"BUTTON", L"Unlock", BS_PUSHBUTTON | WS_TABSTOP, 390, 13, 90, 28, IdDemoVerify);
+        g_demoList = add(L"LISTBOX", L"", LBS_NOTIFY | WS_BORDER | WS_VSCROLL | WS_TABSTOP, 18, 56, 462, 210, IdDemoList, WS_EX_CLIENTEDGE);
+        g_demoUpload = add(L"BUTTON", L"Upload selected", BS_PUSHBUTTON | WS_TABSTOP, 18, 280, 132, 32, IdDemoUpload);
+        g_demoDelete = add(L"BUTTON", L"Delete local", BS_PUSHBUTTON | WS_TABSTOP, 160, 280, 100, 32, IdDemoDelete);
+        add(L"BUTTON", L"Refresh", BS_PUSHBUTTON | WS_TABSTOP, 270, 280, 90, 32, IdDemoRefresh);
+        add(L"BUTTON", L"Close", BS_PUSHBUTTON | WS_TABSTOP, 370, 280, 110, 32, IdDemoClose);
+        g_demoStatus = add(L"STATIC", L"Enter password to unlock demo list.", SS_LEFT, 18, 324, 462, 40, IdDemoStatus);
+        SetDemoActionsEnabled(false);
+        SetFocus(g_demoPassword);
+        return 0;
+    }
+    case WM_COMMAND:
+        switch (LOWORD(wParam))
+        {
+        case IDOK:
+        case IdDemoVerify:
+            VerifyPasswordAndUnlock(window);
+            return 0;
+        case IdDemoUpload:
+            UploadSelectedDemo(window);
+            return 0;
+        case IdDemoDelete:
+            DeleteSelectedDemo(window);
+            return 0;
+        case IdDemoRefresh:
+            RefreshDemoList();
+            return 0;
+        case IDCANCEL:
+        case IdDemoClose:
+            DestroyWindow(window);
+            return 0;
+        default:
+            break;
+        }
+        break;
+    case WM_CLOSE:
+        DestroyWindow(window);
+        return 0;
+    default:
+        break;
+    }
+    return DefWindowProcW(window, message, wParam, lParam);
+}
+
+void ShowDemoManager(HWND owner)
+{
+    WNDCLASSEXW windowClass{sizeof(windowClass)};
+    windowClass.lpfnWndProc = DemoManagerProc;
+    windowClass.hInstance = g_instance;
+    windowClass.hCursor = LoadCursorW(nullptr, IDC_ARROW);
+    windowClass.hbrBackground = GetSysColorBrush(COLOR_WINDOW);
+    windowClass.lpszClassName = kDemoWindowClass;
+    windowClass.hIcon = LoadIconW(nullptr, IDI_APPLICATION);
+    windowClass.hIconSm = windowClass.hIcon;
+    RegisterClassExW(&windowClass);
+
+    RECT rect{0, 0, 500, 382};
+    AdjustWindowRectEx(&rect, WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU, FALSE, 0);
+    RECT ownerRect{};
+    GetWindowRect(owner, &ownerRect);
+    const int width = rect.right - rect.left;
+    const int height = rect.bottom - rect.top;
+    const int x = ownerRect.left + ((ownerRect.right - ownerRect.left) - width) / 2;
+    const int y = ownerRect.top + ((ownerRect.bottom - ownerRect.top) - height) / 2;
+
+    HWND dialog = CreateWindowExW(WS_EX_DLGMODALFRAME, kDemoWindowClass, L"Allclient Demo Manager",
+        WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU, x, y, width, height, owner, nullptr, g_instance, nullptr);
+    if (!dialog)
+        return;
+
+    EnableWindow(owner, FALSE);
+    ShowWindow(dialog, SW_SHOWNORMAL);
+    UpdateWindow(dialog);
+
+    MSG message{};
+    while (IsWindow(dialog) && GetMessageW(&message, nullptr, 0, 0) > 0)
+    {
+        if (IsDialogMessageW(dialog, &message))
+            continue;
+        TranslateMessage(&message);
+        DispatchMessageW(&message);
+    }
+    EnableWindow(owner, TRUE);
+    SetActiveWindow(owner);
+}
+
 HWND AddControl(HWND parent, const wchar_t* type, const wchar_t* text, DWORD style,
                 int x, int y, int width, int height, int id = 0, DWORD exStyle = 0)
 {
@@ -552,6 +1071,8 @@ void CreateControls(HWND window)
 
     AddControl(window, L"BUTTON", L"\u0627\u062c\u0631\u0627\u06cc \u0628\u0627\u0632\u06cc", BS_DEFPUSHBUTTON | WS_TABSTOP,
                420, 488, 176, 36, IdLaunch);
+    AddControl(window, L"BUTTON", L"Demo Manager", BS_PUSHBUTTON | WS_TABSTOP,
+               256, 488, 154, 36, IdDemoManager);
     AddControl(window, L"BUTTON", L"\u0628\u0627\u0632\u0646\u0634\u0627\u0646\u06cc", BS_PUSHBUTTON | WS_TABSTOP,
                138, 488, 108, 36, IdRestore);
     AddControl(window, L"BUTTON", L"\u0627\u0646\u0635\u0631\u0627\u0641", BS_PUSHBUTTON | WS_TABSTOP,
@@ -593,6 +1114,9 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
         case IdEnhancePointer:
             if (HIWORD(wParam) == BN_CLICKED)
                 ApplyMousePreview();
+            return 0;
+        case IdDemoManager:
+            ShowDemoManager(window);
             return 0;
         case IdRestore:
         {

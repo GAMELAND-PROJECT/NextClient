@@ -11,6 +11,9 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <wininet.h>
+#ifdef MessageBox
+#undef MessageBox
+#endif
 #pragma comment(lib, "wininet.lib")
 
 using namespace vgui2;
@@ -105,15 +108,15 @@ void CDemoUploaderDialog::UploadSelectedDemo()
     m_pUploadButton->SetText("Uploading...");
 
     // Basic upload using WinINet
-    HINTERNET hSession = InternetOpen("NextClient Uploader", INTERNET_OPEN_TYPE_DIRECT, NULL, NULL, 0);
+    HINTERNET hSession = InternetOpenA("NextClient Uploader", INTERNET_OPEN_TYPE_DIRECT, NULL, NULL, 0);
     if (hSession)
     {
-        HINTERNET hConnect = InternetConnect(hSession, "gameland.cam", INTERNET_DEFAULT_HTTP_PORT, NULL, NULL, INTERNET_SERVICE_HTTP, 0, 1);
+        HINTERNET hConnect = InternetConnectA(hSession, "gameland.cam", INTERNET_DEFAULT_HTTP_PORT, NULL, NULL, INTERNET_SERVICE_HTTP, 0, 1);
         if (hConnect)
         {
             char szUrl[256];
             snprintf(szUrl, sizeof(szUrl), "/upload_demo.php?name=%s", szDemoName);
-            HINTERNET hRequest = HttpOpenRequest(hConnect, "POST", szUrl, NULL, NULL, NULL, 0, 1);
+            HINTERNET hRequest = HttpOpenRequestA(hConnect, "POST", szUrl, NULL, NULL, NULL, 0, 1);
             if (hRequest)
             {
                 // This is a naive multipart/form-data upload. We would read the file here.
@@ -132,7 +135,7 @@ void CDemoUploaderDialog::UploadSelectedDemo()
 
                     // Simplified header/body structure
                     char header[] = "Content-Type: application/octet-stream\r\n";
-                    HttpSendRequest(hRequest, header, strlen(header), (LPVOID)buffer, fileSize);
+                    HttpSendRequestA(hRequest, header, static_cast<DWORD>(strlen(header)), (LPVOID)buffer, fileSize);
                     delete[] buffer;
                     
                     MessageBox *pBox = new MessageBox("Success", "Demo uploaded successfully!");
