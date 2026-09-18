@@ -111,11 +111,16 @@ if (is_file($ftpConfigFile)) {
         if ($conn) {
             if (@ftp_login($conn, $user, $pass)) {
                 ftp_pasv($conn, true);
-                if (@ftp_put($conn, $path . '/' . $storedName, $_FILES['demo']['tmp_name'], FTP_BINARY)) {
+                
+                // Create gamenet subfolder on FTP if it doesn't exist
+                $targetDir = $path . '/' . $safeBuild;
+                @ftp_mkdir($conn, $targetDir);
+
+                if (@ftp_put($conn, $targetDir . '/' . $storedName, $_FILES['demo']['tmp_name'], FTP_BINARY)) {
                     ftp_close($conn);
                     exit('OK');
                 } else {
-                    $ftpError = "ftp_put failed to path: $path/$storedName";
+                    $ftpError = "ftp_put failed to path: $targetDir/$storedName";
                 }
             } else {
                 $ftpError = "FTP Login failed for user: $user";
@@ -131,8 +136,8 @@ if (is_file($ftpConfigFile)) {
     $ftpError = "FTP config file not found";
 }
 
-// Fallback to local storage
-$localDir = __DIR__ . '/demos';
+// Fallback to local storage in a gamenet subfolder
+$localDir = __DIR__ . '/demos/' . $safeBuild;
 if (!is_dir($localDir) && !mkdir($localDir, 0755, true) && !is_dir($localDir)) {
     exit("FAIL: Cannot create local demo storage (FTP Status: $ftpError)");
 }
