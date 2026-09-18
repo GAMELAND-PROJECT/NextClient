@@ -362,25 +362,42 @@ GameNetAccessStatus ResponseAccessStatus(const std::string& response, const Cale
                 EqualsTag(Trim(line.substr(0, first_separator))))
             {
                 const size_t second_separator = line.find('|', first_separator + 1);
-                if (second_separator != std::string_view::npos &&
-                    line.find('|', second_separator + 1) != std::string_view::npos)
+                if (second_separator == std::string_view::npos)
                 {
-                    status.state = GameNetAccessState::InvalidEntry;
-                }
-                else
-                {
-                    // Accept the previous "build tag | expiry" format during
-                    // migration. It enables Online without a player-name tag.
-                    const auto player_name_tag = second_separator == std::string_view::npos
-                        ? std::string_view{} : Trim(line.substr(
-                            first_separator + 1, second_separator - first_separator - 1));
-                    const auto expiry_text = second_separator == std::string_view::npos
-                        ? Trim(line.substr(first_separator + 1))
-                        : Trim(line.substr(second_separator + 1));
+                    // Accept the previous "build tag | expiry" format during migration.
+                    const auto player_name_tag = std::string_view{};
+                    const auto expiry_text = Trim(line.substr(first_separator + 1));
                     status.player_name_tag = std::string(player_name_tag);
                     status.expiry_date = std::string(expiry_text);
                     CalendarDate expiry;
                     if ((player_name_tag.empty() || IsValidPlayerNameTag(player_name_tag)) &&
+                        ParseJalaliDate(expiry_text, expiry) && IsValidJalaliDate(expiry))
+                    {
+                        status.days_remaining = DaysRemaining(today, expiry);
+                        if (DateKey(today) <= DateKey(expiry))
+                            return {GameNetAccessState::Active, kGameNetTag, status.player_name_tag,
+                                status.expiry_date, status.days_remaining};
+                        status.state = GameNetAccessState::Expired;
+                    }
+                    else
+                        status.state = GameNetAccessState::InvalidEntry;
+                }
+                else
+                {
+                    // The optional fourth field is the per-client demo upload
+                    // password and is intentionally ignored by entitlement parsing.
+                    const auto player_name_tag = Trim(line.substr(
+                        first_separator + 1, second_separator - first_separator - 1));
+                    const size_t third_separator = line.find('|', second_separator + 1);
+                    const auto expiry_text = Trim(line.substr(
+                        second_separator + 1,
+                        third_separator == std::string_view::npos
+                            ? line.size() - second_separator - 1
+                            : third_separator - second_separator - 1));
+                    status.player_name_tag = std::string(player_name_tag);
+                    status.expiry_date = std::string(expiry_text);
+                    CalendarDate expiry;
+                    if (IsValidPlayerNameTag(player_name_tag) &&
                         ParseJalaliDate(expiry_text, expiry) && IsValidJalaliDate(expiry))
                     {
                         status.days_remaining = DaysRemaining(today, expiry);

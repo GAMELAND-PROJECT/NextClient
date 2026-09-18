@@ -85,8 +85,8 @@ foreach ($rows as $line) {
     $parts = array_map('trim', explode('|', trim($line)));
     if (strcasecmp($parts[0], $tag) !== 0) { continue; }
     ++$matches;
-    if (count($parts) !== 2 && count($parts) !== 3) { continue; }
-    $expiry = $parts[count($parts) - 1];
+    if (count($parts) < 2) { continue; }
+    $expiry = count($parts) >= 3 ? $parts[2] : $parts[1];
     if (!validJalaliDate($expiry)) { continue; }
     $allowed = (int)str_replace('/', '', $expiry) >= $todayKey;
 }
