@@ -11,6 +11,7 @@
 #include "vgui_controls/MessageDialog.h"
 #include "CreateMultiplayerGameDialog.h"
 #include "OptionsDialog.h"
+#include "DemoUploaderDialog.h"
 #include "KeyValues.h"
 #include "utlvector.h"
 
@@ -138,6 +139,7 @@ public:
     void OnOpenCreateMultiplayerGameDialog(void);
     void OnOpenQuitConfirmationDialog(void);
     void OnOpenOptionsDialog(const char* tabName = nullptr);
+    void OnOpenDemoUploaderDialog(void);
     void OnOpenPlayerListDialog();
     void OnSizeChanged(int newWide, int newTall) override;
     void OnGameUIHidden(void);
@@ -219,6 +221,7 @@ private:
     vgui2::DHANDLE<CCreateMultiplayerGameDialog> m_hCreateMultiplayerGameDialog;
     vgui2::DHANDLE<vgui2::Frame> m_hPlayerListDialog;;
     vgui2::DHANDLE<vgui2::QueryBox> m_hQuitQueryBox;
+    vgui2::DHANDLE<CDemoUploaderDialog> m_hDemoUploaderDialog;
 
     vgui2::AnimationController *m_pConsoleAnimationController;
     KeyValues *m_pConsoleControlSettings;

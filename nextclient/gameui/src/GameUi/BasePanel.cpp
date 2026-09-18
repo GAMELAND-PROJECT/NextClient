@@ -987,6 +987,10 @@ void CBasePanel::RunMenuCommand(const char *command)
     {
         OnOpenPlayerListDialog();
     }
+    else if (!Q_stricmp(command, "OpenDemoUploader"))
+    {
+        OnOpenDemoUploaderDialog();
+    }
     else if (!Q_strncmp(command, kConnectTo, sizeof(kConnectTo) - 1))
     {
         std::vector<std::string> args;
@@ -1119,6 +1123,17 @@ void CBasePanel::OnOpenCreateMultiplayerGameDialog(void)
     }
 
     m_hCreateMultiplayerGameDialog->Activate();
+}
+
+void CBasePanel::OnOpenDemoUploaderDialog(void)
+{
+    if (!m_hDemoUploaderDialog.Get())
+    {
+        m_hDemoUploaderDialog = new CDemoUploaderDialog(this);
+        PositionDialog(m_hDemoUploaderDialog);
+    }
+
+    m_hDemoUploaderDialog->Activate();
 }
 
 void CBasePanel::PositionDialog(vgui2::PHandle dlg)
@@ -1536,6 +1551,9 @@ void CBasePanel::CloseBaseDialogs(void)
 
     if (m_hPlayerListDialog.Get())
         m_hPlayerListDialog->Close();
+
+    if (m_hDemoUploaderDialog.Get())
+        m_hDemoUploaderDialog->Close();
 
     if (CServerBrowserDialog::GetInstance())
     {

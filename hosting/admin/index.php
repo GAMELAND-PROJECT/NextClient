@@ -5,6 +5,7 @@ const FILE_SERVERS = 'pinned_servers.txt';
 const FILE_MIX_SERVERS = 'mix_servers.txt';
 const FILE_TAGS = 'client_tags.txt';
 const FILE_PASSWORD = 'server_password.txt';
+const FILE_FTP_CONFIG = 'ftp_config.txt';
 const FILE_INSTALLER_ACCESS = '.installer_access.php';
 const FILE_SUSPENDED_SUBSCRIPTIONS = '.suspended_subscriptions.php';
 const MAX_SERVERS = 64;
@@ -708,6 +709,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $servers = validateServers((string)($_POST['mix_servers'] ?? ''));
             backupAndAtomicWrite(FILE_MIX_SERVERS, implode("\n", $servers) . ($servers ? "\n" : ''));
             flash('success', count($servers) . ' Mix servers saved successfully.');
+        } elseif ($action === 'save_ftp_config') {
+            $ftpHost = trim((string)($_POST['ftp_host'] ?? ''));
+            $ftpUser = trim((string)($_POST['ftp_user'] ?? ''));
+            $ftpPass = trim((string)($_POST['ftp_pass'] ?? ''));
+            $ftpPath = trim((string)($_POST['ftp_path'] ?? ''));
+            $content = $ftpHost . "\n" . $ftpUser . "\n" . $ftpPass . "\n" . $ftpPath . "\n";
+            backupAndAtomicWrite(FILE_FTP_CONFIG, $content);
+            flash('success', 'تنظیمات سرور دانلود (FTP) ذخیره شد.');
         } elseif ($action === 'download_backup') {
             sendPanelBackup();
         } elseif ($action === 'restore_backup') {
@@ -833,6 +842,13 @@ if ($authenticated) {
     try {
         $serverText = trim(readTextFile(FILE_SERVERS));
         $mixServerText = trim(readMixServersText());
+        $ftpLines = normalizedLines(readTextFile(FILE_FTP_CONFIG));
+        $ftpConfig = [
+            'host' => $ftpLines[0] ?? '',
+            'user' => $ftpLines[1] ?? '',
+            'pass' => $ftpLines[2] ?? '',
+            'path' => $ftpLines[3] ?? '/'
+        ];
         $tagRows = array_map('decorateSubscriptionRow', array_values(subscriptionRowsByKey()));
         usort($tagRows, static function (array $left, array $right): int {
             $priority = ['expired' => 0, 'urgent' => 1, 'suspended' => 2, 'active' => 3];
@@ -937,6 +953,17 @@ if ($authenticated) {
         <form method="post"><input type="hidden" name="csrf" value="<?= escape(csrfToken()) ?>"><input type="hidden" name="action" value="save_mix_servers">
           <textarea name="mix_servers" class="code" rows="11" spellcheck="false" placeholder="5.57.32.203:45000"><?= escape($mixServerText) ?></textarea>
           <button class="button primary" type="submit">Save Mix Servers</button>
+        </form>
+      </article>
+
+      <article class="card">
+        <div class="card-title"><div><h2>فضای ذخیره‌سازی دمو (FTP)</h2><p>دموهای کلاینت‌ها به این هاست دانلود منتقل می‌شوند.</p></div><span class="pill">DEMO</span></div>
+        <form method="post" autocomplete="off"><input type="hidden" name="csrf" value="<?= escape(csrfToken()) ?>"><input type="hidden" name="action" value="save_ftp_config">
+          <label>آدرس سرور FTP<input class="ltr" type="text" name="ftp_host" value="<?= escape($ftpConfig['host']) ?>" placeholder="ftp.example.com"></label>
+          <label>نام کاربری FTP<input class="ltr" type="text" name="ftp_user" value="<?= escape($ftpConfig['user']) ?>"></label>
+          <label>رمز عبور FTP<input class="ltr" type="password" name="ftp_pass" value="<?= escape($ftpConfig['pass']) ?>" autocomplete="new-password"></label>
+          <label>پوشه ذخیره دموها (Path)<input class="ltr" type="text" name="ftp_path" value="<?= escape($ftpConfig['path']) ?>" placeholder="/domains/gameland.cam/public_html/demos/"></label>
+          <button class="button primary" type="submit">ذخیره تنظیمات FTP</button>
         </form>
       </article>
 
