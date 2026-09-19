@@ -1,6 +1,11 @@
 #include "main.h"
+#include <cctype>
+#include <cstdio>
 #include <cstring>
+#include <ctime>
 #include <ranges>
+#include <string>
+#include <string_view>
 #include <next_client_mini/client_mini.h>
 #include <parsemsg.h>
 
@@ -44,6 +49,14 @@ static dlight_t* (*g_OriginalAllocElight)(int) = nullptr;
 namespace
 {
     bool g_InputBackground = false;
+    bool g_DemoMenuVisible = false;
+    enum class DemoMenuAction
+    {
+        None,
+        Start,
+        Stop,
+    };
+    DemoMenuAction g_PendingDemoAction = DemoMenuAction::None;
     dlight_t g_SuppressedDlight{};
     double g_AnonymousDlightWindowStarted = -1.0;
     unsigned int g_AnonymousDlightsInWindow = 0;
@@ -118,6 +131,181 @@ namespace
     {
         return g_InputBackground;
     }
+
+    bool BindingEquals(const char* binding, std::string_view expected)
+    {
+        return binding != nullptr && expected == binding;
+    }
+
+    bool IsDemoMenuKey(int keynum)
+    {
+        constexpr int kF4 = 138;
+        return keynum == kF4;
+    }
+
+    void ShowDemoMenu()
+    {
+        g_DemoMenuVisible = true;
+    }
+
+    void ShowDemoMenuCommand()
+    {
+        ShowDemoMenu();
+    }
+
+    void HideDemoMenu()
+    {
+        g_DemoMenuVisible = false;
+    }
+
+    void DrawHudString(int x, int y, const char* text)
+    {
+        if (text != nullptr)
+            gEngfuncs.pfnDrawConsoleString(x, y, const_cast<char*>(text));
+    }
+
+    void DrawDemoMenu()
+    {
+        gEngfuncs.pfnDrawSetTextColor(1.0f, 0.67f, 0.16f);
+        DrawHudString(38, 158, "AllClient Demo");
+
+        gEngfuncs.pfnDrawSetTextColor(1.0f, 1.0f, 1.0f);
+        DrawHudString(38, 182, "1. Start Demo");
+        DrawHudString(38, 202, "2. Stop Demo");
+        DrawHudString(38, 222, "0. Close");
+    }
+
+    std::string TrimExtension(std::string value, std::string_view extension)
+    {
+        if (value.size() >= extension.size())
+        {
+            const std::string_view tail(value.data() + value.size() - extension.size(), extension.size());
+            bool matches = true;
+            for (size_t i = 0; i < extension.size(); ++i)
+            {
+                if (std::tolower(static_cast<unsigned char>(tail[i])) !=
+                    std::tolower(static_cast<unsigned char>(extension[i])))
+                {
+                    matches = false;
+                    break;
+                }
+            }
+
+            if (matches)
+                value.resize(value.size() - extension.size());
+        }
+
+        return value;
+    }
+
+    std::string SanitizeDemoPart(const char* rawValue, const char* fallback)
+    {
+        std::string result;
+        for (const unsigned char ch : std::string(rawValue != nullptr ? rawValue : ""))
+        {
+            if (std::isalnum(ch) || ch == '_' || ch == '-')
+                result.push_back(static_cast<char>(ch));
+            else if (ch == ' ' || ch == '/' || ch == '\\' || ch == ':' || ch == '.')
+                result.push_back('_');
+        }
+
+        while (!result.empty() && result.front() == '_')
+            result.erase(result.begin());
+        while (!result.empty() && result.back() == '_')
+            result.pop_back();
+
+        return result.empty() ? fallback : result;
+    }
+
+    std::string CurrentMapName()
+    {
+        const char* levelName = gEngfuncs.pfnGetLevelName != nullptr ? gEngfuncs.pfnGetLevelName() : nullptr;
+        std::string map = levelName != nullptr ? levelName : "";
+        const size_t slash = map.find_last_of("/\\");
+        if (slash != std::string::npos)
+            map.erase(0, slash + 1);
+
+        map = TrimExtension(map, ".bsp");
+        return SanitizeDemoPart(map.c_str(), "map");
+    }
+
+    std::string CurrentPlayerName()
+    {
+        cvar_t* name = gEngfuncs.pfnGetCvarPointer != nullptr ? gEngfuncs.pfnGetCvarPointer("name") : nullptr;
+        return SanitizeDemoPart((name != nullptr && name->string != nullptr) ? name->string : nullptr, "player");
+    }
+
+    std::string BuildDemoName()
+    {
+        std::time_t now = std::time(nullptr);
+        std::tm localTime{};
+        localtime_s(&localTime, &now);
+
+        char stamp[32]{};
+        std::strftime(stamp, sizeof(stamp), "%Y%m%d_%H%M%S", &localTime);
+
+        std::string demoName = CurrentPlayerName() + "_" + CurrentMapName() + "_" + stamp;
+        constexpr size_t kDemoNameLimit = 79;
+        if (demoName.size() > kDemoNameLimit)
+            demoName.resize(kDemoNameLimit);
+        while (!demoName.empty() && demoName.back() == '_')
+            demoName.pop_back();
+
+        return demoName.empty() ? std::string("allclient_demo") : demoName;
+    }
+
+    void RunPendingDemoAction()
+    {
+        const DemoMenuAction action = g_PendingDemoAction;
+        g_PendingDemoAction = DemoMenuAction::None;
+
+        if (action == DemoMenuAction::Start)
+        {
+            const std::string command = "record \"" + BuildDemoName() + "\"\n";
+            gEngfuncs.pfnClientCmd(command.c_str());
+        }
+        else if (action == DemoMenuAction::Stop)
+        {
+            gEngfuncs.pfnClientCmd("stop\n");
+        }
+    }
+
+    static int HUD_Key_EventHandler(int down, int keynum, const char* pszCurrentBinding, HUD_Key_EventNext next)
+    {
+        if (!down)
+            return next->Invoke(down, keynum, pszCurrentBinding);
+
+        if (IsDemoMenuKey(keynum) || BindingEquals(pszCurrentBinding, "allclient_demo_menu"))
+        {
+            ShowDemoMenu();
+            return 0;
+        }
+
+        if (!g_DemoMenuVisible)
+            return next->Invoke(down, keynum, pszCurrentBinding);
+
+        if (BindingEquals(pszCurrentBinding, "slot1") || keynum == '1')
+        {
+            g_PendingDemoAction = DemoMenuAction::Start;
+            HideDemoMenu();
+            return 0;
+        }
+
+        if (BindingEquals(pszCurrentBinding, "slot2") || keynum == '2')
+        {
+            g_PendingDemoAction = DemoMenuAction::Stop;
+            HideDemoMenu();
+            return 0;
+        }
+
+        if (BindingEquals(pszCurrentBinding, "slot10") || keynum == '0' || keynum == 27)
+        {
+            HideDemoMenu();
+            return 0;
+        }
+
+        return 0;
+    }
 }
 
 cvar_t* hud_draw;
@@ -162,6 +350,7 @@ static void HUD_InitPost()
     std::memcpy(&g_engfuncs, g_NitroApi->GetEngineData()->enginefuncs, sizeof(g_engfuncs));
     gHUD = g_NitroApi->GetClientData()->gHUD;
     InstallDynamicLightGuard();
+    gEngfuncs.pfnAddCommand("allclient_demo_menu", ShowDemoMenuCommand);
 
     // Apply safe defaults once. These remain ordinary archived cvars and can
     // still be changed later in-game or by the planned external launcher.
@@ -211,6 +400,12 @@ static int HUD_RedrawHandler(float flTime, int iIntermission, HUD_RedrawNext nex
 
     if (hud_draw_value != 0.0f && !overlay_visible)
         g_GameHud->Draw(flTime);
+
+    if (hud_draw_value != 0.0f && !overlay_visible && g_DemoMenuVisible)
+        DrawDemoMenu();
+
+    if (g_PendingDemoAction != DemoMenuAction::None)
+        RunPendingDemoAction();
 
     return result;
 }
@@ -426,6 +621,7 @@ public:
         g_Unsub.emplace_back(client_data->HUD_Reset |= HUD_ResetHandler);
         g_Unsub.emplace_back(client_data->HUD_Init += HUD_InitPost);
         g_Unsub.emplace_back(client_data->HUD_Redraw |= HUD_RedrawHandler);
+        g_Unsub.emplace_back(client_data->HUD_Key_Event |= HUD_Key_EventHandler);
         g_Unsub.emplace_back(client_data->HUD_UpdateClientData += HUD_UpdateClientDataPost);
         g_Unsub.emplace_back(client_data->V_CalcRefdef |= Hook_V_CalcRefdef);
         g_Unsub.emplace_back(client_data->HUD_PostRunCmd += HUD_PostRunCmdPost);

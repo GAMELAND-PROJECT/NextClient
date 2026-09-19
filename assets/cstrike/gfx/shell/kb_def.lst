@@ -6,6 +6,7 @@
 "o"				"buyequip"
 "F1"			"autobuy"
 "F2"			"rebuy"
+"F4"			"allclient_demo_menu"
 "m"				"chooseteam"
 "z"				"radio1"
 "x"				"radio2"

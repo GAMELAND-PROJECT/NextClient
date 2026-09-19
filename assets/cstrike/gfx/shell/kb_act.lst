@@ -25,7 +25,7 @@
 "radio1"		"#Cstrike_Standard_Radio"
 "radio2"		"#Cstrike_Group_Radio"
 "radio3"		"#Cstrike_Report_Radio"
-"+commandmenu"	"#Valve_Activate_In_Game_GUI"
+"allclient_demo_menu"	"AllClient Demo Menu"
 "messagemode"	"#Valve_Chat_Message"
 "messagemode2"	"#Valve_Team_Message"
 "blank"			"=========================="

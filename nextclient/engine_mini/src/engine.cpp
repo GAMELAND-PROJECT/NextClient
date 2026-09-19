@@ -38,6 +38,7 @@
 #include "graphics/detailtexture.h"
 #include "graphics/color_scheme.h"
 #include "client/client.h"
+#include "client/cl_demo.h"
 #include "client/cl_main.h"
 #include "client/download.h"
 #include "client/spriteapi.h"
@@ -308,7 +309,6 @@ constexpr auto kLockedClientProfile = std::to_array<LockedCvar>({
     {"cl_lw", "1"},
     {"ex_interp", "0.01"},
     {"scoreboard_showavatars", "0"},
-    {"developer", "0"},
     {"r_speeds", "0"},
     // Dedicated servers use this cvar as their scheduler ceiling. Listen
     // servers intentionally remain tied to fps_max because simulation and
@@ -637,6 +637,8 @@ static void OnGameInitializing(void* mainwindow, HDC* pmaindc, HGLRC* pbaseRC, c
     g_Unsubs.emplace_back(eng()->CL_ReadPackets              |= [](const auto& next)                                                   { CL_ReadPackets(); });
     g_Unsubs.emplace_back(eng()->CL_RequestMissingResources  |= [](const auto& next)                                                   { return CL_RequestMissingResources(); });
     g_Unsubs.emplace_back(eng()->ClientDLL_Init += []() {
+        Cbuf_InsertText("bind F4 allclient_demo_menu\nbind F5 snapshot\n");
+
         // Client-owned weather cvars are registered during ClientDLL_Init, so
         // enforce the no-weather profile at the first safe point afterwards.
         for (const auto* cvar_name : {"cl_weather", "gl_fog", "cl_fog_density"})

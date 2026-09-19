@@ -19,6 +19,11 @@ namespace
     CommandSource g_CommandSource;
     bool g_Cbuf_AddText_called;
 
+    bool ShouldBypassLocalDeveloperFilter()
+    {
+        return g_CommandSource == CommandSource::Console && developer != nullptr && developer->value > 0.0f;
+    }
+
     char* Cbuf_AddTextHandler(const char* text, sizebuf_t* buf, nitroapi::NextHandlerInterface<char*, const char*, sizebuf_t*>* next)
     {
         g_Cbuf_AddText_called = true;
@@ -32,6 +37,11 @@ namespace
         if (cmd.starts_with(kPrivateResourceMsgMarker))
         {
             return kEmpty;
+        }
+
+        if (ShouldBypassLocalDeveloperFilter())
+        {
+            return next->Invoke(text, buf);
         }
 
         ScopedCommandBuffer filtered(g_FilteredCmd);
@@ -56,6 +66,12 @@ namespace
         std::string_view cmd = text;
         if (cmd.starts_with(kPrivateResourceMsgMarker))
             return;
+
+        if (ShouldBypassLocalDeveloperFilter())
+        {
+            next->Invoke(text);
+            return;
+        }
 
         ScopedCommandBuffer filtered(g_FilteredCmd);
         g_CmdChecker->FilterCmd(cmd, g_CommandSource, filtered.value);
