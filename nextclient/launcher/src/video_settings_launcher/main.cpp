@@ -114,6 +114,9 @@ std::wstring PointerPositionText(int position)
 HINSTANCE g_instance{};
 HFONT g_font{};
 HFONT g_emphasisFont{};
+HFONT g_brandFont{};
+HBRUSH g_backgroundBrush{};
+HBRUSH g_panelBrush{};
 HWND g_resolution{};
 HWND g_hdModels{};
 HWND g_highQuality{};
@@ -147,6 +150,15 @@ HWND g_demoStatus{};
 std::wstring g_demoRoot;
 std::wstring g_demoPasswordValue;
 std::vector<std::filesystem::path> g_demoFiles;
+
+constexpr COLORREF kColorBackground = RGB(22, 23, 25);
+constexpr COLORREF kColorPanel = RGB(30, 32, 34);
+constexpr COLORREF kColorPanelBorder = RGB(48, 61, 82);
+constexpr COLORREF kColorText = RGB(232, 238, 247);
+constexpr COLORREF kColorMuted = RGB(152, 164, 184);
+constexpr COLORREF kColorAccent = RGB(0, 210, 160);
+constexpr COLORREF kColorAccentHot = RGB(23, 238, 185);
+constexpr COLORREF kColorDanger = RGB(235, 86, 86);
 
 class RegistryKey
 {
@@ -783,39 +795,49 @@ void RefreshDemoList()
     g_demoFiles.clear();
     SendMessageW(g_demoList, LB_RESETCONTENT, 0, 0);
 
-    const auto demoDir = ExecutableRoot() / L"cstrike";
-    if (!std::filesystem::is_directory(demoDir))
+    const auto cstrikeDir = ExecutableRoot() / L"cstrike";
+    const auto demoDir = cstrikeDir / L"demos";
+    if (!std::filesystem::is_directory(cstrikeDir))
     {
         SetDemoStatus(L"Demo folder was not found.", true);
         return;
     }
 
-    for (const auto& entry : std::filesystem::directory_iterator(demoDir))
+    std::error_code error;
+    std::filesystem::create_directories(demoDir, error);
+
+    if (std::filesystem::is_directory(demoDir))
     {
-        if (!entry.is_regular_file())
-            continue;
+        for (const auto& entry : std::filesystem::directory_iterator(demoDir))
+        {
+            if (!entry.is_regular_file())
+                continue;
 
-        std::wstring extension = entry.path().extension().wstring();
-        for (wchar_t& ch : extension)
-            ch = static_cast<wchar_t>(towlower(ch));
-        if (extension != L".dem")
-            continue;
+            std::wstring extension = entry.path().extension().wstring();
+            for (wchar_t& ch : extension)
+                ch = static_cast<wchar_t>(towlower(ch));
+            if (extension != L".dem")
+                continue;
 
-        g_demoFiles.push_back(entry.path());
+            g_demoFiles.push_back(entry.path());
+        }
     }
 
     std::ranges::sort(g_demoFiles, [](const auto& left, const auto& right)
     {
-        return left.filename().wstring() < right.filename().wstring();
+        return left.wstring() < right.wstring();
     });
 
     for (const auto& path : g_demoFiles)
-        SendMessageW(g_demoList, LB_ADDSTRING, 0, reinterpret_cast<LPARAM>(path.filename().c_str()));
+    {
+        const std::wstring label = L"demos\\" + path.filename().wstring();
+        SendMessageW(g_demoList, LB_ADDSTRING, 0, reinterpret_cast<LPARAM>(label.c_str()));
+    }
 
     if (!g_demoFiles.empty())
         SendMessageW(g_demoList, LB_SETCURSEL, 0, 0);
 
-    SetDemoStatus(g_demoFiles.empty() ? L"No local .dem files found in cstrike." : L"Ready.");
+    SetDemoStatus(g_demoFiles.empty() ? L"No local .dem files found in cstrike\\demos." : L"Ready.");
 }
 
 bool ReadDemoPassword(HWND window, std::wstring& password)
@@ -911,6 +933,9 @@ void DeleteSelectedDemo(HWND window)
     RefreshDemoList();
 }
 
+bool IsActionButtonId(UINT id);
+void DrawActionButton(const DRAWITEMSTRUCT& item);
+
 LRESULT CALLBACK DemoManagerProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam)
 {
     switch (message)
@@ -960,6 +985,14 @@ LRESULT CALLBACK DemoManagerProc(HWND window, UINT message, WPARAM wParam, LPARA
             return 0;
         default:
             break;
+        }
+        break;
+
+    case WM_DRAWITEM:
+        if (IsActionButtonId(static_cast<UINT>(wParam)))
+        {
+            DrawActionButton(*reinterpret_cast<DRAWITEMSTRUCT*>(lParam));
+            return TRUE;
         }
         break;
     case WM_CLOSE:
@@ -1023,6 +1056,75 @@ HWND AddControl(HWND parent, const wchar_t* type, const wchar_t* text, DWORD sty
     return control;
 }
 
+HWND AddActionButton(HWND parent, const wchar_t* text, int x, int y, int width, int height, int id, bool defaultButton = false)
+{
+    return AddControl(parent, L"BUTTON", text,
+        BS_OWNERDRAW | WS_TABSTOP,
+        x, y, width, height, id, 0);
+}
+
+bool IsActionButtonId(UINT id)
+{
+    return id == IdLaunch || id == IdDemoManager || id == IdRestore || id == IdCancel;
+}
+
+void DrawActionButton(const DRAWITEMSTRUCT& item)
+{
+    const bool pressed = (item.itemState & ODS_SELECTED) != 0;
+    const bool focused = (item.itemState & ODS_FOCUS) != 0;
+    const bool disabled = (item.itemState & ODS_DISABLED) != 0;
+
+    COLORREF fill = RGB(39, 42, 45);
+    COLORREF border = RGB(70, 74, 78);
+    COLORREF text = disabled ? RGB(110, 120, 138) : kColorText;
+
+    if (item.CtlID == IdLaunch)
+    {
+        fill = pressed ? RGB(0, 146, 112) : RGB(0, 178, 136);
+        border = focused ? kColorAccentHot : kColorAccent;
+        text = RGB(5, 15, 22);
+    }
+    else if (item.CtlID == IdDemoManager)
+    {
+        fill = pressed ? RGB(38, 66, 60) : RGB(31, 48, 44);
+        border = focused ? kColorAccentHot : RGB(69, 113, 98);
+    }
+    else if (item.CtlID == IdCancel)
+    {
+        fill = pressed ? RGB(49, 51, 54) : kColorBackground;
+        border = RGB(65, 68, 72);
+    }
+
+    HBRUSH fillBrush = CreateSolidBrush(fill);
+    FillRect(item.hDC, &item.rcItem, fillBrush);
+    DeleteObject(fillBrush);
+
+    HPEN borderPen = CreatePen(PS_SOLID, focused ? 2 : 1, border);
+    HGDIOBJ oldPen = SelectObject(item.hDC, borderPen);
+    HGDIOBJ oldBrush = SelectObject(item.hDC, GetStockObject(NULL_BRUSH));
+    Rectangle(item.hDC, item.rcItem.left, item.rcItem.top, item.rcItem.right, item.rcItem.bottom);
+    SelectObject(item.hDC, oldBrush);
+    SelectObject(item.hDC, oldPen);
+    DeleteObject(borderPen);
+
+    wchar_t caption[128]{};
+    GetWindowTextW(item.hwndItem, caption, static_cast<int>(std::size(caption)));
+    SetBkMode(item.hDC, TRANSPARENT);
+    SetTextColor(item.hDC, text);
+    HGDIOBJ oldFont = SelectObject(item.hDC, g_emphasisFont);
+    RECT textRect = item.rcItem;
+    if (pressed)
+        OffsetRect(&textRect, 1, 1);
+    DrawTextW(item.hDC, caption, -1, &textRect, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+    SelectObject(item.hDC, oldFont);
+    if (focused)
+    {
+        RECT focusRect = item.rcItem;
+        InflateRect(&focusRect, -5, -5);
+        DrawFocusRect(item.hDC, &focusRect);
+    }
+}
+
 void CreateControls(HWND window)
 {
     InitializeNativeResolutionIfNeeded();
@@ -1032,14 +1134,16 @@ void CreateControls(HWND window)
     {
         return AddControl(window, L"STATIC", text, SS_RIGHT, x, y, width, height);
     };
-    HWND heading = label(L"\u0622\u0645\u0627\u062f\u0647\u0654 \u0628\u0627\u0632\u06cc \u0647\u0633\u062a\u06cc\u062f\u061f", 24, 16, 568, 28);
-    SendMessageW(heading, WM_SETFONT, reinterpret_cast<WPARAM>(g_emphasisFont), TRUE);
-    label(L"\u062a\u0646\u0638\u06cc\u0645\u0627\u062a \u062f\u0644\u062e\u0648\u0627\u0647\u062a\u0627\u0646 \u0631\u0627 \u0627\u0646\u062a\u062e\u0627\u0628 \u06a9\u0646\u06cc\u062f \u0648 \u0648\u0627\u0631\u062f \u0628\u0627\u0632\u06cc \u0634\u0648\u06cc\u062f.", 24, 48, 568);
+    AddActionButton(window, L"Demo Manager", 28, 24, 168, 42, IdDemoManager);
 
-    AddControl(window, L"BUTTON", L"  \u062a\u0635\u0648\u06cc\u0631  ", BS_GROUPBOX | BS_RIGHT, 20, 82, 576, 120);
-    label(L"\u0648\u0636\u0648\u062d \u062a\u0635\u0648\u06cc\u0631", 422, 113, 150);
+    HWND heading = label(L"ALLCLIENT", 320, 18, 264, 38);
+    SendMessageW(heading, WM_SETFONT, reinterpret_cast<WPARAM>(g_brandFont), TRUE);
+    label(L"COUNTER-STRIKE  /  1.6", 300, 60, 284, 22);
+
+    label(L"\u062a\u0635\u0648\u06cc\u0631", 424, 96, 148, 22);
+    label(L"\u0648\u0636\u0648\u062d \u062a\u0635\u0648\u06cc\u0631", 422, 128, 150);
     g_resolution = AddControl(window, WC_COMBOBOXW, L"", CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP,
-                              44, 108, 246, 220, IdResolution);
+                              44, 124, 246, 220, IdResolution);
     SetWindowLongPtrW(g_resolution, GWL_EXSTYLE,
         GetWindowLongPtrW(g_resolution, GWL_EXSTYLE) & ~WS_EX_RTLREADING);
     g_highQuality = AddControl(window, L"BUTTON", L"\u06a9\u06cc\u0641\u06cc\u062a \u0628\u0627\u0644\u0627\u06cc \u062a\u0635\u0648\u06cc\u0631",
@@ -1047,36 +1151,31 @@ void CreateControls(HWND window)
     g_hdModels = AddControl(window, L"BUTTON", L"\u0645\u062f\u0644\u200c\u0647\u0627\u06cc \u0628\u0627\u06a9\u06cc\u0641\u06cc\u062a \u0628\u0627\u0632\u06cc\u06a9\u0646\u0627\u0646",
         BS_AUTOCHECKBOX | BS_RIGHT | BS_LEFTTEXT | WS_TABSTOP, 44, 156, 248, 28, IdHdModels);
 
-    AddControl(window, L"BUTTON", L"  \u0645\u0627\u0648\u0633 \u0648\u06cc\u0646\u062f\u0648\u0632  ", BS_GROUPBOX | BS_RIGHT, 20, 214, 576, 116);
-    label(L"\u0633\u0631\u0639\u062a \u0646\u0634\u0627\u0646\u06af\u0631", 434, 246, 138);
+    label(L"\u0645\u0627\u0648\u0633", 424, 224, 148, 22);
+    label(L"\u0633\u0631\u0639\u062a \u0646\u0634\u0627\u0646\u06af\u0631", 434, 256, 138);
     g_pointerSpeed = AddControl(window, TRACKBAR_CLASSW, L"", TBS_AUTOTICKS | TBS_HORZ | WS_TABSTOP,
-                                114, 239, 304, 36, IdPointerSpeed);
+                                114, 250, 304, 30, IdPointerSpeed);
     SetWindowLongPtrW(g_pointerSpeed, GWL_EXSTYLE,
         GetWindowLongPtrW(g_pointerSpeed, GWL_EXSTYLE) & ~WS_EX_RTLREADING);
     SendMessageW(g_pointerSpeed, TBM_SETRANGE, TRUE, MAKELPARAM(1, 11));
     SendMessageW(g_pointerSpeed, TBM_SETTICFREQ, 1, 0);
-    g_pointerSpeedValue = AddControl(window, L"STATIC", L"", SS_CENTER, 44, 246, 62, 24, IdPointerSpeedValue);
+    g_pointerSpeedValue = AddControl(window, L"STATIC", L"", SS_CENTER, 44, 256, 62, 24, IdPointerSpeedValue);
     g_enhancePointer = AddControl(window, L"BUTTON", L"\u0627\u0641\u0632\u0627\u06cc\u0634 \u062f\u0642\u062a \u0646\u0634\u0627\u0646\u06af\u0631",
         BS_AUTOCHECKBOX | BS_RIGHT | BS_LEFTTEXT | WS_TABSTOP, 324, 286, 248, 28, IdEnhancePointer);
     label(L"\u0627\u0639\u0645\u0627\u0644 \u0631\u0648\u06cc \u0645\u0627\u0648\u0633 \u06a9\u0627\u0631\u0628\u0631 \u0641\u0639\u0644\u06cc \u0648\u06cc\u0646\u062f\u0648\u0632", 44, 289, 260);
 
-    AddControl(window, L"BUTTON", L"  \u0627\u0634\u062a\u0631\u0627\u06a9 \u06af\u06cc\u0645\u0646\u062a  ", BS_GROUPBOX | BS_RIGHT, 20, 342, 576, 132);
-    g_subscriptionTag = label(L"", 44, 368, 528, 24);
+    label(L"\u0627\u0634\u062a\u0631\u0627\u06a9 \u06af\u06cc\u0645\u200c\u0646\u062a", 424, 350, 148, 22);
+    g_subscriptionTag = label(L"", 44, 386, 248, 26);
     SendMessageW(g_subscriptionTag, WM_SETFONT, reinterpret_cast<WPARAM>(g_emphasisFont), TRUE);
-    g_subscriptionState = label(L"", 44, 395, 528, 24);
-    g_subscriptionDetails = label(L"", 44, 422, 528, 22);
-    g_subscriptionRemaining = label(L"", 44, 445, 528, 24);
+    g_subscriptionState = label(L"", 324, 386, 248, 26);
+    g_subscriptionDetails = label(L"", 324, 420, 248, 26);
+    g_subscriptionRemaining = label(L"", 44, 420, 248, 26);
     SendMessageW(g_subscriptionRemaining, WM_SETFONT, reinterpret_cast<WPARAM>(g_emphasisFont), TRUE);
     PopulateSubscriptionStatus();
 
-    AddControl(window, L"BUTTON", L"\u0627\u062c\u0631\u0627\u06cc \u0628\u0627\u0632\u06cc", BS_DEFPUSHBUTTON | WS_TABSTOP,
-               420, 488, 176, 36, IdLaunch);
-    AddControl(window, L"BUTTON", L"Demo Manager", BS_PUSHBUTTON | WS_TABSTOP,
-               256, 488, 154, 36, IdDemoManager);
-    AddControl(window, L"BUTTON", L"\u0628\u0627\u0632\u0646\u0634\u0627\u0646\u06cc", BS_PUSHBUTTON | WS_TABSTOP,
-               138, 488, 108, 36, IdRestore);
-    AddControl(window, L"BUTTON", L"\u0627\u0646\u0635\u0631\u0627\u0641", BS_PUSHBUTTON | WS_TABSTOP,
-               20, 488, 108, 36, IdCancel);
+    AddActionButton(window, L"\u0627\u062c\u0631\u0627\u06cc \u0628\u0627\u0632\u06cc", 370, 486, 214, 48, IdLaunch, true);
+    AddActionButton(window, L"\u0628\u0627\u0632\u0646\u0634\u0627\u0646\u06cc", 144, 486, 136, 48, IdRestore);
+    AddActionButton(window, L"\u0627\u0646\u0635\u0631\u0627\u0641", 28, 486, 104, 48, IdCancel);
     g_status = label(L"\u0622\u0645\u0627\u062f\u0647", 24, 536, 568, 42);
 
     const VideoSettings current = ReadSettings();
@@ -1151,23 +1250,64 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
         }
         break;
 
+    case WM_DRAWITEM:
+        if (IsActionButtonId(static_cast<UINT>(wParam)))
+        {
+            DrawActionButton(*reinterpret_cast<DRAWITEMSTRUCT*>(lParam));
+            return TRUE;
+        }
+        break;
+
     case WM_CTLCOLORSTATIC:
         SetBkMode(reinterpret_cast<HDC>(wParam), TRANSPARENT);
         if (reinterpret_cast<HWND>(lParam) == g_subscriptionState)
         {
             const bool active = g_accessStatus.state == GameNetAccessState::Active;
-            SetTextColor(reinterpret_cast<HDC>(wParam), active ? RGB(24, 132, 76) : RGB(190, 48, 48));
+            SetTextColor(reinterpret_cast<HDC>(wParam), active ? kColorAccent : kColorDanger);
         }
         else if (reinterpret_cast<HWND>(lParam) == g_subscriptionTag)
-            SetTextColor(reinterpret_cast<HDC>(wParam), RGB(28, 73, 128));
+            SetTextColor(reinterpret_cast<HDC>(wParam), RGB(128, 176, 255));
         else if (reinterpret_cast<HWND>(lParam) == g_subscriptionDetails)
-            SetTextColor(reinterpret_cast<HDC>(wParam), RGB(80, 80, 80));
+            SetTextColor(reinterpret_cast<HDC>(wParam), kColorMuted);
         else if (reinterpret_cast<HWND>(lParam) == g_subscriptionRemaining)
         {
             const bool active = g_accessStatus.state == GameNetAccessState::Active;
-            SetTextColor(reinterpret_cast<HDC>(wParam), active ? RGB(24, 132, 76) : RGB(190, 48, 48));
+            SetTextColor(reinterpret_cast<HDC>(wParam), active ? kColorAccent : kColorDanger);
         }
-        return reinterpret_cast<LRESULT>(GetSysColorBrush(COLOR_WINDOW));
+        else
+            SetTextColor(reinterpret_cast<HDC>(wParam), kColorText);
+        return reinterpret_cast<LRESULT>(g_backgroundBrush);
+
+    case WM_CTLCOLORBTN:
+        SetBkMode(reinterpret_cast<HDC>(wParam), TRANSPARENT);
+        SetTextColor(reinterpret_cast<HDC>(wParam), kColorText);
+        return reinterpret_cast<LRESULT>(g_backgroundBrush);
+
+    case WM_CTLCOLORDLG:
+        return reinterpret_cast<LRESULT>(g_backgroundBrush);
+
+    case WM_ERASEBKGND:
+    {
+        HDC dc = reinterpret_cast<HDC>(wParam);
+        RECT rect{};
+        GetClientRect(window, &rect);
+        FillRect(dc, &rect, g_backgroundBrush);
+
+        HPEN accentPen = CreatePen(PS_SOLID, 1, RGB(58, 62, 64));
+        HGDIOBJ oldPen = SelectObject(dc, accentPen);
+        for (int y : {88, 210, 336, 464})
+        {
+            MoveToEx(dc, 28, y, nullptr);
+            LineTo(dc, rect.right - 28, y);
+        }
+        SelectObject(dc, oldPen);
+        DeleteObject(accentPen);
+        HBRUSH accentBrush = CreateSolidBrush(kColorAccent);
+        RECT accent{rect.right - 8, 24, rect.right - 4, 72};
+        FillRect(dc, &accent, accentBrush);
+        DeleteObject(accentBrush);
+        return TRUE;
+    }
 
     case WM_DESTROY:
         if (!g_launchRequested)
@@ -1191,11 +1331,16 @@ bool ShowVideoSettingsDialog(HINSTANCE instance, const GameNetAccessStatus& acce
 
     NONCLIENTMETRICSW metrics{sizeof(metrics)};
     SystemParametersInfoW(SPI_GETNONCLIENTMETRICS, sizeof(metrics), &metrics, 0);
-    wcscpy_s(metrics.lfMessageFont.lfFaceName, L"Tahoma");
+    wcscpy_s(metrics.lfMessageFont.lfFaceName, L"Segoe UI");
+    metrics.lfMessageFont.lfHeight = -15;
     g_font = CreateFontIndirectW(&metrics.lfMessageFont);
     LOGFONTW emphasisFont = metrics.lfMessageFont;
     emphasisFont.lfWeight = FW_BOLD;
     g_emphasisFont = CreateFontIndirectW(&emphasisFont);
+    emphasisFont.lfHeight = -30;
+    g_brandFont = CreateFontIndirectW(&emphasisFont);
+    g_backgroundBrush = CreateSolidBrush(kColorBackground);
+    g_panelBrush = CreateSolidBrush(kColorPanel);
 
     WNDCLASSEXW windowClass{sizeof(windowClass)};
     windowClass.style = CS_HREDRAW | CS_VREDRAW;
@@ -1203,7 +1348,7 @@ bool ShowVideoSettingsDialog(HINSTANCE instance, const GameNetAccessStatus& acce
     windowClass.hInstance = instance;
     windowClass.hIcon = LoadIconW(nullptr, IDI_APPLICATION);
     windowClass.hCursor = LoadCursorW(nullptr, IDC_ARROW);
-    windowClass.hbrBackground = GetSysColorBrush(COLOR_WINDOW);
+    windowClass.hbrBackground = g_backgroundBrush;
     windowClass.lpszClassName = kWindowClass;
     windowClass.hIconSm = windowClass.hIcon;
     if (!RegisterClassExW(&windowClass))
@@ -1241,5 +1386,16 @@ bool ShowVideoSettingsDialog(HINSTANCE instance, const GameNetAccessStatus& acce
         DeleteObject(g_font);
     if (g_emphasisFont)
         DeleteObject(g_emphasisFont);
+    if (g_brandFont)
+        DeleteObject(g_brandFont);
+    if (g_backgroundBrush)
+        DeleteObject(g_backgroundBrush);
+    if (g_panelBrush)
+        DeleteObject(g_panelBrush);
+    g_font = nullptr;
+    g_emphasisFont = nullptr;
+    g_brandFont = nullptr;
+    g_backgroundBrush = nullptr;
+    g_panelBrush = nullptr;
     return g_launchRequested;
 }

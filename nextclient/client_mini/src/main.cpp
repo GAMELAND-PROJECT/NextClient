@@ -1,4 +1,7 @@
 #include "main.h"
+#ifdef _WIN32
+#include <direct.h>
+#endif
 #include <cctype>
 #include <cstdio>
 #include <cstring>
@@ -235,14 +238,59 @@ namespace
         return SanitizeDemoPart((name != nullptr && name->string != nullptr) ? name->string : nullptr, "player");
     }
 
-    std::string BuildDemoName()
+    struct JalaliDate
+    {
+        int year;
+        int month;
+        int day;
+    };
+
+    JalaliDate GregorianToJalali(int gy, int gm, int gd)
+    {
+        static constexpr int gDaysInMonth[] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+        static constexpr int jDaysInMonth[] = {31, 31, 31, 31, 31, 31, 30, 30, 30, 30, 30, 29};
+
+        gy -= 1600;
+        gm -= 1;
+        gd -= 1;
+
+        int gDayNo = 365 * gy + (gy + 3) / 4 - (gy + 99) / 100 + (gy + 399) / 400;
+        for (int i = 0; i < gm; ++i)
+            gDayNo += gDaysInMonth[i];
+        if (gm > 1 && ((gy + 1600) % 4 == 0 && ((gy + 1600) % 100 != 0 || (gy + 1600) % 400 == 0)))
+            ++gDayNo;
+        gDayNo += gd;
+
+        int jDayNo = gDayNo - 79;
+        const int jNp = jDayNo / 12053;
+        jDayNo %= 12053;
+
+        int jy = 979 + 33 * jNp + 4 * (jDayNo / 1461);
+        jDayNo %= 1461;
+
+        if (jDayNo >= 366)
+        {
+            jy += (jDayNo - 1) / 365;
+            jDayNo = (jDayNo - 1) % 365;
+        }
+
+        int jm = 0;
+        for (; jm < 11 && jDayNo >= jDaysInMonth[jm]; ++jm)
+            jDayNo -= jDaysInMonth[jm];
+
+        return {jy, jm + 1, jDayNo + 1};
+    }
+
+    std::string BuildDemoFileName()
     {
         std::time_t now = std::time(nullptr);
         std::tm localTime{};
         localtime_s(&localTime, &now);
 
         char stamp[32]{};
-        std::strftime(stamp, sizeof(stamp), "%Y%m%d_%H%M%S", &localTime);
+        const JalaliDate date = GregorianToJalali(localTime.tm_year + 1900, localTime.tm_mon + 1, localTime.tm_mday);
+        std::snprintf(stamp, sizeof(stamp), "%04d-%02d-%02d__%02d-%02d",
+            date.year, date.month, date.day, localTime.tm_hour, localTime.tm_min);
 
         std::string demoName = CurrentPlayerName() + "_" + CurrentMapName() + "_" + stamp;
         constexpr size_t kDemoNameLimit = 79;
@@ -254,6 +302,15 @@ namespace
         return demoName.empty() ? std::string("allclient_demo") : demoName;
     }
 
+    void EnsureDemoDirectory()
+    {
+#ifdef _WIN32
+        _mkdir("cstrike\\demos");
+#else
+        mkdir("cstrike/demos", 0755);
+#endif
+    }
+
     void RunPendingDemoAction()
     {
         const DemoMenuAction action = g_PendingDemoAction;
@@ -261,7 +318,8 @@ namespace
 
         if (action == DemoMenuAction::Start)
         {
-            const std::string command = "record \"" + BuildDemoName() + "\"\n";
+            EnsureDemoDirectory();
+            const std::string command = "record \"demos/" + BuildDemoFileName() + "\"\n";
             gEngfuncs.pfnClientCmd(command.c_str());
         }
         else if (action == DemoMenuAction::Stop)
