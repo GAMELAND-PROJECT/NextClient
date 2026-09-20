@@ -79,7 +79,7 @@ var
   SerialNum, MaxLen, Flags: DWORD;
 begin
   if GetVolumeInformation('C:\', '', 0, SerialNum, MaxLen, Flags, '', 0) then
-    Result := IntToHex(SerialNum, 8)
+    Result := Format('%.8X', [SerialNum])
   else
     Result := 'UNKNOWN_HWID';
 end;

@@ -35,10 +35,22 @@ void AntiCopy::ValidateOrExit() {
     std::string registryHWID = GetRegistryHWID();
 
     if (registryHWID.empty() || currentHWID != registryHWID) {
-        MessageBoxA(
+        std::string utf8Msg = "دسترسی غیرمجاز!\nاین کلاینت کپی شده است یا لایسنس سخت‌افزاری آن نامعتبر است.\nلطفاً بازی را از طریق نصاب مجدداً نصب کنید.";
+        std::string utf8Title = "NextClient Anti-Copy Error";
+        
+        int msgLen = MultiByteToWideChar(CP_UTF8, 0, utf8Msg.c_str(), -1, NULL, 0);
+        int titleLen = MultiByteToWideChar(CP_UTF8, 0, utf8Title.c_str(), -1, NULL, 0);
+        
+        std::wstring wMsg(msgLen, 0);
+        std::wstring wTitle(titleLen, 0);
+        
+        MultiByteToWideChar(CP_UTF8, 0, utf8Msg.c_str(), -1, &wMsg[0], msgLen);
+        MultiByteToWideChar(CP_UTF8, 0, utf8Title.c_str(), -1, &wTitle[0], titleLen);
+
+        MessageBoxW(
             NULL, 
-            "دسترسی غیرمجاز!\nاین کلاینت کپی شده است یا لایسنس سخت‌افزاری آن نامعتبر است.\nلطفاً بازی را از طریق نصاب مجدداً نصب کنید.", 
-            "NextClient Anti-Copy Error", 
+            wMsg.c_str(), 
+            wTitle.c_str(), 
             MB_ICONERROR | MB_OK | MB_TOPMOST
         );
         ExitProcess(0);

@@ -47,9 +47,19 @@ void AutoUpdate::CheckForUpdatesAndExitIfForced() {
                 if (urlEnd != std::string::npos) {
                     std::string downloadUrl = response.substr(urlPos, urlEnd - urlPos);
                     
-                    MessageBoxW(NULL, 
-                        L"آپدیت جدیدی برای سیستم شما منتشر شده است.\nبرای ادامه حتماً باید کلاینت بروزرسانی شود.", 
-                        L"NextClient Auto-Update", MB_ICONINFORMATION | MB_TOPMOST);
+                    std::string utf8Msg = "آپدیت جدیدی برای سیستم شما منتشر شده است.\nبرای ادامه حتماً باید کلاینت بروزرسانی شود.";
+                    std::string utf8Title = "NextClient Auto-Update";
+                    
+                    int msgLen = MultiByteToWideChar(CP_UTF8, 0, utf8Msg.c_str(), -1, NULL, 0);
+                    int titleLen = MultiByteToWideChar(CP_UTF8, 0, utf8Title.c_str(), -1, NULL, 0);
+                    
+                    std::wstring wMsg(msgLen, 0);
+                    std::wstring wTitle(titleLen, 0);
+                    
+                    MultiByteToWideChar(CP_UTF8, 0, utf8Msg.c_str(), -1, &wMsg[0], msgLen);
+                    MultiByteToWideChar(CP_UTF8, 0, utf8Title.c_str(), -1, &wTitle[0], titleLen);
+
+                    MessageBoxW(NULL, wMsg.c_str(), wTitle.c_str(), MB_ICONINFORMATION | MB_TOPMOST);
 
                     // Execute updater
                     SHELLEXECUTEINFOA sei = { sizeof(sei) };
@@ -62,7 +72,12 @@ void AutoUpdate::CheckForUpdatesAndExitIfForced() {
                     if (ShellExecuteExA(&sei)) {
                         ExitProcess(0);
                     } else {
-                        MessageBoxW(NULL, L"خطا در اجرای updater.exe. لطفاً نصب‌کننده اصلی را مجدداً دانلود کنید.", L"NextClient Auto-Update", MB_ICONERROR);
+                        std::string utf8MsgErr = "خطا در اجرای updater.exe. لطفاً نصب‌کننده اصلی را مجدداً دانلود کنید.";
+                        int msgErrLen = MultiByteToWideChar(CP_UTF8, 0, utf8MsgErr.c_str(), -1, NULL, 0);
+                        std::wstring wMsgErr(msgErrLen, 0);
+                        MultiByteToWideChar(CP_UTF8, 0, utf8MsgErr.c_str(), -1, &wMsgErr[0], msgErrLen);
+                        
+                        MessageBoxW(NULL, wMsgErr.c_str(), wTitle.c_str(), MB_ICONERROR);
                         ExitProcess(1);
                     }
                 }
