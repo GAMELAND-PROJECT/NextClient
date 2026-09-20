@@ -230,11 +230,8 @@ inline gameserveritem_t::gameserveritem_t()
 
 inline const char* gameserveritem_t::GetName() const
 {
-	// Use the IP address as the name if nothing is set yet.
-	if ( m_szServerName[0] == 0 )
-		return m_NetAdr.GetConnectionAddressString();
-	else
-		return m_szServerName;
+	// Do not use the IP address as the name if nothing is set yet, to avoid IP leaks.
+	return m_szServerName;
 }
 
 inline void gameserveritem_t::SetName( const char *pName )

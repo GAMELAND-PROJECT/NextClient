@@ -215,7 +215,7 @@ void CDialogGameInfo::PerformLayout()
     if (server_item_.m_NetAdr.GetIP() && server_item_.m_NetAdr.GetConnectionPort())
     {
         char buf[64];
-        sprintf(buf, "%s", server_item_.m_NetAdr.GetConnectionAddressString().c_str());
+        sprintf(buf, "%s", "");
         SetControlStringNoLocalize("ServerIPText", buf);
         m_pConnectButton->SetEnabled(true);
 

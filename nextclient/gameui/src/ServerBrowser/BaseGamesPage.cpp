@@ -440,12 +440,12 @@ void CBaseGamesPage::ServerResponded(serveritem_t &server)
     kv->SetInt("password", server.gs.m_bPassword ? 1 : 0);
     kv->SetString("secure", server.gs.m_bSecure ? std::format("!img:{}", m_iSecureImage).c_str() : "");
     kv->SetString("bots", server.gs.m_nBotPlayers > 0 ? std::to_string(server.gs.m_nBotPlayers).c_str() : "");
-    kv->SetString("address", server.gs.m_NetAdr.GetConnectionAddressString().c_str());
+    kv->SetString("address", "");
     kv->SetInt("_ip", server.gs.m_NetAdr.GetIP());
     kv->SetInt("_port", server.gs.m_NetAdr.GetConnectionPort());
     kv->SetWString("LastPlayed", FormatUnixTime("%a %e %b %H:%M", server.gs.m_ulTimeLastPlayed).c_str());
 
-    if (server.gs.m_bHadSuccessfulResponse)
+    if (server.hadSuccessfulResponse)
     {
         char buf[256];
         sprintf(buf, "%d / %d", GetHumanPlayerCount(server.gs), server.gs.m_nMaxPlayers);
@@ -455,7 +455,7 @@ void CBaseGamesPage::ServerResponded(serveritem_t &server)
         kv->SetString("Players", "-");
 
 
-    if (!server.gs.m_bHadSuccessfulResponse)
+    if (!server.hadSuccessfulResponse)
         kv->SetString("Ping", "-");
     else if (server.gs.m_nPing < 1200)
         kv->SetInt("Ping", server.gs.m_nPing);
