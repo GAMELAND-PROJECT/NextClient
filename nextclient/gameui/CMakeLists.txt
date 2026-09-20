@@ -59,6 +59,7 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
         data_encoding::data_encoding
         concurrencpp::concurrencpp
         Ws2_32.lib
+        cpr::cpr
 )
 
 target_compile_options(${PROJECT_NAME} PRIVATE

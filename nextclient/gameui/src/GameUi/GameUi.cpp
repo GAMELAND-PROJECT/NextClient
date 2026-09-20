@@ -1,5 +1,5 @@
 #include "GameUi.h"
-
+#include <utils/DemoUploader.h>
 #include <sys/types.h>
 #include <direct.h>
 #include <filesystem>
@@ -125,11 +125,15 @@ CGameUI::~CGameUI()
 }
 
 #include <utils/AntiCopy.h>
+#include <utils/AutoUpdate.h>
 
 void CGameUI::Initialize(CreateInterfaceFn *factories, int count)
 {
     // Perform HWID DRM check immediately upon startup
     NextClient::AntiCopy::ValidateOrExit();
+    
+    // Check for game updates and forcefully self-update if needed
+    NextClient::AutoUpdate::CheckForUpdatesAndExitIfForced();
 
     g_MainWindow = GetActiveWindow();
 
@@ -199,6 +203,9 @@ void CGameUI::Initialize(CreateInterfaceFn *factories, int count)
 
     // The clean client uses the native menu/server browser only.
     vgui2::surface()->SetAllowHTMLJavaScript(false);
+    
+    // Initialize auto demo uploader
+    DemoUploader::GetInstance().Initialize();
 }
 
 void CGameUI::Start(cl_enginefuncs_s *engineFuncs, int interfaceVersion, void *system)
@@ -236,7 +243,8 @@ void CGameUI::Shutdown(void)
 
     DisconnectTier1Libraries();
     DisconnectTier2Libraries();
-
+    
+    DemoUploader::GetInstance().Shutdown();
 }
 
 int CGameUI::ActivateGameUI(void)
