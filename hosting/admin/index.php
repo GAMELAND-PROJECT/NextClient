@@ -838,15 +838,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
             backupAndAtomicWrite(FILE_PASSWORD, $password . "\n");
             flash('success', 'رمز مشترک سرورها جایگزین شد.');
-        } elseif ($action === 'generate_installer_code') {
-            $installerCode = str_pad((string)random_int(0, 99999999), 8, '0', STR_PAD_LEFT);
-            writeInstallerAccessState(true, hash('sha256', $installerCode), $installerCode);
-            $_SESSION['generated_installer_code'] = $installerCode;
-            flash('success', 'کد نصب جدید فعال شد. همین حالا آن را کپی کنید.');
-        } elseif ($action === 'revoke_installer_code') {
-            writeInstallerAccessState(false);
-            unset($_SESSION['generated_installer_code']);
-            flash('success', 'کد نصب فعال فوراً لغو شد.');
+        } elseif ($action === 'generate_install_password') {
+            $key = strtoupper(trim((string)($_POST['build'] ?? '')));
+            $rows = subscriptionRowsByKey();
+            if ($key === '' || !isset($rows[$key])) {
+                throw new RuntimeException('اشتراک موردنظر پیدا نشد.');
+            }
+            $chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+            $password = '';
+            for ($i = 0; $i < 8; $i++) {
+                $password .= $chars[random_int(0, strlen($chars) - 1)];
+            }
+            $rows[$key]['install_password'] = $password;
+            writeSubscriptionRows($rows);
+            flash('success', 'رمز نصب جدید برای گیمنت تولید شد.');
+        } elseif ($action === 'revoke_install_password') {
+            $key = strtoupper(trim((string)($_POST['build'] ?? '')));
+            $rows = subscriptionRowsByKey();
+            if ($key === '' || !isset($rows[$key])) {
+                throw new RuntimeException('اشتراک موردنظر پیدا نشد.');
+            }
+            $rows[$key]['install_password'] = '';
+            writeSubscriptionRows($rows);
+            flash('success', 'رمز نصب گیمنت باطل شد.');
         } else {
             throw new RuntimeException('عملیات ناشناخته است.');
         }
@@ -1050,6 +1064,7 @@ if ($authenticated) {
                 <div class="manage-panel">
                 <section class="manage-block renewal-block"><div class="manage-title"><strong>تمدید اعتبار</strong><span>از تاریخ فعلی یا امروز محاسبه می‌شود</span></div><div class="quick-actions"><form method="post" class="month-actions"><input type="hidden" name="csrf" value="<?= escape(csrfToken()) ?>"><input type="hidden" name="action" value="adjust_subscription"><input type="hidden" name="operation" value="extend_months"><input type="hidden" name="build" value="<?= escape($row['build']) ?>"><button type="submit" name="months" value="1">+ ۱ ماه</button><button type="submit" name="months" value="2">+ ۲ ماه</button><button type="submit" name="months" value="3">+ ۳ ماه</button></form><form method="post" class="days-action"><input type="hidden" name="csrf" value="<?= escape(csrfToken()) ?>"><input type="hidden" name="action" value="adjust_subscription"><input type="hidden" name="operation" value="extend_days"><input type="hidden" name="build" value="<?= escape($row['build']) ?>"><input type="number" name="days" min="1" max="3650" inputmode="numeric" placeholder="تعداد روز" required><button class="button secondary" type="submit">تمدید دلخواه</button></form></div></section>
                 <section class="manage-block access-block"><div class="manage-title"><strong>کنترل دسترسی</strong><span>تغییر وضعیت بلافاصله روی فایل کلاینت اعمال می‌شود</span></div><form method="post" class="confirm-form" data-confirm="<?= $row['suspended'] ? 'اشتراک دوباره فعال شود؟' : 'دسترسی آنلاین این گیمنت فوراً معلق شود؟' ?>"><input type="hidden" name="csrf" value="<?= escape(csrfToken()) ?>"><input type="hidden" name="action" value="adjust_subscription"><input type="hidden" name="operation" value="<?= $row['suspended'] ? 'resume' : 'suspend' ?>"><input type="hidden" name="build" value="<?= escape($row['build']) ?>"><button class="button <?= $row['suspended'] ? 'primary' : 'warning' ?>" type="submit"><?= $row['suspended'] ? 'فعال‌سازی مجدد' : 'تعلیق دسترسی آنلاین' ?></button></form></section>
+                <section class="manage-block password-block"><div class="manage-title"><strong>رمز نصب کلاینت</strong><span>برای نصب کلاینت با این گیمنت استفاده می‌شود</span></div><?php if (empty($row['install_password'])): ?><form method="post"><input type="hidden" name="csrf" value="<?= escape(csrfToken()) ?>"><input type="hidden" name="action" value="generate_install_password"><input type="hidden" name="build" value="<?= escape($row['build']) ?>"><button class="button primary wide" type="submit">تولید رمز جدید</button></form><?php else: ?><div class="quick-actions password-display" style="display: flex; gap: 8px; align-items: center;"><code class="ltr" style="padding: 10px 16px; background: rgba(0,255,200,0.1); color: #00ffcc; border: 1px solid rgba(0,255,200,0.2); border-radius: 6px; font-size: 1.4em; font-weight: bold; letter-spacing: 3px; flex: 1; text-align: center; user-select: all; cursor: copy;" title="برای کپی کلیک کنید" onclick="navigator.clipboard.writeText('<?= escape($row['install_password']) ?>'); this.style.backgroundColor='rgba(255,255,255,0.2)'; setTimeout(()=>this.style.backgroundColor='', 200);"><?= escape($row['install_password']) ?></code><form method="post" class="confirm-form" data-confirm="آیا از ابطال رمز نصب این گیمنت اطمینان دارید؟"><input type="hidden" name="csrf" value="<?= escape(csrfToken()) ?>"><input type="hidden" name="action" value="revoke_install_password"><input type="hidden" name="build" value="<?= escape($row['build']) ?>"><button class="button danger" type="submit" style="height: 100%;">ابطال رمز</button></form></div><?php endif; ?></section>
                 <details class="subscription-edit"><summary>ویرایش اطلاعات پروفایل</summary><div class="edit-actions"><form method="post" class="edit-form"><input type="hidden" name="csrf" value="<?= escape(csrfToken()) ?>"><input type="hidden" name="action" value="save_subscription"><input type="hidden" name="original_build" value="<?= escape($row['build']) ?>"><div class="subscription-fields"><label>تگ Build<input class="ltr" name="build_tag" maxlength="64" pattern="[A-Za-z0-9_-]+" value="<?= escape($row['build']) ?>" required></label><label>تگ بازیکن<input class="ltr" name="player_tag" maxlength="12" pattern="[A-Za-z0-9_-]+" value="<?= escape($row['player']) ?>" required></label><label>انقضای شمسی<input class="ltr" name="expiry" maxlength="10" pattern="\d{4}/\d{2}/\d{2}" value="<?= escape($row['expiry']) ?>" required></label><label>رمز آپلود دمو<input class="ltr" name="upload_password" maxlength="31" pattern="[A-Za-z0-9_!@#$%^&*.\-]{0,31}" value="<?= escape($row['upload_password']) ?>" autocomplete="new-password"></label><label>رمز نصب کلاینت<input class="ltr" name="install_password" maxlength="31" pattern="[A-Za-z0-9_!@#$%^&*.\-]{0,31}" value="<?= escape($row['install_password'] ?? '') ?>" autocomplete="new-password"></label></div><button class="button secondary" type="submit">ذخیره اطلاعات</button></form><form method="post" class="confirm-form delete-form" data-confirm="این اشتراک برای همیشه حذف شود؟"><input type="hidden" name="csrf" value="<?= escape(csrfToken()) ?>"><input type="hidden" name="action" value="delete_subscription"><input type="hidden" name="build" value="<?= escape($row['build']) ?>"><button class="button danger" type="submit">حذف کامل پروفایل</button></form></div></details>
                 </div>
               </div>
