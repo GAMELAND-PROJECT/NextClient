@@ -77,6 +77,10 @@ CDialogGameInfo::CDialogGameInfo(vgui2::Panel *parent, uint32 ip, uint16 port) :
     RegisterControlSettingsFile("Servers/DialogGameInfo_SinglePlayer.res");
     RegisterControlSettingsFile("Servers/DialogGameInfo_AutoRetry.res");
 
+    // Never expose the server IP address to the user interface.
+    SetControlVisible("ServerIPLabel", false);
+    SetControlVisible("ServerIPText", false);
+
     server_item_.m_NetAdr.Init(server_ip_, server_port_, server_port_);
 }
 
@@ -214,9 +218,7 @@ void CDialogGameInfo::PerformLayout()
 
     if (server_item_.m_NetAdr.GetIP() && server_item_.m_NetAdr.GetConnectionPort())
     {
-        char buf[64];
-        sprintf(buf, "%s", "");
-        SetControlStringNoLocalize("ServerIPText", buf);
+        // IP address is intentionally never displayed.
         m_pConnectButton->SetEnabled(true);
 
         if (m_pAutoRetry->IsSelected())
@@ -232,7 +234,7 @@ void CDialogGameInfo::PerformLayout()
     }
     else
     {
-        SetControlStringNoLocalize("ServerIPText", "");
+        // IP address is intentionally never displayed.
         m_pConnectButton->SetEnabled(false);
     }
 

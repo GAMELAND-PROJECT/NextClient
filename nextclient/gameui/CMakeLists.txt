@@ -66,6 +66,7 @@ target_compile_options(${PROJECT_NAME} PRIVATE
         /WX  # treat all warnings as error
         /EHsc # NEVER catch SEH exceptions; c functions cannot throw exceptions
         /utf-8 # force UTF-8 charset
+        /wd4828 # suppress warning C4828
 )
 
 if (WIN32)
