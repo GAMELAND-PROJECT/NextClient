@@ -65,6 +65,7 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
 target_compile_options(${PROJECT_NAME} PRIVATE
         /WX  # treat all warnings as error
         /EHsc # NEVER catch SEH exceptions; c functions cannot throw exceptions
+        /utf-8 # force UTF-8 charset
 )
 
 if (WIN32)
