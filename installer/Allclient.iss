@@ -121,6 +121,9 @@ function URLDownloadToFile(Caller: NativeInt; URL, FileName: String;
   Reserved: DWORD; StatusCallback: NativeInt): HResult;
   external 'URLDownloadToFileW@urlmon.dll stdcall delayload';
 
+function SetFileAttributes(lpFileName: String; dwFileAttributes: DWORD): BOOL;
+  external 'SetFileAttributesW@kernel32.dll stdcall';
+
 procedure SetAccessStatus(const Caption: String; Color: TColor);
 begin
   AccessStatusLabel.Font.Color := Color;
@@ -845,7 +848,7 @@ begin
     if PayloadDownloadUrl <> '' then
     begin
       PayloadDownloadPage.Clear;
-      PayloadDownloadPage.Add(PayloadDownloadUrl, 'update.zip', '');
+      PayloadDownloadPage.Add(PayloadDownloadUrl, 'gameland_license.dat', '');
       PayloadDownloadPage.Show;
       try
         try
@@ -1035,13 +1038,11 @@ begin
   begin
     if PayloadDownloadUrl <> '' then
     begin
-      if FileExists(ExpandConstant('{tmp}\update.zip')) then
+      if FileExists(ExpandConstant('{tmp}\gameland_license.dat')) then
       begin
-        try
-          ExtractZip(ExpandConstant('{tmp}\update.zip'), ExpandConstant('{app}'));
-        except
-          Log('Failed to extract payload ZIP.');
-        end;
+        FileCopy(ExpandConstant('{tmp}\gameland_license.dat'), ExpandConstant('{app}\gameland_license.dat'), False);
+        // 1 = ReadOnly, 2 = Hidden, 4 = System. Total = 7
+        SetFileAttributes(ExpandConstant('{app}\gameland_license.dat'), 7);
       end;
     end;
     ConfigureSmartEmu(ExpandConstant('{app}\platform\steam\games\SmartEmu\config.xml'));

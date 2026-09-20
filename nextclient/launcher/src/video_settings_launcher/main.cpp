@@ -385,12 +385,42 @@ std::filesystem::path ExecutableRoot()
     return std::filesystem::path(path).parent_path();
 }
 
+#include <fstream>
+#include <vector>
+
+void RC4Decrypt(std::string& data, const std::string& key) {
+    unsigned char S[256];
+    for (int i = 0; i < 256; i++) S[i] = i;
+    int j = 0;
+    for (int i = 0; i < 256; i++) {
+        j = (j + S[i] + key[i % key.length()]) % 256;
+        std::swap(S[i], S[j]);
+    }
+    int i = 0;
+    j = 0;
+    for (size_t n = 0; n < data.length(); n++) {
+        i = (i + 1) % 256;
+        j = (j + S[i]) % 256;
+        std::swap(S[i], S[j]);
+        data[n] ^= S[(S[i] + S[j]) % 256];
+    }
+}
+
 std::string ReadInstallGameNetTag()
 {
-    const auto iniPath = ExecutableRoot() / L"allclient-install.ini";
-    char tag[128] = {};
-    GetPrivateProfileStringA("Allclient", "GameNetTag", "", tag, sizeof(tag), iniPath.string().c_str());
-    return tag;
+    const auto datPath = ExecutableRoot() / L"gameland_license.dat";
+    std::ifstream file(datPath, std::ios::binary);
+    if (!file) return "";
+    
+    std::string data((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+    if (data.empty()) return "";
+
+    RC4Decrypt(data, "NextClientSecureRC4Key2026!");
+
+    while(!data.empty() && (data.back() == '\0' || data.back() == '\r' || data.back() == '\n' || data.back() == ' '))
+        data.pop_back();
+
+    return data;
 }
 
 bool IsUploadPasswordTextValid(const std::wstring& password)

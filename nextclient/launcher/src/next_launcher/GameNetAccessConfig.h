@@ -1,11 +1,6 @@
 #pragma once
 
-#ifndef NEXTCLIENT_GAME_NET_TAG
-#define NEXTCLIENT_GAME_NET_TAG "im"
-#endif
-
-// CMake reads this value from the repository-root client_tags.txt file.
-inline constexpr char kGameNetTag[] = NEXTCLIENT_GAME_NET_TAG;
+#include <string>
 
 // Production grace period for offline LAN and subscription expiration.
 inline constexpr bool kGameNetOneMinuteTest = false;
@@ -15,3 +10,9 @@ inline constexpr unsigned long long kGameNetGraceSeconds =
 // Subscription list format: build tag | player name tag | expiry (YYYY/MM/DD).
 // Blank lines and lines beginning with '#' are ignored.
 inline constexpr wchar_t kGameNetAccessUrl[] = L"http://gameland.cam/client_tags.txt";
+
+// Secret key for decrypting gameland_license.dat using RC4
+inline constexpr char kLicenseSecretKey[] = "NextClientSecureRC4Key2026!";
+
+// Gets the decrypted GameNetTag. Returns empty string if missing or invalid.
+const std::string& GetGameNetTag();

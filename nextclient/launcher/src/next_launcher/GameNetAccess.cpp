@@ -19,6 +19,56 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <fstream>
+#include <vector>
+
+void RC4Decrypt(std::string& data, const std::string& key) {
+    unsigned char S[256];
+    for (int i = 0; i < 256; i++) S[i] = i;
+    int j = 0;
+    for (int i = 0; i < 256; i++) {
+        j = (j + S[i] + key[i % key.length()]) % 256;
+        std::swap(S[i], S[j]);
+    }
+    int i = 0;
+    j = 0;
+    for (size_t n = 0; n < data.length(); n++) {
+        i = (i + 1) % 256;
+        j = (j + S[i]) % 256;
+        std::swap(S[i], S[j]);
+        data[n] ^= S[(S[i] + S[j]) % 256];
+    }
+}
+
+const std::string& GetGameNetTag() {
+    static std::string cached_tag;
+    static bool loaded = false;
+    if (loaded) return cached_tag;
+    loaded = true;
+
+    char path[MAX_PATH] = {0};
+    GetModuleFileNameA(nullptr, path, MAX_PATH);
+    std::string modulePath(path);
+    size_t slash = modulePath.find_last_of("\\/");
+    if (slash != std::string::npos) {
+        modulePath = modulePath.substr(0, slash);
+    }
+    std::string datFile = modulePath + "\\gameland_license.dat";
+
+    std::ifstream file(datFile, std::ios::binary);
+    if (!file) return cached_tag;
+    
+    std::string data((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+    if (data.empty()) return cached_tag;
+
+    RC4Decrypt(data, kLicenseSecretKey);
+
+    while(!data.empty() && (data.back() == '\0' || data.back() == '\r' || data.back() == '\n' || data.back() == ' '))
+        data.pop_back();
+
+    cached_tag = data;
+    return cached_tag;
+}
 
 namespace
 {
@@ -41,9 +91,15 @@ void ApplyOfflineLease(GameNetAccessStatus& status)
     ticks.LowPart = time.dwLowDateTime;
     ticks.HighPart = time.dwHighDateTime;
     const uint64_t now = ticks.QuadPart;
+    const std::string tag = GetGameNetTag();
+    if (tag.empty()) {
+        status.lan_allowed = false;
+        return;
+    }
+
     const std::string key_name = std::string(kGameNetOneMinuteTest
         ? "Software\\Allclient\\OfflineLeaseTest60\\"
-        : "Software\\Allclient\\OfflineLease\\") + kGameNetTag;
+        : "Software\\Allclient\\OfflineLease\\") + tag;
     HKEY key{};
     if (RegCreateKeyExA(HKEY_CURRENT_USER, key_name.c_str(), 0, nullptr, 0,
             KEY_QUERY_VALUE | KEY_SET_VALUE, nullptr, &key, nullptr) != ERROR_SUCCESS)
@@ -52,8 +108,8 @@ void ApplyOfflineLease(GameNetAccessStatus& status)
         return;
     }
 
-    DATA_BLOB entropy{static_cast<DWORD>(std::strlen(kGameNetTag)),
-        reinterpret_cast<BYTE*>(const_cast<char*>(kGameNetTag))};
+    DATA_BLOB entropy{static_cast<DWORD>(tag.length()),
+        reinterpret_cast<BYTE*>(const_cast<char*>(tag.c_str()))};
     OfflineLease lease{};
     BYTE bytes[4096]{};
     DWORD size = sizeof(bytes), type = 0;
@@ -181,7 +237,7 @@ std::string_view Trim(std::string_view value)
 
 bool EqualsTag(std::string_view value)
 {
-    const std::string_view expected(kGameNetTag);
+    const std::string expected = GetGameNetTag();
     return value.size() == expected.size() &&
         std::equal(value.begin(), value.end(), expected.begin(), [](unsigned char left, unsigned char right)
         {
@@ -348,7 +404,7 @@ bool IsValidPlayerNameTag(std::string_view value)
 
 GameNetAccessStatus ResponseAccessStatus(const std::string& response, const CalendarDate& today)
 {
-    GameNetAccessStatus status{GameNetAccessState::TagMissing, kGameNetTag, {}, {}, -1};
+    GameNetAccessStatus status{GameNetAccessState::TagMissing, GetGameNetTag(), {}, {}, -1};
     size_t begin = 0;
     while (begin <= response.size())
     {
@@ -375,7 +431,7 @@ GameNetAccessStatus ResponseAccessStatus(const std::string& response, const Cale
                     {
                         status.days_remaining = DaysRemaining(today, expiry);
                         if (DateKey(today) <= DateKey(expiry))
-                            return {GameNetAccessState::Active, kGameNetTag, status.player_name_tag,
+                            return {GameNetAccessState::Active, GetGameNetTag(), status.player_name_tag,
                                 status.expiry_date, status.days_remaining};
                         status.state = GameNetAccessState::Expired;
                     }
@@ -402,7 +458,7 @@ GameNetAccessStatus ResponseAccessStatus(const std::string& response, const Cale
                     {
                         status.days_remaining = DaysRemaining(today, expiry);
                         if (DateKey(today) <= DateKey(expiry))
-                            return {GameNetAccessState::Active, kGameNetTag, status.player_name_tag,
+                            return {GameNetAccessState::Active, GetGameNetTag(), status.player_name_tag,
                                 status.expiry_date, status.days_remaining};
                         status.state = GameNetAccessState::Expired;
                     }
@@ -660,7 +716,7 @@ GameNetAccessStatus QueryGameNetOnlineAccess()
     const auto unavailable = []
     {
         return GameNetAccessStatus{
-            GameNetAccessState::ServiceUnavailable, kGameNetTag, {}, {}, -1};
+            GameNetAccessState::ServiceUnavailable, GetGameNetTag(), {}, {}, -1};
     };
 
     CalendarDate today;
