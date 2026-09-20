@@ -370,14 +370,15 @@ begin
     Exit;
   end;
 
-  if not IsEightDigitCode(Password) then
+  if Length(Trim(Password)) = 0 then
   begin
-    OnlineVerificationMessage := 'رمز عبور باید دقیقاً ۸ رقم باشد.';
+    OnlineVerificationMessage := 'رمز عبور نمی‌تواند خالی باشد.';
     Exit;
   end;
 
+
   SetAccessStatus('در حال بررسی اطلاعات واردشده…', clGray);
-  RequestUrl := '?action=verify&username=' + Trim(Username) + '&code=' + Trim(Password);
+  RequestUrl := '?action=verify&username=' + Trim(Username) + '&password=' + Trim(Password);
   if FetchAccessApi(RequestUrl, ResponseText) then
   begin
     SetAccessStatus('پاسخ دریافت شد؛ در حال بررسی نتیجه…', clGray);
@@ -563,7 +564,7 @@ begin
     'اطلاعات گیم‌نت را وارد کنید',
     'نام کاربری و رمز عبور اختصاصی گیم‌نت خود را وارد کنید.');
   AccessPage.Add('نام کاربری (کد شعبه):', False);
-  AccessPage.Add('رمز عبور (۸ رقمی):', True);
+  AccessPage.Add('رمز عبور نصب کلاینت:', True);
 
   AccessStatusLabel := TNewStaticText.Create(WizardForm);
   AccessStatusLabel.Parent := AccessPage.Surface;

@@ -1,70 +1,33 @@
 <?php
-declare(strict_types=1);
+/**
+ * gameland_license.dat Generator
+ * 
+ * This script generates the encrypted license payload.
+ * The payload is encrypted using RC4 and the shared secret key.
+ * 
+ * You can integrate this logic into your installer_access.php
+ * or host it as a separate endpoint that the installer downloads from.
+ */
 
-header('Content-Type: application/json; charset=utf-8');
-header('Cache-Control: no-store, max-age=0');
-header('X-Content-Type-Options: nosniff');
+// The secret key MUST match the kLicenseSecretKey in GameNetAccessConfig.h
+$secret_key = "NextClientSecureRC4Key2026!";
 
-// A simple Secret Key to decrypt the token (in a real scenario, use AES decryption)
-$SECRET_KEY = "my_super_secret_key"; 
+// The data you want to encrypt. In this case, just the GameNet tag.
+// e.g., "branch_8832" or "vip_center_tehran"
+$tag_data = isset($_GET['tag']) ? $_GET['tag'] : "default_tag";
 
-$token = (string)($_GET['token'] ?? '');
-$hwid = (string)($_GET['hwid'] ?? '');
-$client_ip = $_SERVER['REMOTE_ADDR'] ?? 'UNKNOWN';
+// We use OpenSSL with 'rc4' cipher. OPENSSL_RAW_DATA ensures we get the raw binary bytes, not base64.
+$encrypted_payload = openssl_encrypt($tag_data, 'rc4', $secret_key, OPENSSL_RAW_DATA);
 
-if (empty($token) || empty($hwid)) {
-    http_response_code(400);
-    echo json_encode(["status" => "DENIED", "error" => "Missing parameters"]);
-    exit;
-}
+// Set headers to force download as a binary file
+header('Content-Description: File Transfer');
+header('Content-Type: application/octet-stream');
+header('Content-Disposition: attachment; filename="gameland_license.dat"');
+header('Expires: 0');
+header('Cache-Control: must-revalidate');
+header('Pragma: public');
+header('Content-Length: ' . strlen($encrypted_payload));
 
-// In a real system, the token would be decrypted here. 
-// For demonstration, we assume the token is the tag itself (e.g., GAMELAND).
-$tag = $token; 
-
-$db_file = __DIR__ . '/license_db.json';
-$db = file_exists($db_file) ? json_decode(file_get_contents($db_file), true) : [];
-
-if (!isset($db[$tag])) {
-    // Initialize the tag if it doesn't exist (In production, the Admin panel creates this)
-    $db[$tag] = [
-        'max_pcs' => 20,
-        'allowed_ip' => '', // Will be set on first PC connection
-        'hwids' => []
-    ];
-}
-
-$tag_data = &$db[$tag];
-
-// If allowed_ip is empty, we lock it to the first IP that connects
-if (empty($tag_data['allowed_ip'])) {
-    $tag_data['allowed_ip'] = $client_ip;
-}
-
-// 1. Check IP address match
-if ($tag_data['allowed_ip'] !== $client_ip && $client_ip !== '127.0.0.1') { // allow localhost for testing
-    echo json_encode(["status" => "DENIED", "error" => "IP mismatch. This game is locked to another network."]);
-    exit;
-}
-
-// 2. HWID checking and auto-registration
-if (!in_array($hwid, $tag_data['hwids'], true)) {
-    // It's a new PC, check capacity
-    if (count($tag_data['hwids']) >= $tag_data['max_pcs']) {
-        echo json_encode(["status" => "DENIED", "error" => "Maximum PC limit reached for this GameNet."]);
-        exit;
-    }
-    
-    // Register the new HWID
-    $tag_data['hwids'][] = $hwid;
-    file_put_contents($db_file, json_encode($db, JSON_PRETTY_PRINT));
-}
-
-// Everything is good, allow access
-echo json_encode([
-    "status" => "ACTIVE", 
-    "tag" => $tag, 
-    "hwid" => $hwid, 
-    "registered_pcs" => count($tag_data['hwids']),
-    "max_pcs" => $tag_data['max_pcs']
-]);
+// Output the binary payload
+echo $encrypted_payload;
+exit;
