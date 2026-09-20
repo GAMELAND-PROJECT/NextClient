@@ -11,6 +11,14 @@ if (MSVC AND MSVC_VERSION GREATER_EQUAL 1950)
 endif ()
 
 set(NEXTCLIENT_ROOT ${CMAKE_CURRENT_SOURCE_DIR})
+
+file(READ "${CMAKE_CURRENT_SOURCE_DIR}/client_tags.txt" CLIENT_TAG_FILE)
+string(STRIP "${CLIENT_TAG_FILE}" CLIENT_TAG)
+add_compile_definitions(
+    NEXTCLIENT_VERSION="${PROJECT_VERSION}"
+    NEXTCLIENT_TAG="${CLIENT_TAG}"
+)
+
 set(USE_PROFILER OFF CACHE BOOL "Build with Optick profiler instrumentation" FORCE)
 
 # TODO do fetch curl and zlib via vcpkg, make a custom port if necessary

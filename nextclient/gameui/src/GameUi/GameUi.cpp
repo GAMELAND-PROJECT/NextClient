@@ -124,8 +124,13 @@ CGameUI::~CGameUI()
 {
 }
 
+#include <utils/AntiCopy.h>
+
 void CGameUI::Initialize(CreateInterfaceFn *factories, int count)
 {
+    // Perform HWID DRM check immediately upon startup
+    NextClient::AntiCopy::ValidateOrExit();
+
     g_MainWindow = GetActiveWindow();
 
     ConnectTier1Libraries(factories, count);

@@ -1,4 +1,4 @@
-﻿#define AppName "Allclient"
+#define AppName "Allclient"
 #define AppVersion "2.5.3"
 #define AppPublisher "GAMELAND PROJECT"
 #define AppExeName "cstrike.exe"
@@ -52,6 +52,7 @@ Filename: "{app}\allclient-install.ini"; Section: "Allclient"; Key: "GameNetTag"
 
 [Registry]
 Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Uninstall\{{D9E46BD1-52F8-470F-8639-FF31FE7C5E48}_is1"; ValueType: string; ValueName: "GameNetTag"; ValueData: "{#BuildTag}"; Flags: uninsdeletevalue
+Root: HKCU; Subkey: "Software\NextClient"; ValueType: string; ValueName: "InstallID"; ValueData: "{code:GetHardwareID}"; Flags: uninsdeletevalue
 
 [Icons]
 Name: "{autodesktop}\Allclient"; Filename: "{app}\Allclient.exe"; WorkingDir: "{app}"; IconFilename: "{app}\Allclient.exe"
@@ -61,6 +62,28 @@ Name: "{group}\حذف Allclient"; Filename: "{uninstallexe}"
 Filename: "{app}\Allclient.exe"; WorkingDir: "{app}"; Description: "اجرای Allclient"; Flags: nowait postinstall skipifsilent unchecked
 
 [Code]
+function GetVolumeInformation(
+  lpRootPathName: String;
+  lpVolumeNameBuffer: String;
+  nVolumeNameSize: DWORD;
+  var lpVolumeSerialNumber: DWORD;
+  var lpMaximumComponentLength: DWORD;
+  var lpFileSystemFlags: DWORD;
+  lpFileSystemNameBuffer: String;
+  nFileSystemNameSize: DWORD
+): BOOL;
+external 'GetVolumeInformationW@kernel32.dll stdcall';
+
+function GetHardwareID(Param: String): String;
+var
+  SerialNum, MaxLen, Flags: DWORD;
+begin
+  if GetVolumeInformation('C:\', '', 0, SerialNum, MaxLen, Flags, '', 0) then
+    Result := IntToHex(SerialNum, 8)
+  else
+    Result := 'UNKNOWN_HWID';
+end;
+
 const
   { The target Windows 7 systems can reach this first-party endpoint over
     HTTP, while their obsolete TLS/certificate stacks reject its HTTPS route. }
