@@ -92,12 +92,12 @@ CDialogGameInfo::~CDialogGameInfo()
 
 void CDialogGameInfo::Run(const char *titleName, bool queryDetails)
 {
-    if (titleName)
+    if (titleName && titleName[0])
         SetTitle("#ServerBrowser_GameInfoWithNameTitle", true);
     else
         SetTitle("#ServerBrowser_GameInfoTitle", true);
 
-    SetDialogVariable("game", titleName);
+    SetDialogVariable("game", (titleName && titleName[0]) ? titleName : "");
 
     if (queryDetails)
         SendPingQueryIfNotAny();
@@ -193,7 +193,13 @@ void CDialogGameInfo::PerformLayout()
 {
     BaseClass::PerformLayout();
 
-    SetControlStringNoLocalize("ServerText", server_item_.GetName().c_str());
+    SetControlVisible("ServerIPLabel", false);
+    SetControlVisible("ServerIPText", false);
+
+    std::string srvName = server_item_.GetName();
+    if (srvName.empty())
+        srvName = m_bServerNotResponding ? "#ServerBrowser_ServerNotResponding" : "";
+    SetControlStringNoLocalize("ServerText", srvName.c_str());
     SetControlStringNoLocalize("GameText", server_item_.m_szGameDescription);
     SetControlStringNoLocalize("MapText", server_item_.m_szMap);
 

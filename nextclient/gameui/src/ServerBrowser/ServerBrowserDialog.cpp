@@ -343,7 +343,9 @@ CDialogGameInfo *CServerBrowserDialog::OpenGameInfoDialog(IGameList *gameList, u
     auto *gameDialog = new CDialogGameInfo(&ServerBrowserDialog(), server.gs.m_NetAdr.GetIP(), server.gs.m_NetAdr.GetQueryPort());
     gameDialog->SetKnownServer(server.gs);
     gameDialog->AddActionSignalTarget(this);
-    gameDialog->Run(server.gs.GetName().c_str());
+    const auto name = server.gs.GetName();
+    const char* srvTitle = (name.empty() || name == server.gs.m_NetAdr.GetConnectionAddressString()) ? "" : name.c_str();
+    gameDialog->Run(srvTitle);
     gameDialog->MoveToCenterOfScreen();
 
     int i = m_GameInfoDialogs.AddToTail();
@@ -411,7 +413,9 @@ CDialogGameInfo *CServerBrowserDialog::JoinGame(IGameList *gameList, unsigned in
     auto *gameDialog = new CDialogGameInfo(this, server.m_NetAdr.GetIP(), server.m_NetAdr.GetQueryPort());
     gameDialog->SetKnownServer(server);
     gameDialog->AddActionSignalTarget(this);
-    gameDialog->Run(server.GetName().c_str(), false);
+    const auto name = server.GetName();
+    const char* srvTitle = (name.empty() || name == server.m_NetAdr.GetConnectionAddressString()) ? "" : name.c_str();
+    gameDialog->Run(srvTitle, false);
     gameDialog->MoveToCenterOfScreen();
     m_GameInfoDialogs[m_GameInfoDialogs.AddToTail()] = gameDialog;
     gameDialog->Connect();

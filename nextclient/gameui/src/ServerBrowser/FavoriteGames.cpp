@@ -57,6 +57,39 @@ public:
     {
         CGameListPanel::OnMousePressed(code);
         owner_->SelectOnlineServer(this);
+
+        if (code == MOUSE_RIGHT)
+        {
+            int selected = GetSelectedItemsCount() > 0 ? GetSelectedItem(0) : -1;
+            long now = system()->GetTimeMillis();
+            if (now - last_right_click_time_ < 450 && last_right_click_item_ == selected && selected != -1)
+            {
+                last_right_click_time_ = 0;
+                last_right_click_item_ = -1;
+                CServerContextMenu *menu = ServerBrowserDialog().GetContextMenu(nullptr);
+                if (menu)
+                    menu->SetVisible(false);
+                owner_->OnViewGameInfo();
+                return;
+            }
+            last_right_click_time_ = now;
+            last_right_click_item_ = selected;
+        }
+    }
+    void OnMouseDoublePressed(MouseCode code) override
+    {
+        if (code == MOUSE_RIGHT)
+        {
+            last_right_click_time_ = 0;
+            last_right_click_item_ = -1;
+            CServerContextMenu *menu = ServerBrowserDialog().GetContextMenu(nullptr);
+            if (menu)
+                menu->SetVisible(false);
+            owner_->SelectOnlineServer(this);
+            owner_->OnViewGameInfo();
+            return;
+        }
+        CGameListPanel::OnMouseDoublePressed(code);
     }
     void OnKeyCodeTyped(KeyCode code) override
     {
@@ -66,6 +99,8 @@ public:
     }
 private:
     CFavoriteGames* owner_;
+    long last_right_click_time_{0};
+    int last_right_click_item_{-1};
 };
 }
 
@@ -169,7 +204,16 @@ void CFavoriteGames::UpdateCategoryLists()
         }
         const bool fresh = existing == m_categoryRows.end();
         KeyValues* data = fresh ? new KeyValues("Server") : list->GetItem(existing->second.item);
-        data->SetString("Name", server.GetName().c_str());
+        std::string serverName = server.GetName();
+        if (serverName.empty() || serverName == endpoint)
+        {
+            const char* prevName = fresh ? "" : data->GetString("Name", "");
+            if (prevName && prevName[0] && strcmp(prevName, "#ServerBrowser_ServerNotResponding") != 0 && strcmp(prevName, endpoint.c_str()) != 0)
+                serverName = prevName;
+            else
+                serverName = "#ServerBrowser_ServerNotResponding";
+        }
+        data->SetString("Name", serverName.c_str());
         data->SetString("_endpoint", endpoint.c_str());
         data->SetInt("_humans", server.m_bHadSuccessfulResponse ? GetHumanPlayerCount(server) : -1);
         data->SetInt("_latency", server.m_bHadSuccessfulResponse ? server.m_nPing : 9999);
@@ -343,7 +387,7 @@ void CFavoriteGames::ServerFailedToRespond(serveritem_t &server)
 
 void CFavoriteGames::OnOpenContextMenu(int itemID)
 {
-    CServerContextMenu *menu = ServerBrowserDialog().GetContextMenu(m_pGameList);
+    CServerContextMenu *menu = ServerBrowserDialog().GetContextMenu(this);
 
     if (m_pGameList->GetSelectedItemsCount())
     {
