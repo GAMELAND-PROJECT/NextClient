@@ -46,9 +46,32 @@ function uploadPasswordValid(string $buildTag, string $password): bool
     return false;
 }
 
+function checkRateLimit(string $ip): bool
+{
+    $rateLimitFile = panelDataDir() . DIRECTORY_SEPARATOR . '.upload_demo.rate';
+    $now = time();
+    $rates = [];
+    if (is_file($rateLimitFile)) {
+        $content = file_get_contents($rateLimitFile);
+        if ($content !== false) {
+            $rates = json_decode($content, true) ?? [];
+        }
+    }
+    $rates = array_filter($rates, static fn($entry) => is_array($entry) && $now - (int)($entry['time'] ?? 0) < 60);
+    $ipRate = $rates[$ip] ?? ['time' => $now, 'count' => 0];
+    $ipRate['count']++;
+    $rates[$ip] = $ipRate;
+    @file_put_contents($rateLimitFile, json_encode($rates), LOCK_EX);
+    return $ipRate['count'] <= 5;
+}
+
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     http_response_code(405);
     exit('FAIL: Method Not Allowed');
+}
+if (!checkRateLimit((string)($_SERVER['REMOTE_ADDR'] ?? '0.0.0.0'))) {
+    http_response_code(429);
+    exit('FAIL: Too Many Requests');
 }
 
 $buildTag = trim((string)($_POST['build'] ?? ''));

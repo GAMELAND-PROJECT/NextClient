@@ -48,15 +48,17 @@ const filters = [...document.querySelectorAll('.filter-chip')];
 let activeFilter = 'all';
 const modalTriggers = [...document.querySelectorAll('.open-profile-modal')];
 function closeProfileModal(dialog) {
-  if (!dialog?.open) return;
+  if (!dialog?.open && !dialog.hasAttribute('open')) return;
   if (typeof dialog.close === 'function') dialog.close();
   else dialog.removeAttribute('open');
+  try { sessionStorage.removeItem('allclient-open-modal'); } catch (_) {}
 }
 modalTriggers.forEach(trigger => trigger.addEventListener('click', () => {
   const dialog = document.getElementById(trigger.dataset.modal || '');
   if (!dialog) return;
   if (typeof dialog.showModal === 'function') dialog.showModal();
   else dialog.setAttribute('open', '');
+  try { sessionStorage.setItem('allclient-open-modal', dialog.id); } catch (_) {}
 }));
 document.querySelectorAll('.profile-modal').forEach(dialog => {
   dialog.querySelector('[data-close-modal]')?.addEventListener('click', () => closeProfileModal(dialog));
@@ -64,6 +66,18 @@ document.querySelectorAll('.profile-modal').forEach(dialog => {
     if (event.target === dialog) closeProfileModal(dialog);
   });
 });
+try {
+  const openModalId = sessionStorage.getItem('allclient-open-modal');
+  if (openModalId) {
+    const dialog = document.getElementById(openModalId);
+    if (dialog) {
+      if (typeof dialog.showModal === 'function') dialog.showModal();
+      else dialog.setAttribute('open', '');
+    } else {
+      sessionStorage.removeItem('allclient-open-modal');
+    }
+  }
+} catch (_) {}
 function applySubscriptionFilter() {
   const query = (search?.value || '').trim().toLocaleLowerCase('fa');
   cards.forEach(card => {

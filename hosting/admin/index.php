@@ -6,7 +6,6 @@ const FILE_MIX_SERVERS = 'mix_servers.txt';
 const FILE_TAGS = 'client_tags.txt';
 const FILE_PASSWORD = 'server_password.txt';
 const FILE_FTP_CONFIG = 'ftp_config.txt';
-const FILE_INSTALLER_ACCESS = '.installer_access.php';
 const FILE_SUSPENDED_SUBSCRIPTIONS = '.suspended_subscriptions.php';
 const MAX_SERVERS = 64;
 const MAX_TAGS = 256;
@@ -260,7 +259,6 @@ function sendPanelBackup(): never
         'mix_servers' => normalizedLines(readMixServersText()),
         'client_tags' => normalizedLines(readTextFile(FILE_TAGS)),
         'server_password' => trim(readTextFile(FILE_PASSWORD)),
-        'installer_access' => readInstallerAccessState(),
         'suspended_subscriptions' => readSuspendedSubscriptionRows(),
     ];
 
@@ -296,14 +294,6 @@ function restorePanelBackup(array $upload): void
     backupAndAtomicWrite(FILE_MIX_SERVERS, implode("\n", $mixServers) . ($mixServers ? "\n" : ''));
     backupAndAtomicWrite(FILE_TAGS, implode("\n", $tagRows) . ($tagRows ? "\n" : ''));
     backupAndAtomicWrite(FILE_PASSWORD, $password . ($password !== '' ? "\n" : ''));
-
-    $installer = is_array($payload['installer_access'] ?? null) ? $payload['installer_access'] : [];
-    $plainCode = (string)($installer['plain_code'] ?? '');
-    if (!empty($installer['active']) && preg_match('/\A\d{8}\z/', $plainCode)) {
-        writeInstallerAccessState(true, hash('sha256', $plainCode), $plainCode);
-    } else {
-        writeInstallerAccessState(false);
-    }
 
     $rows = [];
     foreach (parseTagRows(readTextFile(FILE_TAGS)) as $row) {
@@ -609,53 +599,6 @@ function decorateSubscriptionRow(array $row): array
     return $row;
 }
 
-function readInstallerAccessState(): array
-{
-    $path = dataPath(FILE_INSTALLER_ACCESS);
-    if (!is_file($path)) {
-        return ['active' => false, 'code_hash' => '', 'plain_code' => '', 'created_at' => ''];
-    }
-
-    if (!defined('ALLCLIENT_INSTALLER_ACCESS_INTERNAL')) {
-        define('ALLCLIENT_INSTALLER_ACCESS_INTERNAL', true);
-    }
-    $state = require $path;
-    if (!is_array($state)) {
-        throw new RuntimeException('فایل وضعیت کد نصب معتبر نیست.');
-    }
-    return [
-        'active' => !empty($state['active']),
-        'code_hash' => (string)($state['code_hash'] ?? ''),
-        'plain_code' => preg_match('/\A\d{8}\z/', (string)($state['plain_code'] ?? '')) === 1
-            ? (string)$state['plain_code']
-            : '',
-        'created_at' => (string)($state['created_at'] ?? ''),
-    ];
-}
-
-function writeInstallerAccessState(bool $active, string $codeHash = '', string $plainCode = ''): void
-{
-    if ($active && !preg_match('/\A[a-f0-9]{64}\z/', $codeHash)) {
-        throw new RuntimeException('هش کد نصب معتبر نیست.');
-    }
-
-    if ($active && !preg_match('/\A\d{8}\z/', $plainCode)) {
-        throw new RuntimeException('Installer code must be exactly 8 digits.');
-    }
-
-    $state = [
-        'active' => $active,
-        'code_hash' => $active ? $codeHash : '',
-        'plain_code' => $active ? $plainCode : '',
-        'created_at' => $active ? gmdate('c') : '',
-    ];
-    $content = "<?php\ndeclare(strict_types=1);\n\n" .
-        "if (!defined('ALLCLIENT_INSTALLER_ACCESS_INTERNAL')) {\n" .
-        "    http_response_code(404);\n    exit;\n}\n\nreturn " .
-        var_export($state, true) . ";\n";
-    backupAndAtomicWrite(FILE_INSTALLER_ACCESS, $content);
-    @chmod(dataPath(FILE_INSTALLER_ACCESS), 0600);
-}
 
 $action = (string)($_POST['action'] ?? '');
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
