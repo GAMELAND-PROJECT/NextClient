@@ -197,7 +197,7 @@ void CDialogGameInfo::PerformLayout()
     SetControlVisible("ServerIPText", false);
 
     std::string srvName = server_item_.GetName();
-    if (srvName.empty())
+    if (srvName.empty() || srvName == server_item_.m_NetAdr.GetConnectionAddressString())
         srvName = m_bServerNotResponding ? "#ServerBrowser_ServerNotResponding" : "";
     SetControlStringNoLocalize("ServerText", srvName.c_str());
     SetControlStringNoLocalize("GameText", server_item_.m_szGameDescription);

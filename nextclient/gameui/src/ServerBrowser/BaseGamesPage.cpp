@@ -432,7 +432,7 @@ void CBaseGamesPage::ServerResponded(serveritem_t &server)
 
     const bool isPinned = EngineMini()->IsPinnedServer(server.gs.m_NetAdr.GetIP(), server.gs.m_NetAdr.GetConnectionPort());
     auto displayName = server.gs.GetName();
-    if (displayName.empty())
+    if (displayName.empty() || displayName == server.gs.m_NetAdr.GetConnectionAddressString())
         displayName = "#ServerBrowser_ServerNotResponding";
     kv->SetString("name", displayName.c_str());
     kv->SetInt("_pinned", isPinned ? 1 : 0);
@@ -576,7 +576,7 @@ void CBaseGamesPage::ApplyGameFilters()
                 auto *kv = new KeyValues("Server");
                 const bool isPinned = EngineMini()->IsPinnedServer(server.gs.m_NetAdr.GetIP(), server.gs.m_NetAdr.GetConnectionPort());
                 auto displayName = server.gs.GetName();
-                if (displayName.empty())
+                if (displayName.empty() || displayName == server.gs.m_NetAdr.GetConnectionAddressString())
                     displayName = "#ServerBrowser_ServerNotResponding";
                 kv->SetString("name", displayName.c_str());
                 kv->SetInt("_pinned", isPinned ? 1 : 0);
