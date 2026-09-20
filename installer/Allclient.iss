@@ -25,6 +25,8 @@ UsePreviousAppDir=yes
 DisableProgramGroupPage=yes
 OutputDir=output
 OutputBaseFilename=Allclient-Setup
+DiskSpanning=yes
+DiskSliceSize=Max
 SetupIconFile=..\nextclient\launcher\src\next_launcher\assets\app_icon.ico
 UninstallDisplayIcon={app}\{#AppExeName}
 Compression=lzma2/ultra64
@@ -112,6 +114,8 @@ var
   DetectedInstallDirectory: String;
   DetectedInstallRoot: Integer;
   DependenciesReady: Boolean;
+  PayloadDownloadUrl: String;
+  PayloadDownloadPage: TDownloadWizardPage;
 
 function URLDownloadToFile(Caller: NativeInt; URL, FileName: String;
   Reserved: DWORD; StatusCallback: NativeInt): HResult;
@@ -329,33 +333,62 @@ begin
   end;
 end;
 
-function OnlineAccessCodeIsValid(const EnteredCode: String): Boolean;
+function GetJsonString(const Json, Key: String): String;
+var
+  KeyStr: String;
+  StartPos, EndPos: Integer;
+begin
+  Result := '';
+  KeyStr := '"' + Key + '":"';
+  StartPos := Pos(KeyStr, Json);
+  if StartPos > 0 then
+  begin
+    StartPos := StartPos + Length(KeyStr);
+    EndPos := Pos('"', Copy(Json, StartPos, Length(Json)));
+    if EndPos > 0 then
+      Result := Copy(Json, StartPos, EndPos - 1);
+  end;
+end;
+
+function OnlineAccessCodeIsValid(const Username, Password: String): Boolean;
 var
   RequestUrl: String;
   ResponseText: String;
+  NormalizedResponse: String;
 begin
   Result := False;
   OnlineServiceUnavailable := False;
   OnlineVerificationMessage := '';
+  PayloadDownloadUrl := '';
 
-  if not IsEightDigitCode(EnteredCode) then
+  if Length(Trim(Username)) = 0 then
   begin
-    OnlineVerificationMessage := 'کد آنلاین باید دقیقاً ۸ رقم باشد.';
+    OnlineVerificationMessage := 'نام کاربری نمی‌تواند خالی باشد.';
     Exit;
   end;
 
-  SetAccessStatus('در حال بررسی کد واردشده…', clGray);
-  RequestUrl := '?action=verify&code=' + Trim(EnteredCode);
+  if not IsEightDigitCode(Password) then
+  begin
+    OnlineVerificationMessage := 'رمز عبور باید دقیقاً ۸ رقم باشد.';
+    Exit;
+  end;
+
+  SetAccessStatus('در حال بررسی اطلاعات واردشده…', clGray);
+  RequestUrl := '?action=verify&username=' + Trim(Username) + '&code=' + Trim(Password);
   if FetchAccessApi(RequestUrl, ResponseText) then
   begin
     SetAccessStatus('پاسخ دریافت شد؛ در حال بررسی نتیجه…', clGray);
-    if Pos('"valid":true', Lowercase(ResponseText)) > 0 then
+    NormalizedResponse := Lowercase(ResponseText);
+    if Pos('"valid":true', NormalizedResponse) > 0 then
     begin
       Result := True;
-      OnlineVerificationMessage := 'کد آنلاین تأیید شد.';
+      OnlineVerificationMessage := 'لایسنس آنلاین تأیید شد.';
+      PayloadDownloadUrl := GetJsonString(ResponseText, 'download_url');
+      if PayloadDownloadUrl <> '' then
+        PayloadDownloadUrl := Copy(PayloadDownloadUrl, 1, Length(PayloadDownloadUrl)); // Clean copy
     end
-    else if Pos('"valid":false', Lowercase(ResponseText)) > 0 then
-      OnlineVerificationMessage := 'کد آنلاین اشتباه است یا لغو شده است.'
+    else if Pos('"valid":false', NormalizedResponse) > 0 then
+      OnlineVerificationMessage := 'اطلاعات ورود اشتباه است یا اشتراک لغو شده است.'
     else
     begin
       OnlineServiceUnavailable := True;
@@ -370,13 +403,13 @@ begin
   end;
 end;
 
-function AccessCodeIsValid(const EnteredCode: String): Boolean;
+function AccessCodeIsValid(const Username, Password: String): Boolean;
 begin
-  Result := CompareText(Trim(EnteredCode), OfflineCode) = 0;
+  Result := CompareText(Trim(Password), OfflineCode) = 0;
   if Result then
-    OnlineVerificationMessage := 'کد دسترسی تأیید شد.'
+    OnlineVerificationMessage := 'کد دسترسی آفلاین تأیید شد.'
   else
-    Result := OnlineAccessCodeIsValid(EnteredCode);
+    Result := OnlineAccessCodeIsValid(Username, Password);
 end;
 
 procedure RefreshAccessStatus(Sender: TObject);
@@ -524,14 +557,15 @@ begin
   AccessPage := CreateInputQueryPage(
     PreparationPage.ID,
     'تأیید مجوز نصب',
-    'کد نصب Allclient را وارد کنید',
-    'کد آنلاین ۸ رقمی فعال یا کد آفلاین را وارد کنید.');
-  AccessPage.Add('کد دسترسی:', True);
+    'اطلاعات گیم‌نت را وارد کنید',
+    'نام کاربری و رمز عبور اختصاصی گیم‌نت خود را وارد کنید.');
+  AccessPage.Add('نام کاربری (کد شعبه):', False);
+  AccessPage.Add('رمز عبور (۸ رقمی):', True);
 
   AccessStatusLabel := TNewStaticText.Create(WizardForm);
   AccessStatusLabel.Parent := AccessPage.Surface;
-  AccessStatusLabel.Left := AccessPage.Edits[0].Left;
-  AccessStatusLabel.Top := AccessPage.Edits[0].Top + AccessPage.Edits[0].Height + ScaleY(20);
+  AccessStatusLabel.Left := AccessPage.Edits[1].Left;
+  AccessStatusLabel.Top := AccessPage.Edits[1].Top + AccessPage.Edits[1].Height + ScaleY(20);
   AccessStatusLabel.Width := AccessPage.SurfaceWidth;
   AccessStatusLabel.Height := ScaleY(42);
   AccessStatusLabel.AutoSize := False;
@@ -541,12 +575,14 @@ begin
 
   RefreshAccessButton := TNewButton.Create(WizardForm);
   RefreshAccessButton.Parent := AccessPage.Surface;
-  RefreshAccessButton.Left := AccessPage.Edits[0].Left;
+  RefreshAccessButton.Left := AccessPage.Edits[1].Left;
   RefreshAccessButton.Top := AccessStatusLabel.Top + AccessStatusLabel.Height + ScaleY(10);
   RefreshAccessButton.Width := ScaleX(150);
   RefreshAccessButton.Height := ScaleY(30);
   RefreshAccessButton.Caption := 'بررسی دوباره اتصال';
   RefreshAccessButton.OnClick := @RefreshAccessStatus;
+
+  PayloadDownloadPage := CreateDownloadPage('در حال دریافت اطلاعات گیم‌نت', 'لطفاً منتظر بمانید...', nil);
 end;
 
 function ReadPreviousInstallFromRoot(RootKey: Integer;
@@ -766,15 +802,19 @@ begin
 end;
 
 function NextButtonClick(CurPageID: Integer): Boolean;
+var
+  InputUsername, InputPassword: String;
 begin
   Result := True;
   if CurPageID = AccessPage.ID then
   begin
     WizardForm.NextButton.Enabled := False;
     SetAccessStatus('در حال تأیید مجوز نصب…', clGray);
+    InputUsername := AccessPage.Values[0];
+    InputPassword := NormalizeAccessCode(AccessPage.Values[1]);
     try
       try
-        Result := AccessCodeIsValid(NormalizeAccessCode(AccessPage.Values[0]));
+        Result := AccessCodeIsValid(InputUsername, InputPassword);
       except
         Result := False;
         OnlineServiceUnavailable := True;
@@ -790,13 +830,37 @@ begin
       begin
         AccessApproved := False;
         if OnlineVerificationMessage = '' then
-          OnlineVerificationMessage := 'کد نصب تأیید نشد.';
+          OnlineVerificationMessage := 'اطلاعات نصب تأیید نشد.';
         SetAccessStatus(OnlineVerificationMessage, clRed);
         MsgBox(OnlineVerificationMessage, mbError, MB_OK);
         WizardForm.ActiveControl := AccessPage.Edits[0];
       end;
     finally
       WizardForm.NextButton.Enabled := True;
+    end;
+  end;
+
+  if CurPageID = wpReady then
+  begin
+    if PayloadDownloadUrl <> '' then
+    begin
+      PayloadDownloadPage.Clear;
+      PayloadDownloadPage.Add(PayloadDownloadUrl, 'update.zip', '');
+      PayloadDownloadPage.Show;
+      try
+        try
+          PayloadDownloadPage.Download;
+          Result := True;
+        except
+          if PayloadDownloadPage.AbortedByUser then
+            Log('Aborted by user.')
+          else
+            MsgBox('خطا در دانلود فایل اختصاصی گیم‌نت. لطفاً اتصال اینترنت را بررسی کنید.', mbError, MB_OK);
+          Result := False;
+        end;
+      finally
+        PayloadDownloadPage.Hide;
+      end;
     end;
   end;
 end;
@@ -954,10 +1018,32 @@ begin
   SetXmlElement(ConfigFile, 'StartIn', ExpandConstant('{app}'));
 end;
 
+procedure ExtractZip(const ZipFile, TargetFolder: String);
+var
+  Shell, ZipFolder, Target: Variant;
+begin
+  Shell := CreateOleObject('Shell.Application');
+  ZipFolder := Shell.NameSpace(ZipFile);
+  Target := Shell.NameSpace(TargetFolder);
+  if (not VarIsClear(ZipFolder)) and (not VarIsClear(Target)) then
+    Target.CopyHere(ZipFolder.Items, 4 + 16);
+end;
+
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
   if CurStep = ssPostInstall then
   begin
+    if PayloadDownloadUrl <> '' then
+    begin
+      if FileExists(ExpandConstant('{tmp}\update.zip')) then
+      begin
+        try
+          ExtractZip(ExpandConstant('{tmp}\update.zip'), ExpandConstant('{app}'));
+        except
+          Log('Failed to extract payload ZIP.');
+        end;
+      end;
+    end;
     ConfigureSmartEmu(ExpandConstant('{app}\platform\steam\games\SmartEmu\config.xml'));
   end;
 end;
