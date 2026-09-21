@@ -22,21 +22,35 @@ if (!is_file($updates_file)) {
 
 $updates_data = json_decode(file_get_contents($updates_file), true);
 
-if (is_array($updates_data) && isset($updates_data[$tag])) {
-    $tag_data = $updates_data[$tag];
-    $latest_version = (string)($tag_data['version'] ?? '0.0.0');
-    
-    // Check if the server version is greater than the client's current version
-    if (version_compare($latest_version, $current_version, '>')) {
-        echo json_encode([
-            "update_available" => true,
-            "latest_version" => $latest_version,
-            "download_url" => (string)($tag_data['download_url'] ?? ''),
-            "hash" => (string)($tag_data['hash'] ?? ''),
-            "forced" => true // Based on user preference
-        ]);
-        exit;
+if (is_array($updates_data)) {
+    $target_data = null;
+    foreach ($updates_data as $key => $val) {
+        if (strcasecmp((string)$key, $tag) === 0) {
+            $target_data = $val;
+            break;
+        }
+    }
+    if ($target_data === null && isset($updates_data['DEFAULT'])) {
+        $target_data = $updates_data['DEFAULT'];
+    }
+
+    if (is_array($target_data)) {
+        $latest_version = (string)($target_data['version'] ?? '0.0.0');
+        
+        // Check if the server version is greater than the client's current version
+        if (version_compare($latest_version, $current_version, '>')) {
+            echo json_encode([
+                "update_available" => true,
+                "latest_version" => $latest_version,
+                "download_url" => (string)($target_data['download_url'] ?? ''),
+                "hash" => (string)($target_data['hash'] ?? ''),
+                "size" => (string)($target_data['size'] ?? ''),
+                "type" => (string)($target_data['type'] ?? 'zip'),
+                "forced" => isset($target_data['forced']) ? (bool)$target_data['forced'] : true
+            ], JSON_UNESCAPED_SLASHES);
+            exit;
+        }
     }
 }
 
-echo json_encode(["update_available" => false]);
+echo json_encode(["update_available" => false], JSON_UNESCAPED_SLASHES);

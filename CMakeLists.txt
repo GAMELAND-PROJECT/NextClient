@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(NextClient VERSION 2.5.3)
+project(NextClient VERSION 0.0.1)
 
 # VS 2022 is the newest Microsoft toolchain that supports producing native
 # Windows 7 binaries. VS 2026 raises the target floor to Windows 10, so reject

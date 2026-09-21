@@ -176,17 +176,28 @@ jobs:
           $releaseDir = Join-Path $env:GITHUB_WORKSPACE "tagged-output"
           New-Item -ItemType Directory -Force -Path $releaseDir | Out-Null
 
+          $cmakeText = Get-Content -LiteralPath (Join-Path $env:GITHUB_WORKSPACE "CMakeLists.txt") -Raw
+          $buildVersion = "0.0.1"
+          if ($cmakeText -match 'project\s*\(\s*NextClient\s+VERSION\s+([0-9\.]+)') {
+            $buildVersion = $matches[1]
+          }
+          "BUILD_VERSION=$buildVersion" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
           @(
             "Client tag: $env:CLIENT_TAG"
+            "Version: $buildVersion"
             "Commit: $env:GITHUB_SHA"
             "Workflow run: $env:GITHUB_RUN_NUMBER"
           ) | Set-Content -LiteralPath (Join-Path $env:GITHUB_WORKSPACE "install\build-info.txt") -Encoding utf8
+
+          Set-Content -LiteralPath (Join-Path $env:GITHUB_WORKSPACE "install\version.txt") -Value $buildVersion -Encoding ascii -NoNewline
 
           @(
             "## Tagged NextClient build"
             ""
             "- Client tag: ``$env:CLIENT_TAG``"
-            "- Output: installer EXE only"
+            "- Version: ``$buildVersion``"
+            "- Output: installer EXE and lightweight patch ZIP"
           ) | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
 
       - name: Prepare hosting panel package
@@ -203,6 +214,8 @@ jobs:
           Copy-Item -Path "hosting\admin\*" -Destination (Join-Path $hostingStage "admin") -Recurse -Force
           Copy-Item -LiteralPath "hosting\installer_access.php" -Destination $hostingStage -Force
           Copy-Item -LiteralPath "hosting\update_access.php" -Destination $hostingStage -Force
+          Copy-Item -LiteralPath "hosting\update_api.php" -Destination $hostingStage -Force
+          Copy-Item -LiteralPath "hosting\api.php" -Destination $hostingStage -Force
           Copy-Item -LiteralPath "pinned_servers.txt" -Destination $hostingStage -Force
           Copy-Item -LiteralPath "mix_servers.txt" -Destination $hostingStage -Force
           Copy-Item -LiteralPath "client_tags.txt" -Destination $hostingStage -Force
@@ -280,6 +293,64 @@ jobs:
             "- Size: **$installerSize MB**"
           ) | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
 
+      - name: Build lightweight client patch ZIP
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $patchStage = Join-Path $env:RUNNER_TEMP "allclient-patch"
+          $patchZip = Join-Path $env:GITHUB_WORKSPACE "tagged-output\Allclient-$env:CLIENT_TAG-Patch.zip"
+          $installDir = Join-Path $env:GITHUB_WORKSPACE "install"
+
+          Remove-Item -LiteralPath $patchStage -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force -Path $patchStage | Out-Null
+          New-Item -ItemType Directory -Force -Path (Join-Path $patchStage "cstrike\cl_dlls") | Out-Null
+
+          $binaries = @(
+            "Allclient.exe",
+            "cstrike.exe",
+            "updater.exe",
+            "FileSystem_Proxy.dll",
+            "next_engine_mini.dll",
+            "nitro_api2.dll",
+            "steam_api.dll",
+            "vgui2.dll",
+            "pinned_servers.txt",
+            "mix_servers.txt",
+            "client_tags.txt",
+            "build-info.txt",
+            "version.txt"
+          )
+
+          foreach ($bin in $binaries) {
+            $src = Join-Path $installDir $bin
+            if (Test-Path -LiteralPath $src -PathType Leaf) {
+              Copy-Item -LiteralPath $src -Destination (Join-Path $patchStage $bin) -Force
+            }
+          }
+
+          $clDlls = @("client_mini.dll", "GameUI.dll")
+          foreach ($dll in $clDlls) {
+            $src = Join-Path $installDir "cstrike\cl_dlls\$dll"
+            if (Test-Path -LiteralPath $src -PathType Leaf) {
+              Copy-Item -LiteralPath $src -Destination (Join-Path $patchStage "cstrike\cl_dlls\$dll") -Force
+            }
+          }
+
+          Remove-Item -LiteralPath $patchZip -Force -ErrorAction SilentlyContinue
+          Compress-Archive -Path (Join-Path $patchStage "*") -DestinationPath $patchZip -Force
+          $versionedZip = Join-Path $env:GITHUB_WORKSPACE "tagged-output\Allclient-$env:CLIENT_TAG-v$env:BUILD_VERSION-Patch.zip"
+          Copy-Item -LiteralPath $patchZip -Destination $versionedZip -Force
+          $patchSize = [math]::Round((Get-Item -LiteralPath $patchZip).Length / 1MB, 2)
+          Write-Host "Patch ZIP created: $patchZip ($patchSize MB)"
+
+          @(
+            ""
+            "### Lightweight Patch ZIP (~10MB payload)"
+            "- Patch ZIP: ``Allclient-$env:CLIENT_TAG-v$env:BUILD_VERSION-Patch.zip`` (**$patchSize MB**)"
+            "- Patch ZIP: ``Allclient-$env:CLIENT_TAG-Patch.zip`` (**$patchSize MB**)"
+            "- Can be uploaded directly into the Admin Panel under the **Updates** tab!"
+          ) | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+
       - name: Upload tagged Allclient installer
         uses: actions/upload-artifact@v4
         with:
@@ -287,6 +358,15 @@ jobs:
           path: tagged-output/Allclient-${{ env.CLIENT_TAG }}-Setup.exe
           if-no-files-found: error
           compression-level: 0
+          retention-days: 14
+
+      - name: Upload tagged lightweight patch ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: Allclient-${{ env.CLIENT_TAG }}-Patch-${{ github.run_number }}
+          path: tagged-output/Allclient-${{ env.CLIENT_TAG }}-Patch.zip
+          if-no-files-found: error
+          compression-level: 9
           retention-days: 14
 
       - name: Upload tagged hosting package
@@ -321,12 +401,16 @@ jobs:
           session_string = os.environ.get('TELEGRAM_SESSION')
           client_tag = os.environ.get('CLIENT_TAG')
           file_path = f'tagged-output/Allclient-{client_tag}-Setup.exe'
+          patch_path = f'tagged-output/Allclient-{client_tag}-Patch.zip'
 
           async def main():
               print('Connecting to Telegram...')
               async with TelegramClient(StringSession(session_string), api_id, api_hash) as client:
                   print(f'Uploading {file_path} to Saved Messages...')
                   await client.send_file('me', file_path, caption=f'NextClient Build: {client_tag}\\nWorkflow Run: {os.environ.get("GITHUB_RUN_NUMBER")}')
+                  if os.path.isfile(patch_path):
+                      print(f'Uploading {patch_path} to Saved Messages...')
+                      await client.send_file('me', patch_path, caption=f'NextClient Patch ZIP: {client_tag}\\nWorkflow Run: {os.environ.get("GITHUB_RUN_NUMBER")}')
                   print('Upload complete!')
 
           asyncio.run(main())

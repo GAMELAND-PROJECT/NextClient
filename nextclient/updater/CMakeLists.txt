@@ -9,6 +9,7 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
     urlmon.lib
     shell32.lib
     user32.lib
+    shlwapi.lib
 )
 
 if (WIN32)

@@ -7,13 +7,15 @@ const FILE_TAGS = 'client_tags.txt';
 const FILE_PASSWORD = 'server_password.txt';
 const FILE_FTP_CONFIG = 'ftp_config.txt';
 const FILE_SUSPENDED_SUBSCRIPTIONS = '.suspended_subscriptions.php';
+const FILE_UPDATES = 'updates.json';
+const DIR_DOWNLOADS = 'downloads';
 const MAX_SERVERS = 64;
 const MAX_TAGS = 256;
 
 header('X-Content-Type-Options: nosniff');
 header('X-Frame-Options: DENY');
 header('Referrer-Policy: no-referrer');
-header("Content-Security-Policy: default-src 'self'; style-src 'self'; script-src 'self'; worker-src 'self'; manifest-src 'self'; img-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'");
+header("Content-Security-Policy: default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; worker-src 'self'; manifest-src 'self'; img-src 'self' data:; form-action 'self'; frame-ancestors 'none'; base-uri 'none'");
 header('Cache-Control: no-store, max-age=0');
 
 $configFile = __DIR__ . '/config.php';
@@ -524,6 +526,26 @@ function writeSubscriptionRows(array $rows): void
     backupAndAtomicWrite(FILE_TAGS, implode("\n", $active) . ($active ? "\n" : ''));
 }
 
+function readUpdatesData(): array
+{
+    $path = dataPath(FILE_UPDATES);
+    if (!is_file($path)) {
+        return [];
+    }
+    $content = file_get_contents($path);
+    if ($content === false) {
+        return [];
+    }
+    $decoded = json_decode($content, true);
+    return is_array($decoded) ? $decoded : [];
+}
+
+function writeUpdatesData(array $data): void
+{
+    $content = json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+    backupAndAtomicWrite(FILE_UPDATES, $content !== false ? $content : '{}');
+}
+
 function iranToday(): DateTimeImmutable
 {
     return new DateTimeImmutable('today', new DateTimeZone('Asia/Tehran'));
@@ -803,6 +825,157 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $rows[$key]['install_password'] = '';
             writeSubscriptionRows($rows);
             flash('success', 'رمز نصب گیمنت باطل شد.');
+        } elseif ($action === 'upload_update') {
+            $tag = strtoupper(trim((string)($_POST['update_tag'] ?? '')));
+            $version = trim((string)($_POST['update_version'] ?? ''));
+            $forced = !empty($_POST['update_forced']);
+
+            global $dataDir;
+            $downloadsDir = $dataDir . DIRECTORY_SEPARATOR . DIR_DOWNLOADS;
+            if (!is_dir($downloadsDir) && !mkdir($downloadsDir, 0755, true) && !is_dir($downloadsDir)) {
+                throw new RuntimeException('امکان ساخت پوشه downloads وجود ندارد.');
+            }
+
+            $file = $_FILES['update_file'] ?? [];
+            $customUrl = trim((string)($_POST['custom_url'] ?? ''));
+
+            $downloadUrl = '';
+            $filename = '';
+            $sizeStr = '';
+            $hash = '';
+            $type = 'zip';
+
+            if (!empty($file['tmp_name']) && is_uploaded_file($file['tmp_name'])) {
+                if ($file['error'] !== UPLOAD_ERR_OK) {
+                    throw new RuntimeException('خطا در بارگذاری فایل آپدیت.');
+                }
+                $origExt = strtolower(pathinfo((string)$file['name'], PATHINFO_EXTENSION));
+                if (!in_array($origExt, ['zip', 'exe', 'rar', '7z'], true)) {
+                    throw new RuntimeException('فرمت فایل نامعتبر است. فقط ZIP یا EXE مجاز می‌باشد.');
+                }
+                $type = ($origExt === 'exe') ? 'exe' : 'zip';
+                $originalName = (string)$file['name'];
+
+                // 1. هوشمندسازی: بررسی درون فایل فشرده ZIP برای استخراج نسخه و تگ
+                if ($origExt === 'zip' && class_exists('ZipArchive')) {
+                    $zip = new ZipArchive();
+                    if ($zip->open($file['tmp_name']) === true) {
+                        $vFile = $zip->getFromName('version.txt');
+                        if ($vFile !== false && trim($vFile) !== '') {
+                            $candVer = trim($vFile);
+                            if (preg_match('/^\d+(\.\d+){1,3}$/', $candVer) && $version === '') {
+                                $version = $candVer;
+                            }
+                        }
+
+                        $bInfo = $zip->getFromName('build-info.txt');
+                        if ($bInfo !== false) {
+                            if ($version === '' && preg_match('/Version:\s*([0-9\.]+)/i', $bInfo, $mVer)) {
+                                $version = trim($mVer[1]);
+                            }
+                            if (($tag === '' || $tag === 'DEFAULT') && preg_match('/Client tag:\s*([A-Za-z0-9_-]+)/i', $bInfo, $mTag)) {
+                                $tag = strtoupper(trim($mTag[1]));
+                            }
+                        }
+                        $zip->close();
+                    }
+                }
+
+                // 2. شناسایی نسخه از نام فایل در صورت خالی بودن
+                if ($version === '') {
+                    if (preg_match('/[vV]?(\d+\.\d+(\.\d+)?)/', $originalName, $fnVer)) {
+                        $version = $fnVer[1];
+                    }
+                }
+
+                // 3. شناسایی تگ از نام فایل در صورت نیاز
+                if ($tag === '' || $tag === 'DEFAULT') {
+                    if (preg_match('/[aA]llclient-([A-Za-z0-9_-]+)-/', $originalName, $fnTag)) {
+                        $tag = strtoupper($fnTag[1]);
+                    }
+                }
+                if ($tag === '') {
+                    $tag = 'GAMELAND';
+                }
+
+                // 4. افزایش خودکار نسخه در صورت عدم تشخیص
+                $updates = readUpdatesData();
+                if ($version === '') {
+                    $lastVer = $updates[$tag]['version'] ?? '0.0.1';
+                    $parts = explode('.', $lastVer);
+                    if (count($parts) >= 2) {
+                        $parts[count($parts) - 1] = (int)$parts[count($parts) - 1] + 1;
+                        $version = implode('.', $parts);
+                    } else {
+                        $version = '0.0.2';
+                    }
+                }
+
+                if (!preg_match('/^\d+(\.\d+){1,3}$/', $version)) {
+                    throw new RuntimeException('شماره نسخه باید قالبی مانند 0.0.2 یا 1.0.0 داشته باشد.');
+                }
+
+                $filename = "Allclient_Patch_{$tag}_v{$version}.{$origExt}";
+                $destPath = $downloadsDir . DIRECTORY_SEPARATOR . $filename;
+
+                if (!move_uploaded_file($file['tmp_name'], $destPath)) {
+                    throw new RuntimeException('انتقال فایل آپلود شده به پوشه downloads ناموفق بود.');
+                }
+                $fileBytes = filesize($destPath);
+                $sizeStr = ($fileBytes !== false) ? round($fileBytes / (1024 * 1024), 2) . ' MB' : '';
+                $hash = hash_file('sha256', $destPath) ?: '';
+
+                $proto = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https://' : 'http://';
+                $host = $_SERVER['HTTP_HOST'] ?? 'gameland.cam';
+                $downloadUrl = $proto . $host . '/downloads/' . $filename;
+            } elseif ($customUrl !== '') {
+                if (!filter_var($customUrl, FILTER_VALIDATE_URL)) {
+                    throw new RuntimeException('لینک مستقیم دانلود نامعتبر است.');
+                }
+                $downloadUrl = $customUrl;
+                $filename = basename(parse_url($customUrl, PHP_URL_PATH) ?: 'update.zip');
+                $origExt = strtolower(pathinfo($filename, PATHINFO_EXTENSION));
+                $type = ($origExt === 'exe') ? 'exe' : 'zip';
+                $sizeStr = 'لینک مستقیم';
+                if ($version === '') {
+                    if (preg_match('/[vV]?(\d+\.\d+(\.\d+)?)/', $filename, $fnVer)) {
+                        $version = $fnVer[1];
+                    } else {
+                        $version = '0.0.2';
+                    }
+                }
+                if ($tag === '') {
+                    $tag = 'GAMELAND';
+                }
+            } else {
+                throw new RuntimeException('لطفاً یک فایل پچ آپلود کنید یا لینک مستقیم دانلود را وارد نمایید.');
+            }
+
+            $updates = readUpdatesData();
+            $updates[$tag] = [
+                'tag' => $tag,
+                'version' => $version,
+                'download_url' => $downloadUrl,
+                'filename' => $filename,
+                'size' => $sizeStr,
+                'hash' => $hash,
+                'type' => $type,
+                'forced' => $forced,
+                'updated_at' => date('Y-m-d H:i:s'),
+                'updated_at_jalali' => dateTimeToJalali(iranToday()) . ' ' . (new DateTime('now', new DateTimeZone('Asia/Tehran')))->format('H:i')
+            ];
+            writeUpdatesData($updates);
+            flash('success', "آپدیت نسخه {$version} برای تگ {$tag} با موفقیت فعال شد.");
+        } elseif ($action === 'delete_update') {
+            $tag = strtoupper(trim((string)($_POST['update_tag'] ?? '')));
+            $updates = readUpdatesData();
+            if (isset($updates[$tag])) {
+                unset($updates[$tag]);
+                writeUpdatesData($updates);
+                flash('success', "آپدیت مربوط به تگ {$tag} غیرفعال شد.");
+            } else {
+                throw new RuntimeException('آپدیت مورد نظر یافت نشد.');
+            }
         } else {
             throw new RuntimeException('عملیات ناشناخته است.');
         }
@@ -846,6 +1019,7 @@ if ($authenticated) {
             else { ++$activeSubscriptions; }
         }
         $passwordConfigured = trim(readTextFile(FILE_PASSWORD, 256)) !== '';
+        $updatesData = readUpdatesData();
     } catch (Throwable $error) {
         $flash = ['type' => 'error', 'message' => $error->getMessage()];
     }
@@ -913,6 +1087,7 @@ if ($authenticated) {
     <nav class="panel-tabs" aria-label="بخش‌های پنل">
       <button class="panel-tab active" type="button" data-panel="dashboard" aria-selected="true"><span class="tab-icon">⌂</span><span>داشبورد</span></button>
       <button class="panel-tab" type="button" data-panel="subscriptions" aria-selected="false"><span class="tab-icon">◫</span><span>اشتراک‌ها</span><b><?= count($tagRows) ?></b></button>
+      <button class="panel-tab" type="button" data-panel="updates" aria-selected="false"><span class="tab-icon">↑</span><span>آپدیت‌ها</span><b><?= count($updatesData ?? []) ?></b></button>
       <button class="panel-tab" type="button" data-panel="settings" aria-selected="false"><span class="tab-icon">⚙</span><span>تنظیمات</span></button>
     </nav>
 
@@ -1008,6 +1183,115 @@ if ($authenticated) {
           </article>
         <?php endforeach; ?>
         <?php if (!$tagRows): ?><div class="card empty-state"><strong>هنوز اشتراکی ثبت نشده است</strong><span>با دکمه «اشتراک جدید» اولین گیمنت را اضافه کنید.</span></div><?php endif; ?>
+      </div>
+    </section>
+
+    <section class="updates panel-view" data-panel-view="updates">
+      <div class="section-heading">
+        <div><span class="eyebrow">UPDATES SYSTEM</span><h2>مدیریت و بارگذاری آپدیت کلاینت</h2><p>انتشار آپدیت‌های سبک (ZIP) یا نصبی (EXE)، تعیین نسخه و اعمال خودکار به کلاینت‌ها</p></div>
+      </div>
+
+      <div class="grid dashboard-grid" style="margin-bottom: 24px;">
+        <article class="card">
+          <div class="card-title"><div><h2>بارگذاری آپدیت جدید</h2><p>فایل پچ فشرده (.zip حدود ۳ تا ۱۰ مگابایت) یا اینستالر (.exe) را آپلود کنید.</p></div><span class="pill">UPLOAD</span></div>
+          <form method="post" enctype="multipart/form-data" autocomplete="off">
+            <input type="hidden" name="csrf" value="<?= escape(csrfToken()) ?>">
+            <input type="hidden" name="action" value="upload_update">
+            
+            <label>تگ گیم‌نت / کلاینت
+              <select id="update-tag-select" name="update_tag" class="ltr" style="min-height: 44px; border: 1px solid #334c67; border-radius: 10px; padding: 11px 13px; background: var(--input); color: var(--text);">
+                <option value="GAMELAND">GAMELAND (پیش‌فرض عمومی)</option>
+                <option value="DEFAULT">DEFAULT (همگانی برای تمامی تگ‌ها)</option>
+                <?php foreach ($tagRows as $tRow): ?>
+                  <?php if (strtoupper($tRow['build']) !== 'GAMELAND'): ?>
+                    <option value="<?= escape($tRow['build']) ?>"><?= escape($tRow['build']) ?> (<?= escape($tRow['player']) ?>)</option>
+                  <?php endif; ?>
+                <?php endforeach; ?>
+              </select>
+            </label>
+
+            <label>شماره نسخه جدید (اختیاری - خودکار از فایل استخراج می‌شود)
+              <input id="update-version-input" class="ltr" type="text" name="update_version" placeholder="خودکار از فایل یا دلخواه (مثلاً 0.0.2)" pattern="^\d+(\.\d+){1,3}$">
+            </label>
+
+            <label>فایل آپدیت (ZIP سبک یا EXE)
+              <input id="update-file-input" type="file" name="update_file" accept=".zip,.exe,.rar,.7z">
+            </label>
+            <div id="update-detect-banner" style="display:none; padding: 10px 14px; background: rgba(69,213,154,0.15); border: 1px solid rgba(69,213,154,0.3); border-radius: 8px; color: var(--green); margin: -5px 0 15px; font-size: 12px; line-height: 1.6;"></div>
+
+            <label>یا لینک مستقیم دانلود (در صورت میزبانی روی سرور دیگر)
+              <input class="ltr" type="url" name="custom_url" placeholder="https://gameland.cam/downloads/patch.zip">
+            </label>
+
+            <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+              <input type="checkbox" name="update_forced" value="1" checked style="width: auto; min-height: auto;">
+              <span>آپدیت اجباری (کلاینت تا زمان دریافت آپدیت اجازه ادامه بازی را ندارد)</span>
+            </label>
+
+            <button class="button primary wide" type="submit" style="margin-top: 10px;">بارگذاری هوشمند و فعال‌سازی خودکار آپدیت</button>
+          </form>
+        </article>
+
+        <article class="card">
+          <div class="card-title"><div><h2>راهنمای پچ سبک و تست زنده</h2><p>مشخصات فنی سیستم پچ و ابزار بررسی API</p></div><span class="pill">INFO</span></div>
+          <div style="font-size: 13px; line-height: 1.8; color: var(--muted);">
+            <p><strong style="color: var(--text);">نسخه پایه کلاینت:</strong> <code class="ltr" style="color: var(--primary);">0.0.1</code></p>
+            <p><strong style="color: var(--text);">عملکرد خودکار کلاینت:</strong> در زمان باز شدن بازی، کلاینت به آدرس <code class="ltr" style="color: #45d59a;">/update_api.php</code> درخواست می‌زند. اگر نسخه‌ای که در پنل قرار می‌دهید بزرگتر از نسخه کلاینت باشد، برنامه به صورت خودکار کاربر را به آپدیت هدایت می‌کند.</p>
+            <p><strong style="color: var(--text);">پچ کم‌حجم ZIP:</strong> پچ زیپ شامل فایل‌های <code class="ltr">GameUI.dll</code>, <code class="ltr">client_mini.dll</code>, <code class="ltr">cstrike.exe</code> و کتابخانه‌ها است (حدود ۴ مگابایت فشرده) و توسط <code class="ltr">updater.exe</code> بدون نیاز به نصب مجدد بازی سریعاً جایگزین می‌شود.</p>
+          </div>
+          <hr style="border: 0; border-top: 1px solid var(--border); margin: 15px 0;">
+          <label>تست زنده API برای تگ GAMELAND با نسخه 0.0.1:
+            <div style="display: flex; gap: 8px; margin-top: 6px;">
+              <a href="../update_api.php?tag=GAMELAND&version=0.0.1" target="_blank" class="button secondary" style="text-decoration: none; display: flex; align-items: center; justify-content: center; width: 100%;">بررسی پاسخ JSON در پنجره جدید ↗</a>
+            </div>
+          </label>
+        </article>
+      </div>
+
+      <div class="card">
+        <div class="card-title"><div><h2>لیست آپدیت‌های فعال</h2><p>تمام آپدیت‌های فعال به تفکیک تگ در فایل updates.json</p></div><span class="pill"><?= count($updatesData ?? []) ?> فعال</span></div>
+        <?php if (!empty($updatesData)): ?>
+          <div style="overflow-x: auto;">
+            <table style="width: 100%; border-collapse: collapse; text-align: right; font-size: 13px;">
+              <thead>
+                <tr style="border-bottom: 1px solid var(--border); color: var(--muted);">
+                  <th style="padding: 10px;">تگ کلاینت</th>
+                  <th style="padding: 10px;">نسخه هدف</th>
+                  <th style="padding: 10px;">نوع و حجم</th>
+                  <th style="padding: 10px;">تاریخ انتشار</th>
+                  <th style="padding: 10px;">لینک دانلود</th>
+                  <th style="padding: 10px;">تست API</th>
+                  <th style="padding: 10px;">عملیات</th>
+                </tr>
+              </thead>
+              <tbody>
+                <?php foreach ($updatesData as $uTag => $uInfo): ?>
+                  <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
+                    <td style="padding: 12px 10px;"><strong class="ltr" style="color: #45cfff;"><?= escape((string)$uTag) ?></strong></td>
+                    <td style="padding: 12px 10px;"><span class="ltr" style="background: rgba(69, 207, 255, 0.15); padding: 4px 8px; border-radius: 6px; font-weight: bold; color: #45cfff;"><?= escape((string)($uInfo['version'] ?? '')) ?></span></td>
+                    <td style="padding: 12px 10px;"><?= escape((string)($uInfo['size'] ?? '')) ?> (<?= escape(strtoupper((string)($uInfo['type'] ?? 'ZIP'))) ?>)</td>
+                    <td style="padding: 12px 10px;"><?= escape((string)($uInfo['updated_at_jalali'] ?? $uInfo['updated_at'] ?? '')) ?></td>
+                    <td style="padding: 12px 10px;"><a href="<?= escape((string)($uInfo['download_url'] ?? '')) ?>" target="_blank" class="ltr" style="color: var(--primary); text-decoration: none; word-break: break-all;" title="دانلود مستقیم فایل">دریافت فایل ⤓</a></td>
+                    <td style="padding: 12px 10px;"><a href="../update_api.php?tag=<?= urlencode((string)$uTag) ?>&version=0.0.1" target="_blank" style="color: var(--green); text-decoration: none;">تست (0.0.1) ↗</a></td>
+                    <td style="padding: 12px 10px;">
+                      <form method="post" class="confirm-form" data-confirm="آیا از غیرفعال‌سازی این آپدیت مطمئن هستید؟" style="margin: 0;">
+                        <input type="hidden" name="csrf" value="<?= escape(csrfToken()) ?>">
+                        <input type="hidden" name="action" value="delete_update">
+                        <input type="hidden" name="update_tag" value="<?= escape((string)$uTag) ?>">
+                        <button class="button danger" type="submit" style="min-height: 32px; padding: 4px 12px; font-size: 12px;">حذف</button>
+                      </form>
+                    </td>
+                  </tr>
+                <?php endforeach; ?>
+              </tbody>
+            </table>
+          </div>
+        <?php else: ?>
+          <div class="empty-state" style="text-align: center; padding: 30px; color: var(--muted);">
+            <strong>در حال حاضر هیچ آپدیتی ثبت نشده است.</strong>
+            <p style="margin-top: 6px;">با استفاده از فرم بالا می‌توانید اولین فایل آپدیت را برای تگ دلخواه بارگذاری کنید.</p>
+          </div>
+        <?php endif; ?>
       </div>
     </section>
 

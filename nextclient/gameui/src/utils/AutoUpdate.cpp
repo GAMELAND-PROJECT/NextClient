@@ -45,8 +45,17 @@ void AutoUpdate::CheckForUpdatesAndExitIfForced() {
                 urlPos += 16;
                 size_t urlEnd = response.find("\"", urlPos);
                 if (urlEnd != std::string::npos) {
-                    std::string downloadUrl = response.substr(urlPos, urlEnd - urlPos);
-                    
+                    std::string rawUrl = response.substr(urlPos, urlEnd - urlPos);
+                    std::string downloadUrl;
+                    for (size_t i = 0; i < rawUrl.length(); ++i) {
+                        if (rawUrl[i] == '\\' && i + 1 < rawUrl.length() && rawUrl[i + 1] == '/') {
+                            downloadUrl += '/';
+                            ++i;
+                        } else {
+                            downloadUrl += rawUrl[i];
+                        }
+                    }
+
                     std::string utf8Msg = "آپدیت جدیدی برای سیستم شما منتشر شده است.\nبرای ادامه حتماً باید کلاینت بروزرسانی شود.";
                     std::string utf8Title = "NextClient Auto-Update";
                     
@@ -61,12 +70,13 @@ void AutoUpdate::CheckForUpdatesAndExitIfForced() {
 
                     MessageBoxW(NULL, wMsg.c_str(), wTitle.c_str(), MB_ICONINFORMATION | MB_TOPMOST);
 
-                    // Execute updater
+                    // Execute updater with quoted URL
+                    std::string execParams = "\"" + downloadUrl + "\"";
                     SHELLEXECUTEINFOA sei = { sizeof(sei) };
                     sei.fMask = SEE_MASK_NOCLOSEPROCESS;
                     sei.lpVerb = "open";
                     sei.lpFile = "updater.exe";
-                    sei.lpParameters = downloadUrl.c_str();
+                    sei.lpParameters = execParams.c_str();
                     sei.nShow = SW_SHOWNORMAL;
                     
                     if (ShellExecuteExA(&sei)) {

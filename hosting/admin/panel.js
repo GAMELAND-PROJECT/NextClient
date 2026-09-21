@@ -123,3 +123,66 @@ installButton?.addEventListener('click', async () => {
   installButton.disabled = false;
 });
 window.addEventListener('appinstalled', () => { if (installButton) installButton.hidden = true; });
+
+// Smart auto-detection of version and tag from uploaded update file
+const updateFileInput = document.getElementById('update-file-input');
+const updateVersionInput = document.getElementById('update-version-input');
+const updateTagSelect = document.getElementById('update-tag-select');
+const updateDetectBanner = document.getElementById('update-detect-banner');
+
+if (updateFileInput) {
+  updateFileInput.addEventListener('change', () => {
+    const file = updateFileInput.files?.[0];
+    if (!file) {
+      if (updateDetectBanner) updateDetectBanner.style.display = 'none';
+      return;
+    }
+    const name = file.name;
+    let detectedTag = null;
+    let detectedVer = null;
+
+    // Detect tag from name like Allclient-GAMELAND-...
+    const tagMatch = name.match(/allclient-([A-Za-z0-9_-]+)-/i);
+    if (tagMatch) {
+      detectedTag = tagMatch[1].toUpperCase();
+    }
+
+    // Detect version like v0.0.2 or 0.0.2
+    const verMatch = name.match(/[vV]?(\d+\.\d+(\.\d+)?)/);
+    if (verMatch) {
+      detectedVer = verMatch[1];
+    }
+
+    let msg = `✓ فایل <strong>${name}</strong> انتخاب شد.`;
+    if (detectedTag && updateTagSelect) {
+      let found = false;
+      for (const opt of updateTagSelect.options) {
+        if (opt.value.toUpperCase() === detectedTag) {
+          updateTagSelect.value = opt.value;
+          found = true;
+          break;
+        }
+      }
+      if (!found) {
+        const opt = document.createElement('option');
+        opt.value = detectedTag;
+        opt.textContent = detectedTag;
+        opt.selected = true;
+        updateTagSelect.appendChild(opt);
+      }
+      msg += `<br>• تگ کلاینت: <strong>${detectedTag}</strong> شناسایی و تنظیم شد.`;
+    }
+
+    if (detectedVer && updateVersionInput) {
+      updateVersionInput.value = detectedVer;
+      msg += `<br>• نسخه جدید: <strong>${detectedVer}</strong> استخراج شد.`;
+    } else {
+      msg += `<br>• نسخه فایل پس از آپلود به صورت خودکار از محتوا/نام استخراج می‌شود.`;
+    }
+
+    if (updateDetectBanner) {
+      updateDetectBanner.innerHTML = msg;
+      updateDetectBanner.style.display = 'block';
+    }
+  });
+}
