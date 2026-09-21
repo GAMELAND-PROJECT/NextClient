@@ -40,6 +40,10 @@ void RC4Decrypt(std::string& data, const std::string& key) {
     }
 }
 
+void RC4Encrypt(std::string& data, const std::string& key) {
+    RC4Decrypt(data, key);
+}
+
 const std::string& GetGameNetTag() {
     static std::string cached_tag;
     static bool loaded = false;
@@ -55,18 +59,78 @@ const std::string& GetGameNetTag() {
     }
     std::string datFile = modulePath + "\\gameland_license.dat";
 
+    // 1. Primary: Encrypted gameland_license.dat
     std::ifstream file(datFile, std::ios::binary);
-    if (!file) return cached_tag;
-    
-    std::string data((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
-    if (data.empty()) return cached_tag;
+    if (file) {
+        std::string data((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+        file.close();
+        if (!data.empty()) {
+            RC4Decrypt(data, kLicenseSecretKey);
+            while(!data.empty() && (data.back() == '\0' || data.back() == '\r' || data.back() == '\n' || data.back() == ' '))
+                data.pop_back();
 
-    RC4Decrypt(data, kLicenseSecretKey);
+            if (!data.empty()) {
+                cached_tag = data;
+                return cached_tag;
+            }
+        }
+    }
 
-    while(!data.empty() && (data.back() == '\0' || data.back() == '\r' || data.back() == '\n' || data.back() == ' '))
-        data.pop_back();
+    // 2. Secondary Fallback: allclient-install.ini
+    std::string iniFile = modulePath + "\\allclient-install.ini";
+    char iniTag[128] = {0};
+    if (GetPrivateProfileStringA("Allclient", "GameNetTag", "", iniTag, sizeof(iniTag), iniFile.c_str()) > 0) {
+        std::string tagStr(iniTag);
+        while (!tagStr.empty() && (tagStr.back() == '\0' || tagStr.back() == '\r' || tagStr.back() == '\n' || tagStr.back() == ' '))
+            tagStr.pop_back();
 
-    cached_tag = data;
+        if (!tagStr.empty()) {
+            cached_tag = tagStr;
+
+            // Auto-heal / regenerate gameland_license.dat so it stays secure & self-healing
+            std::string payload = cached_tag;
+            RC4Encrypt(payload, kLicenseSecretKey);
+            std::ofstream outDat(datFile, std::ios::binary);
+            if (outDat) {
+                outDat.write(payload.data(), payload.size());
+                outDat.close();
+                SetFileAttributesA(datFile.c_str(), FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_SYSTEM);
+            }
+            return cached_tag;
+        }
+    }
+
+    // 3. Tertiary Fallback: Windows Registry (Uninstall Key)
+    HKEY hKey = nullptr;
+    const char* subKey = "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{D9E46BD1-52F8-470F-8639-FF31FE7C5E48}_is1";
+    if (RegOpenKeyExA(HKEY_CURRENT_USER, subKey, 0, KEY_READ, &hKey) == ERROR_SUCCESS) {
+        char regTag[128] = {0};
+        DWORD regSize = sizeof(regTag);
+        DWORD regType = 0;
+        if (RegQueryValueExA(hKey, "GameNetTag", nullptr, &regType, reinterpret_cast<LPBYTE>(regTag), &regSize) == ERROR_SUCCESS && regType == REG_SZ) {
+            std::string tagStr(regTag);
+            while (!tagStr.empty() && (tagStr.back() == '\0' || tagStr.back() == '\r' || tagStr.back() == '\n' || tagStr.back() == ' '))
+                tagStr.pop_back();
+
+            if (!tagStr.empty()) {
+                cached_tag = tagStr;
+                RegCloseKey(hKey);
+
+                // Auto-heal / regenerate gameland_license.dat
+                std::string payload = cached_tag;
+                RC4Encrypt(payload, kLicenseSecretKey);
+                std::ofstream outDat(datFile, std::ios::binary);
+                if (outDat) {
+                    outDat.write(payload.data(), payload.size());
+                    outDat.close();
+                    SetFileAttributesA(datFile.c_str(), FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_SYSTEM);
+                }
+                return cached_tag;
+            }
+        }
+        RegCloseKey(hKey);
+    }
+
     return cached_tag;
 }
 
