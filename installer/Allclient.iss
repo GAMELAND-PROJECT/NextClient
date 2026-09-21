@@ -1,6 +1,6 @@
 #define AppName "Allclient"
 #ifndef AppVersion
-  #define AppVersion "2.5.3"
+  #define AppVersion "0.0.1"
 #endif
 #define AppPublisher "GAMELAND PROJECT"
 #define AppExeName "cstrike.exe"
@@ -45,12 +45,18 @@ SetupLogging=no
 [Languages]
 Name: "farsi"; MessagesFile: "languages\Farsi.isl"
 
+#ifndef BinaryRoot
+  #define BinaryRoot "..\install"
+#endif
+
 [Files]
 Source: "runtime\vc_redist.x86.exe"; Flags: dontcopy
 Source: "runtime\vc_redist.x64.exe"; Flags: dontcopy
 Source: "runtime\vcredist2010_x86.exe"; Flags: dontcopy
 Source: "runtime\vcredist2010_x64.exe"; Flags: dontcopy
 Source: "{#SourceRoot}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "crashes\*,htmlcache\*,*.log,*.mdmp,debug.log,install.bat,unins000.exe,unins000.dat"
+; Overlay latest compiled binaries and configs on top of base game files:
+Source: "{#BinaryRoot}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "*.log,*.mdmp,debug.log"
 
 [INI]
 Filename: "{app}\allclient-install.ini"; Section: "Allclient"; Key: "Schema"; String: "1"

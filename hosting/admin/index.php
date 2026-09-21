@@ -808,10 +808,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($key === '' || !isset($rows[$key])) {
                 throw new RuntimeException('اشتراک موردنظر پیدا نشد.');
             }
-            $chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
             $password = '';
             for ($i = 0; $i < 8; $i++) {
-                $password .= $chars[random_int(0, strlen($chars) - 1)];
+                $password .= (string)random_int(0, 9);
             }
             $rows[$key]['install_password'] = $password;
             writeSubscriptionRows($rows);

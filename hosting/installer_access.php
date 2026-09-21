@@ -52,7 +52,10 @@ function verificationAttemptAllowed(string $username): bool
 
 function getSubscription(string $username): ?array
 {
-    $tagsFile = __DIR__ . '/../client_tags.txt';
+    $tagsFile = __DIR__ . '/client_tags.txt';
+    if (!is_file($tagsFile)) {
+        $tagsFile = __DIR__ . '/../client_tags.txt';
+    }
     if (!is_file($tagsFile)) {
         return null;
     }

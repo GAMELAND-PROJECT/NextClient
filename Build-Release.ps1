@@ -36,6 +36,26 @@ if ($LASTEXITCODE -ne 0) {
 }
 Write-OK "Binaries compiled successfully."
 
+# Sync freshly compiled binaries to installStage
+$outBin = Join-Path $rootDir "out\bin\Release"
+$binariesToSync = @(
+    "Allclient.exe", "cstrike.exe", "updater.exe", "FileSystem_Proxy.dll",
+    "next_engine_mini.dll", "nitro_api2.dll", "steam_api.dll", "vgui2.dll"
+)
+foreach ($bin in $binariesToSync) {
+    $src = Join-Path $outBin $bin
+    if (Test-Path -LiteralPath $src -PathType Leaf) {
+        Copy-Item -LiteralPath $src -Destination (Join-Path $installStage $bin) -Force
+    }
+}
+$clDllsToSync = @("client_mini.dll", "GameUI.dll")
+foreach ($dll in $clDllsToSync) {
+    $src = Join-Path $outBin "cstrike\cl_dlls\$dll"
+    if (Test-Path -LiteralPath $src -PathType Leaf) {
+        Copy-Item -LiteralPath $src -Destination (Join-Path $installStage "cstrike\cl_dlls\$dll") -Force
+    }
+}
+
 # Write metadata
 Set-Content -LiteralPath (Join-Path $installStage "version.txt") -Value $Version -Encoding ascii -NoNewline
 @(
@@ -136,9 +156,9 @@ if (-not $PatchOnly) {
         $compiledExe = Join-Path $rootDir "installer\output\Allclient-Setup.exe"
         $finalExe = Join-Path $outDir "Allclient-Setup.exe"
 
-        & $iscc "/DSourceRoot=$sourceRoot" "/DAppVersion=$Version" "/DBuildTag=$Tag" $issScript
+        & $iscc "/DSourceRoot=$sourceRoot" "/DBinaryRoot=$installStage" "/DAppVersion=$Version" "/DBuildTag=$Tag" $issScript
         if ($LASTEXITCODE -eq 0 -and (Test-Path -LiteralPath $compiledExe -PathType Leaf)) {
-            Copy-Item -LiteralPath $compiledExe -Destination $finalExe -Force
+            Copy-Item -Path (Join-Path $rootDir "installer\output\Allclient-Setup*") -Destination $outDir -Force
             $installerMb = [math]::Round((Get-Item -LiteralPath $finalExe).Length / 1MB, 1)
             Write-OK "Smart Installer created successfully ($installerMb MB):"
             Write-Host "    -> $finalExe" -ForegroundColor Green
