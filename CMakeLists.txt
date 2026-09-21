@@ -128,6 +128,17 @@ endif ()
 
 # custom build target
 if (NOT NEXTCLIENT_BUILD_TESTS)
+    set(ALLCLIENT_INSTALL_INI "${CMAKE_BINARY_DIR}/allclient-install.ini")
+    if (EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/installer/allclient-install.ini.in")
+        configure_file(
+            "${CMAKE_CURRENT_SOURCE_DIR}/installer/allclient-install.ini.in"
+            "${ALLCLIENT_INSTALL_INI}"
+            @ONLY
+        )
+    else ()
+        file(WRITE "${ALLCLIENT_INSTALL_INI}" "[Allclient]\nSchema=1\nGameNetTag=GAMELAND\n")
+    endif ()
+
     add_custom_target(BUILD_ALL ALL)
     add_dependencies(BUILD_ALL
             auto_launcher
@@ -149,7 +160,7 @@ if (NOT NEXTCLIENT_BUILD_TESTS)
                 COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:next_launcher> ${NEXTCLIENT_INSTALL_DIR}/cstrike.exe
                 COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:auto_launcher> ${NEXTCLIENT_INSTALL_DIR}/Allclient.exe
                 COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:updater> ${NEXTCLIENT_INSTALL_DIR}/updater.exe
-                COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_BINARY_DIR}/allclient-install.ini ${NEXTCLIENT_INSTALL_DIR}/allclient-install.ini
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different "${ALLCLIENT_INSTALL_INI}" "${NEXTCLIENT_INSTALL_DIR}/allclient-install.ini"
                 COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:engine_mini> ${NEXTCLIENT_INSTALL_DIR}/next_engine_mini.dll
                 COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:filesystem_proxy> ${NEXTCLIENT_INSTALL_DIR}/FileSystem_Proxy.dll
                 COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:client_mini> ${NEXTCLIENT_INSTALL_DIR}/cstrike/cl_dlls/client_mini.dll

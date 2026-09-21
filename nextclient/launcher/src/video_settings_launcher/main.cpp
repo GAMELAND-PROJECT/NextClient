@@ -2,6 +2,7 @@
 #include <CommCtrl.h>
 #include <WinInet.h>
 #include <windowsx.h>
+#include <shellapi.h>
 
 #include <algorithm>
 #include <compare>
@@ -115,6 +116,7 @@ HINSTANCE g_instance{};
 HFONT g_font{};
 HFONT g_emphasisFont{};
 HFONT g_brandFont{};
+HFONT g_badgeFont{};
 HBRUSH g_backgroundBrush{};
 HBRUSH g_panelBrush{};
 HWND g_resolution{};
@@ -124,6 +126,7 @@ HWND g_pointerSpeed{};
 HWND g_pointerSpeedValue{};
 HWND g_enhancePointer{};
 HWND g_status{};
+HWND g_versionLabel{};
 HWND g_subscriptionState{};
 HWND g_subscriptionTag{};
 HWND g_subscriptionDetails{};
@@ -421,6 +424,55 @@ std::string ReadInstallGameNetTag()
         data.pop_back();
 
     return data;
+}
+
+std::string ReadInstalledClientVersion()
+{
+    // 1. Try reading version.txt directly from client root
+    const auto versionPath = ExecutableRoot() / L"version.txt";
+    std::ifstream vFile(versionPath);
+    if (vFile)
+    {
+        std::string line;
+        if (std::getline(vFile, line))
+        {
+            while (!line.empty() && (line.back() == '\r' || line.back() == '\n' || line.back() == ' ' || line.back() == '\t'))
+                line.pop_back();
+            size_t start = line.find_first_not_of(" \t");
+            if (start != std::string::npos)
+                line = line.substr(start);
+            if (!line.empty())
+                return line;
+        }
+    }
+
+    // 2. Try reading build-info.txt for "Version: X.X.X"
+    const auto buildInfoPath = ExecutableRoot() / L"build-info.txt";
+    std::ifstream bFile(buildInfoPath);
+    if (bFile)
+    {
+        std::string line;
+        while (std::getline(bFile, line))
+        {
+            if (line.rfind("Version:", 0) == 0)
+            {
+                std::string ver = line.substr(8);
+                while (!ver.empty() && (ver.back() == '\r' || ver.back() == '\n' || ver.back() == ' ' || ver.back() == '\t'))
+                    ver.pop_back();
+                size_t start = ver.find_first_not_of(" \t");
+                if (start != std::string::npos)
+                    ver = ver.substr(start);
+                if (!ver.empty())
+                    return ver;
+            }
+        }
+    }
+
+#ifdef NEXTCLIENT_VERSION
+    return NEXTCLIENT_VERSION;
+#else
+    return "0.0.1";
+#endif
 }
 
 bool IsUploadPasswordTextValid(const std::wstring& password)
@@ -1164,11 +1216,16 @@ void CreateControls(HWND window)
     {
         return AddControl(window, L"STATIC", text, SS_RIGHT, x, y, width, height);
     };
-    AddActionButton(window, L"Demo Manager", 28, 24, 168, 42, IdDemoManager);
+    AddActionButton(window, L"Demo Manager", 28, 24, 150, 40, IdDemoManager);
 
-    HWND heading = label(L"ALLCLIENT", 320, 18, 264, 38);
+    std::string installedVer = ReadInstalledClientVersion();
+    std::wstring versionLabelText = L"نسخه " + WidenAscii(installedVer) + L" (بروز)";
+    g_versionLabel = AddControl(window, L"STATIC", versionLabelText.c_str(), SS_CENTER | SS_CENTERIMAGE, 196, 32, 130, 26);
+    SendMessageW(g_versionLabel, WM_SETFONT, reinterpret_cast<WPARAM>(g_badgeFont), TRUE);
+
+    HWND heading = label(L"ALLCLIENT", 340, 18, 244, 38);
     SendMessageW(heading, WM_SETFONT, reinterpret_cast<WPARAM>(g_brandFont), TRUE);
-    label(L"COUNTER-STRIKE  /  1.6", 300, 60, 284, 22);
+    label(L"COUNTER-STRIKE  /  1.6", 340, 58, 244, 20);
 
     label(L"\u062a\u0635\u0648\u06cc\u0631", 424, 96, 148, 22);
     label(L"\u0648\u0636\u0648\u062d \u062a\u0635\u0648\u06cc\u0631", 422, 128, 150);
@@ -1216,12 +1273,148 @@ void CreateControls(HWND window)
     SetMouseControls(g_mouseAtLastApply);
 }
 
+void CheckLauncherUpdates(HWND window)
+{
+    SetStatus(L"در حال بررسی بروزرسانی کلاینت...");
+
+    std::string tag = NEXTCLIENT_TAG;
+    std::string version = ReadInstalledClientVersion();
+    std::string url = "http://gameland.cam/update_api.php?tag=" + tag + "&version=" + version;
+
+    HINTERNET hInternet = InternetOpenA("AllclientLauncher", INTERNET_OPEN_TYPE_DIRECT, NULL, NULL, 0);
+    if (!hInternet)
+    {
+        std::wstring fallbackMsg = L"آماده بازی  •  نسخه " + WidenAscii(version);
+        SetStatus(fallbackMsg.c_str());
+        return;
+    }
+
+    DWORD timeout = 2500;
+    InternetSetOptionA(hInternet, INTERNET_OPTION_CONNECT_TIMEOUT, &timeout, sizeof(timeout));
+    InternetSetOptionA(hInternet, INTERNET_OPTION_RECEIVE_TIMEOUT, &timeout, sizeof(timeout));
+    InternetSetOptionA(hInternet, INTERNET_OPTION_SEND_TIMEOUT, &timeout, sizeof(timeout));
+
+    HINTERNET hConnect = InternetOpenUrlA(hInternet, url.c_str(), NULL, 0, INTERNET_FLAG_RELOAD | INTERNET_FLAG_NO_CACHE_WRITE, 0);
+    if (!hConnect)
+    {
+        InternetCloseHandle(hInternet);
+        std::wstring fallbackMsg = L"آماده بازی  •  نسخه " + WidenAscii(version);
+        SetStatus(fallbackMsg.c_str());
+        return;
+    }
+
+    char buffer[1024];
+    DWORD bytesRead = 0;
+    std::string response;
+    while (InternetReadFile(hConnect, buffer, sizeof(buffer) - 1, &bytesRead) && bytesRead > 0)
+    {
+        buffer[bytesRead] = '\0';
+        response += buffer;
+    }
+    InternetCloseHandle(hConnect);
+    InternetCloseHandle(hInternet);
+
+    bool hasUpdate = (response.find("\"update_available\":true") != std::string::npos ||
+                      response.find("\"update_available\": true") != std::string::npos ||
+                      response.find("\"has_update\":true") != std::string::npos ||
+                      response.find("\"has_update\": true") != std::string::npos);
+
+    if (hasUpdate)
+    {
+        size_t urlPos = response.find("\"download_url\":\"");
+        if (urlPos == std::string::npos)
+            urlPos = response.find("\"download_url\": \"");
+
+        if (urlPos != std::string::npos)
+        {
+            urlPos = response.find("\"", urlPos + 15);
+            if (urlPos != std::string::npos)
+            {
+                urlPos++;
+                size_t urlEnd = response.find("\"", urlPos);
+                if (urlEnd != std::string::npos)
+                {
+                    std::string rawUrl = response.substr(urlPos, urlEnd - urlPos);
+                    std::string downloadUrl;
+                    for (size_t i = 0; i < rawUrl.length(); ++i)
+                    {
+                        if (rawUrl[i] == '\\' && i + 1 < rawUrl.length() && rawUrl[i + 1] == '/')
+                        {
+                            downloadUrl += '/';
+                            ++i;
+                        }
+                        else
+                        {
+                            downloadUrl += rawUrl[i];
+                        }
+                    }
+
+                    std::string latestVersion = "جدید";
+                    size_t verPos = response.find("\"latest_version\":\"");
+                    if (verPos != std::string::npos)
+                    {
+                        verPos += 18;
+                        size_t verEnd = response.find("\"", verPos);
+                        if (verEnd != std::string::npos)
+                            latestVersion = response.substr(verPos, verEnd - verPos);
+                    }
+
+                    SetStatus(L"آپدیت جدید آماده دریافت است.");
+
+                    std::wstring promptMsg = L"آپدیت جدید نسخه " + WidenAscii(latestVersion) +
+                        L" برای کلاینت شما منتشر شده است.\n\n"
+                        L"برای ادامه استفاده، دریافت آپدیت الزامی است.\n"
+                        L"آیا مایلید هم‌اکنون آپدیت دانلود و نصب شود؟";
+
+                    int userChoice = MessageBoxW(window, promptMsg.c_str(), L"بروزرسانی Allclient",
+                        MB_YESNO | MB_ICONINFORMATION | MB_TOPMOST);
+
+                    if (userChoice == IDYES || userChoice == IDOK)
+                    {
+                        SetStatus(L"در حال فراخوانی ابزار بروزرسانی...");
+                        std::string execParams = "\"" + downloadUrl + "\"";
+                        SHELLEXECUTEINFOA sei = { sizeof(sei) };
+                        sei.fMask = SEE_MASK_NOCLOSEPROCESS;
+                        sei.lpVerb = "open";
+                        sei.lpFile = "updater.exe";
+                        sei.lpParameters = execParams.c_str();
+                        sei.nShow = SW_SHOWNORMAL;
+
+                        if (ShellExecuteExA(&sei))
+                        {
+                            ExitProcess(0);
+                        }
+                        else
+                        {
+                            SetStatus(L"خطا در اجرای updater.exe", true);
+                            MessageBoxW(window, L"خطا در اجرای updater.exe. لطفاً اتصال اینترنت خود را بررسی کنید.", L"خطای بروزرسانی", MB_ICONERROR);
+                        }
+                    }
+                    else
+                    {
+                        SetStatus(L"برای اجرای بازی، نصب بروزرسانی الزامی است.", true);
+                    }
+                    return;
+                }
+            }
+        }
+    }
+
+    std::wstring readyMsg = L"آماده بازی  •  کلاینت نسخه " + WidenAscii(version) + L" (بروزرسانی شده)";
+    SetStatus(readyMsg.c_str());
+}
+
 LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam)
 {
     switch (message)
     {
     case WM_CREATE:
         CreateControls(window);
+        PostMessageW(window, WM_APP + 101, 0, 0);
+        return 0;
+
+    case WM_APP + 101:
+        CheckLauncherUpdates(window);
         return 0;
 
     case WM_COMMAND:
@@ -1304,6 +1497,10 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
             const bool active = g_accessStatus.state == GameNetAccessState::Active;
             SetTextColor(reinterpret_cast<HDC>(wParam), active ? kColorAccent : kColorDanger);
         }
+        else if (reinterpret_cast<HWND>(lParam) == g_versionLabel || reinterpret_cast<HWND>(lParam) == g_status)
+        {
+            SetTextColor(reinterpret_cast<HDC>(wParam), RGB(0, 210, 160));
+        }
         else
             SetTextColor(reinterpret_cast<HDC>(wParam), kColorText);
         return reinterpret_cast<LRESULT>(g_backgroundBrush);
@@ -1332,6 +1529,19 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
         }
         SelectObject(dc, oldPen);
         DeleteObject(accentPen);
+
+        // Version badge container pill
+        RECT badgeRect{194, 30, 328, 60};
+        HBRUSH badgeBrush = CreateSolidBrush(RGB(32, 44, 42));
+        HPEN badgePen = CreatePen(PS_SOLID, 1, RGB(0, 160, 120));
+        HGDIOBJ prevBrush = SelectObject(dc, badgeBrush);
+        HGDIOBJ prevPen = SelectObject(dc, badgePen);
+        RoundRect(dc, badgeRect.left, badgeRect.top, badgeRect.right, badgeRect.bottom, 8, 8);
+        SelectObject(dc, prevBrush);
+        SelectObject(dc, prevPen);
+        DeleteObject(badgeBrush);
+        DeleteObject(badgePen);
+
         HBRUSH accentBrush = CreateSolidBrush(kColorAccent);
         RECT accent{rect.right - 8, 24, rect.right - 4, 72};
         FillRect(dc, &accent, accentBrush);
@@ -1369,6 +1579,10 @@ bool ShowVideoSettingsDialog(HINSTANCE instance, const GameNetAccessStatus& acce
     g_emphasisFont = CreateFontIndirectW(&emphasisFont);
     emphasisFont.lfHeight = -30;
     g_brandFont = CreateFontIndirectW(&emphasisFont);
+    LOGFONTW badgeFont = metrics.lfMessageFont;
+    badgeFont.lfWeight = FW_SEMIBOLD;
+    badgeFont.lfHeight = -13;
+    g_badgeFont = CreateFontIndirectW(&badgeFont);
     g_backgroundBrush = CreateSolidBrush(kColorBackground);
     g_panelBrush = CreateSolidBrush(kColorPanel);
 
@@ -1418,6 +1632,8 @@ bool ShowVideoSettingsDialog(HINSTANCE instance, const GameNetAccessStatus& acce
         DeleteObject(g_emphasisFont);
     if (g_brandFont)
         DeleteObject(g_brandFont);
+    if (g_badgeFont)
+        DeleteObject(g_badgeFont);
     if (g_backgroundBrush)
         DeleteObject(g_backgroundBrush);
     if (g_panelBrush)
@@ -1425,6 +1641,7 @@ bool ShowVideoSettingsDialog(HINSTANCE instance, const GameNetAccessStatus& acce
     g_font = nullptr;
     g_emphasisFont = nullptr;
     g_brandFont = nullptr;
+    g_badgeFont = nullptr;
     g_backgroundBrush = nullptr;
     g_panelBrush = nullptr;
     return g_launchRequested;

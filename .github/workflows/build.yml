@@ -3,22 +3,46 @@ name: Build
 on:
   workflow_dispatch:
     inputs:
-      client_tag:
-        description: Client/game-net tag (letters, numbers, _ and - only)
+      client_version:
+        description: Patch / Client version (e.g. 0.0.1, 0.0.2)
         required: true
-        default: GAMELAND
+        default: 0.0.1
+        type: string
+      build_mode:
+        description: Build mode (patch_only or full_installer)
+        required: true
+        default: patch_only
+        type: choice
+        options:
+          - patch_only
+          - full_installer
+      client_tag:
+        description: Client tag (Only needed for full installer - leave blank for patch_only)
+        required: false
+        default: ''
         type: string
       force_redownload:
-        description: Force redownload base game (ignore cache)
+        description: Force redownload base game (ignore cache, full_installer only)
         required: false
         type: boolean
         default: false
   workflow_call:
     inputs:
+      client_version:
+        description: Client version
+        required: false
+        type: string
+        default: 0.0.1
+      build_mode:
+        description: Build mode (patch_only or full_installer)
+        required: false
+        type: string
+        default: patch_only
       client_tag:
         description: Optional client/game-net build tag
         required: false
         type: string
+        default: ''
 
 permissions:
   contents: read
@@ -79,14 +103,14 @@ jobs:
 
       - name: Cache base game archive
         id: base-game-cache
-        if: inputs.force_redownload != true
+        if: (inputs.build_mode == 'full_installer') && (inputs.force_redownload != true)
         uses: actions/cache@v4
         with:
           path: base-game-cache/Allclient.rar
           key: base-game-${{ runner.os }}-${{ env.BASE_GAME_CACHE_VERSION }}
 
       - name: Download base game from GitHub Release
-        if: steps.base-game-cache.outputs.cache-hit != 'true'
+        if: (inputs.build_mode == 'full_installer') && (steps.base-game-cache.outputs.cache-hit != 'true')
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
@@ -106,6 +130,7 @@ jobs:
           }
 
       - name: Validate and extract base game
+        if: inputs.build_mode == 'full_installer'
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
@@ -116,7 +141,7 @@ jobs:
 
           & $sevenZip t $env:BASE_GAME_ARCHIVE -bso0 -bsp0
           if ($LASTEXITCODE -ne 0) {
-            throw "The Google Drive base-game archive is corrupt or incomplete."
+            throw "The base game archive is corrupt or incomplete."
           }
 
           $extractDir = Join-Path $env:RUNNER_TEMP "allclient-base"
@@ -145,6 +170,15 @@ jobs:
           }
           Write-Host "Base game prepared successfully ($baseFileCount files)."
 
+      - name: Ensure install directory exists for patch build
+        if: inputs.build_mode != 'full_installer'
+        shell: pwsh
+        run: |
+          $installDir = Join-Path $env:GITHUB_WORKSPACE "install"
+          New-Item -ItemType Directory -Force -Path $installDir | Out-Null
+          New-Item -ItemType Directory -Force -Path (Join-Path $installDir "cstrike\cl_dlls") | Out-Null
+          Write-Host "Prepared clean install directory for patch-only build."
+
       - name: Cache vcpkg packages
         uses: actions/cache@v4
         with:
@@ -167,19 +201,19 @@ jobs:
 
       - name: Prepare installer metadata
         shell: pwsh
+        env:
+          REQUESTED_CLIENT_VERSION: ${{ inputs.client_version }}
         run: |
-          $launcher = Join-Path $env:GITHUB_WORKSPACE "install\cstrike.exe"
-          if (-not (Test-Path -LiteralPath $launcher -PathType Leaf)) {
-            throw "Expected launcher was not produced: $launcher"
-          }
-
           $releaseDir = Join-Path $env:GITHUB_WORKSPACE "tagged-output"
           New-Item -ItemType Directory -Force -Path $releaseDir | Out-Null
 
-          $cmakeText = Get-Content -LiteralPath (Join-Path $env:GITHUB_WORKSPACE "CMakeLists.txt") -Raw
-          $buildVersion = "0.0.1"
-          if ($cmakeText -match 'project\s*\(\s*NextClient\s+VERSION\s+([0-9\.]+)') {
-            $buildVersion = $matches[1]
+          $buildVersion = $env:REQUESTED_CLIENT_VERSION.Trim()
+          if ([string]::IsNullOrWhiteSpace($buildVersion)) {
+            $cmakeText = Get-Content -LiteralPath (Join-Path $env:GITHUB_WORKSPACE "CMakeLists.txt") -Raw
+            $buildVersion = "0.0.1"
+            if ($cmakeText -match 'project\s*\(\s*NextClient\s+VERSION\s+([0-9\.]+)') {
+              $buildVersion = $matches[1]
+            }
           }
           "BUILD_VERSION=$buildVersion" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
@@ -191,16 +225,20 @@ jobs:
           ) | Set-Content -LiteralPath (Join-Path $env:GITHUB_WORKSPACE "install\build-info.txt") -Encoding utf8
 
           Set-Content -LiteralPath (Join-Path $env:GITHUB_WORKSPACE "install\version.txt") -Value $buildVersion -Encoding ascii -NoNewline
+          Copy-Item -LiteralPath "pinned_servers.txt" -Destination (Join-Path $env:GITHUB_WORKSPACE "install\pinned_servers.txt") -Force -ErrorAction SilentlyContinue
+          Copy-Item -LiteralPath "mix_servers.txt" -Destination (Join-Path $env:GITHUB_WORKSPACE "install\mix_servers.txt") -Force -ErrorAction SilentlyContinue
 
           @(
             "## Tagged NextClient build"
             ""
             "- Client tag: ``$env:CLIENT_TAG``"
             "- Version: ``$buildVersion``"
-            "- Output: installer EXE and lightweight patch ZIP"
+            "- Build mode: ``${{ inputs.build_mode }}``"
+            "- Output: installer EXE (if full) and lightweight patch ZIP"
           ) | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
 
       - name: Prepare hosting panel package
+        if: inputs.build_mode == 'full_installer'
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
@@ -231,6 +269,7 @@ jobs:
           ) | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
 
       - name: Install Inno Setup 7.1
+        if: inputs.build_mode == 'full_installer'
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
@@ -253,6 +292,7 @@ jobs:
           }
 
       - name: Cache bundled Microsoft runtimes
+        if: inputs.build_mode == 'full_installer'
         uses: actions/cache@v4
         with:
           path: installer/runtime/*.exe
@@ -260,10 +300,12 @@ jobs:
           restore-keys: microsoft-runtimes-
 
       - name: Prepare bundled Microsoft runtimes
+        if: inputs.build_mode == 'full_installer'
         shell: pwsh
         run: ./installer/Prepare-Runtimes.ps1
 
-      - name: Build tagged Allclient installer
+      - name: Build Allclient installer
+        if: inputs.build_mode == 'full_installer'
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
@@ -271,26 +313,27 @@ jobs:
           $script = Join-Path $env:GITHUB_WORKSPACE "installer\Allclient.iss"
           $installDir = Join-Path $env:GITHUB_WORKSPACE "install"
           $compiledInstaller = Join-Path $env:GITHUB_WORKSPACE "installer\output\Allclient-Setup.exe"
-          $taggedInstaller = Join-Path $env:GITHUB_WORKSPACE "tagged-output\Allclient-$env:CLIENT_TAG-Setup.exe"
+          $finalInstaller = Join-Path $env:GITHUB_WORKSPACE "tagged-output\Allclient-Setup.exe"
 
           if (-not (Test-Path -LiteralPath $iscc -PathType Leaf)) {
             throw "Inno Setup 7 compiler was not found after installation."
           }
 
-          & $iscc "/DSourceRoot=$installDir" $script
+          & $iscc "/DSourceRoot=$installDir" "/DAppVersion=$env:BUILD_VERSION" "/DBuildTag=$env:CLIENT_TAG" $script
           if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $compiledInstaller -PathType Leaf)) {
             throw "Allclient installer compilation failed."
           }
 
-          Copy-Item -LiteralPath $compiledInstaller -Destination $taggedInstaller -Force
-          $installerSize = [math]::Round((Get-Item -LiteralPath $taggedInstaller).Length / 1MB, 1)
-          Write-Host "Installer created: $taggedInstaller ($installerSize MB)"
+          Copy-Item -LiteralPath $compiledInstaller -Destination $finalInstaller -Force
+          $installerSize = [math]::Round((Get-Item -LiteralPath $finalInstaller).Length / 1MB, 1)
+          Write-Host "Smart Installer created: $finalInstaller ($installerSize MB)"
 
           @(
             ""
-            "### Ready-to-install package"
-            "- Installer: ``Allclient-$env:CLIENT_TAG-Setup.exe``"
-            "- Size: **$installerSize MB**"
+            "### Smart Installer Package (v$env:BUILD_VERSION)"
+            "- Installer: ``Allclient-Setup.exe`` (**$installerSize MB**)"
+            "- Auto-detects existing installations & updates automatically without credentials!"
+            "- Prompts for login/pass only on fresh installations."
           ) | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
 
       - name: Build lightweight client patch ZIP
@@ -298,7 +341,7 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
           $patchStage = Join-Path $env:RUNNER_TEMP "allclient-patch"
-          $patchZip = Join-Path $env:GITHUB_WORKSPACE "tagged-output\Allclient-$env:CLIENT_TAG-Patch.zip"
+          $patchZip = Join-Path $env:GITHUB_WORKSPACE "tagged-output\Allclient-Patch.zip"
           $installDir = Join-Path $env:GITHUB_WORKSPACE "install"
 
           Remove-Item -LiteralPath $patchStage -Recurse -Force -ErrorAction SilentlyContinue
@@ -316,7 +359,6 @@ jobs:
             "vgui2.dll",
             "pinned_servers.txt",
             "mix_servers.txt",
-            "client_tags.txt",
             "build-info.txt",
             "version.txt"
           )
@@ -338,7 +380,7 @@ jobs:
 
           Remove-Item -LiteralPath $patchZip -Force -ErrorAction SilentlyContinue
           Compress-Archive -Path (Join-Path $patchStage "*") -DestinationPath $patchZip -Force
-          $versionedZip = Join-Path $env:GITHUB_WORKSPACE "tagged-output\Allclient-$env:CLIENT_TAG-v$env:BUILD_VERSION-Patch.zip"
+          $versionedZip = Join-Path $env:GITHUB_WORKSPACE "tagged-output\Allclient-v$env:BUILD_VERSION-Patch.zip"
           Copy-Item -LiteralPath $patchZip -Destination $versionedZip -Force
           $patchSize = [math]::Round((Get-Item -LiteralPath $patchZip).Length / 1MB, 2)
           Write-Host "Patch ZIP created: $patchZip ($patchSize MB)"
@@ -346,34 +388,36 @@ jobs:
           @(
             ""
             "### Lightweight Patch ZIP (~10MB payload)"
-            "- Patch ZIP: ``Allclient-$env:CLIENT_TAG-v$env:BUILD_VERSION-Patch.zip`` (**$patchSize MB**)"
-            "- Patch ZIP: ``Allclient-$env:CLIENT_TAG-Patch.zip`` (**$patchSize MB**)"
-            "- Can be uploaded directly into the Admin Panel under the **Updates** tab!"
+            "- Versioned Patch: ``Allclient-v$env:BUILD_VERSION-Patch.zip`` (**$patchSize MB**)"
+            "- Latest Patch: ``Allclient-Patch.zip`` (**$patchSize MB**)"
+            "- Ready for deployment directly to your server/admin panel!"
           ) | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
 
-      - name: Upload tagged Allclient installer
+      - name: Upload Allclient installer
+        if: inputs.build_mode == 'full_installer'
         uses: actions/upload-artifact@v4
         with:
-          name: Allclient-${{ env.CLIENT_TAG }}-Setup-${{ github.run_number }}
-          path: tagged-output/Allclient-${{ env.CLIENT_TAG }}-Setup.exe
+          name: Allclient-Setup-${{ github.run_number }}
+          path: tagged-output/Allclient-Setup.exe
           if-no-files-found: error
           compression-level: 0
           retention-days: 14
 
-      - name: Upload tagged lightweight patch ZIP
+      - name: Upload lightweight patch ZIP
         uses: actions/upload-artifact@v4
         with:
-          name: Allclient-${{ env.CLIENT_TAG }}-Patch-${{ github.run_number }}
-          path: tagged-output/Allclient-${{ env.CLIENT_TAG }}-Patch.zip
+          name: Allclient-v${{ env.BUILD_VERSION }}-Patch-${{ github.run_number }}
+          path: tagged-output/Allclient-v${{ env.BUILD_VERSION }}-Patch.zip
           if-no-files-found: error
           compression-level: 9
           retention-days: 14
 
       - name: Upload tagged hosting package
+        if: inputs.build_mode == 'full_installer'
         uses: actions/upload-artifact@v4
         with:
-          name: Allclient-${{ env.CLIENT_TAG }}-Hosting-${{ github.run_number }}
-          path: tagged-output/Allclient-${{ env.CLIENT_TAG }}-Hosting.zip
+          name: Allclient-Hosting-${{ github.run_number }}
+          path: tagged-output/Allclient-Hosting.zip
           if-no-files-found: error
           compression-level: 0
           retention-days: 14
@@ -399,18 +443,19 @@ jobs:
           api_id = 2040
           api_hash = 'b18441a1ff607e10a989891a5462e627'
           session_string = os.environ.get('TELEGRAM_SESSION')
-          client_tag = os.environ.get('CLIENT_TAG')
-          file_path = f'tagged-output/Allclient-{client_tag}-Setup.exe'
-          patch_path = f'tagged-output/Allclient-{client_tag}-Patch.zip'
+          build_version = os.environ.get('BUILD_VERSION', 'unknown')
+          file_path = 'tagged-output/Allclient-Setup.exe'
+          patch_path = f'tagged-output/Allclient-v{build_version}-Patch.zip'
 
           async def main():
               print('Connecting to Telegram...')
               async with TelegramClient(StringSession(session_string), api_id, api_hash) as client:
-                  print(f'Uploading {file_path} to Saved Messages...')
-                  await client.send_file('me', file_path, caption=f'NextClient Build: {client_tag}\\nWorkflow Run: {os.environ.get("GITHUB_RUN_NUMBER")}')
+                  if os.path.isfile(file_path):
+                      print(f'Uploading {file_path} to Saved Messages...')
+                      await client.send_file('me', file_path, caption=f'NextClient Smart Installer: v{build_version}\\nWorkflow Run: {os.environ.get("GITHUB_RUN_NUMBER")}')
                   if os.path.isfile(patch_path):
                       print(f'Uploading {patch_path} to Saved Messages...')
-                      await client.send_file('me', patch_path, caption=f'NextClient Patch ZIP: {client_tag}\\nWorkflow Run: {os.environ.get("GITHUB_RUN_NUMBER")}')
+                      await client.send_file('me', patch_path, caption=f'NextClient Patch ZIP: v{build_version}\\nWorkflow Run: {os.environ.get("GITHUB_RUN_NUMBER")}')
                   print('Upload complete!')
 
           asyncio.run(main())

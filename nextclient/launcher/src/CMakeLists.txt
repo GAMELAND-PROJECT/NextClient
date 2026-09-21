@@ -21,6 +21,8 @@ add_compile_options(
         /GR- # disable rtti to reduce the library size
         /WX  # treat all warnings as error
         /EHsc # NEVER catch SEH exceptions; c functions cannot throw exceptions
+        /utf-8 # force UTF-8 source and execution character set
+        /wd4828 # suppress C4828 character encoding warning from legacy HL1 SDK headers
 )
 
 add_subdirectory(utils)

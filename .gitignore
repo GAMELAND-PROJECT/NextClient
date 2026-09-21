@@ -38,3 +38,7 @@ CMakeUserPresets.json
 .cursor/
 .windsurf/
 .junie/
+
+# Build and Release Outputs
+/install/
+/out_release/

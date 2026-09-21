@@ -1,10 +1,14 @@
 #define AppName "Allclient"
-#define AppVersion "2.5.3"
+#ifndef AppVersion
+  #define AppVersion "2.5.3"
+#endif
 #define AppPublisher "GAMELAND PROJECT"
 #define AppExeName "cstrike.exe"
-#define TagFile FileOpen("..\client_tags.txt")
-#define BuildTag Trim(FileRead(TagFile))
-#expr FileClose(TagFile)
+#ifndef BuildTag
+  #define TagFile FileOpen("..\client_tags.txt")
+  #define BuildTag Trim(FileRead(TagFile))
+  #expr FileClose(TagFile)
+#endif
 
 #ifndef SourceRoot
   #define SourceRoot "F:\CS 1.6 - AllClient"
@@ -50,10 +54,10 @@ Source: "{#SourceRoot}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs
 
 [INI]
 Filename: "{app}\allclient-install.ini"; Section: "Allclient"; Key: "Schema"; String: "1"
-Filename: "{app}\allclient-install.ini"; Section: "Allclient"; Key: "GameNetTag"; String: "{#BuildTag}"
+Filename: "{app}\allclient-install.ini"; Section: "Allclient"; Key: "GameNetTag"; String: "{code:GetActiveGameNetTag}"
 
 [Registry]
-Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Uninstall\{{D9E46BD1-52F8-470F-8639-FF31FE7C5E48}_is1"; ValueType: string; ValueName: "GameNetTag"; ValueData: "{#BuildTag}"; Flags: uninsdeletevalue
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Uninstall\{{D9E46BD1-52F8-470F-8639-FF31FE7C5E48}_is1"; ValueType: string; ValueName: "GameNetTag"; ValueData: "{code:GetActiveGameNetTag}"; Flags: uninsdeletevalue
 Root: HKCU; Subkey: "Software\NextClient"; ValueType: string; ValueName: "InstallID"; ValueData: "{code:GetHardwareID}"; Flags: uninsdeletevalue
 
 [Icons]
@@ -116,6 +120,15 @@ var
   DependenciesReady: Boolean;
   PayloadDownloadUrl: String;
   PayloadDownloadPage: TDownloadWizardPage;
+  ActiveGameNetTag: String;
+
+function GetActiveGameNetTag(Param: String): String;
+begin
+  if Trim(ActiveGameNetTag) <> '' then
+    Result := Trim(ActiveGameNetTag)
+  else
+    Result := '{#BuildTag}';
+end;
 
 function URLDownloadToFile(Caller: NativeInt; URL, FileName: String;
   Reserved: DWORD; StatusCallback: NativeInt): HResult;
@@ -386,6 +399,7 @@ begin
     if Pos('"valid":true', NormalizedResponse) > 0 then
     begin
       Result := True;
+      ActiveGameNetTag := Trim(Username);
       OnlineVerificationMessage := 'لایسنس آنلاین تأیید شد.';
       PayloadDownloadUrl := GetJsonString(ResponseText, 'download_url');
       if PayloadDownloadUrl <> '' then
@@ -502,8 +516,8 @@ begin
       PreparationReady := True;
       PreparationProgress.Position := 100;
       PreparationStatusLabel.Font.Color := clGreen;
-      PreparationStatusLabel.Caption := 'نسخه نصب‌شده شناسایی شد و اشتراک فعال است.' + #13#10 +
-        'برای به‌روزرسانی در همین مسیر، «بعدی» را بزنید:' + #13#10 + DetectedInstallDirectory;
+      PreparationStatusLabel.Caption := 'کلاینت قبلی با برچسب «' + ActiveGameNetTag + '» شناسایی شد و اشتراک فعال است.' + #13#10 +
+        'برای به‌روزرسانی خودکار، «بعدی» را بزنید:' + #13#10 + DetectedInstallDirectory;
     end
     else
       RunEarlyPreparation(nil);
@@ -511,9 +525,9 @@ begin
   if SubscriptionUpdate and (CurPageID = wpReady) then
   begin
     WizardForm.NextButton.Caption := 'به‌روزرسانی';
-    WizardForm.ReadyMemo.Text := 'اشتراک گیمنت تأیید شد؛ نیازی به وارد کردن کد نیست.' + #13#10 +
+    WizardForm.ReadyMemo.Text := 'اشتراک گیم‌نت «' + ActiveGameNetTag + '» تأیید شد؛ نیازی به ورود مشخصات نیست.' + #13#10 +
       'مسیر به‌روزرسانی: ' + DetectedInstallDirectory + #13#10 +
-      'نسخه قبلی و فایل‌های آن پاک و نسخه جدید نصب می‌شود. بازی و لانچر را ببندید.';
+      'فایل‌ها و پچ جدید کلاینت جایگزین خواهند شد. لطفاً بازی و لانچر را ببندید.';
   end;
 end;
 
@@ -872,31 +886,38 @@ end;
 function ReadInstalledGameNetTag(const Directory: String; var Tag: String): Boolean;
 var
   IdentityFile, RegistryTag: String;
+  RawTag: AnsiString;
 begin
-  IdentityFile := AddBackslash(Directory) + 'allclient-install.ini';
   Tag := '';
+  IdentityFile := AddBackslash(Directory) + 'allclient-install.ini';
   RegQueryStringValue(DetectedInstallRoot, AllclientUninstallKey, 'GameNetTag', Tag);
-  RegistryTag := Tag;
+  RegistryTag := Trim(Tag);
+
   if FileExists(IdentityFile) then
   begin
-    if GetIniString('Allclient', 'Schema', '', IdentityFile) <> '1' then
-    begin
-      Result := False;
-      Exit;
-    end;
     Tag := Trim(GetIniString('Allclient', 'GameNetTag', '', IdentityFile));
-    if (RegistryTag <> '') and (CompareText(RegistryTag, Tag) <> 0) then
+  end;
+
+  if Tag = '' then
+    Tag := RegistryTag;
+
+  if (Tag = '') and FileExists(AddBackslash(Directory) + 'client_tags.txt') then
+  begin
+    Tag := Trim(GetIniString('', '', '', AddBackslash(Directory) + 'client_tags.txt'));
+    if Tag = '' then
     begin
-      Result := False;
-      Exit;
+      RawTag := '';
+      if LoadStringFromFile(AddBackslash(Directory) + 'client_tags.txt', RawTag) then
+        Tag := Trim(String(RawTag));
     end;
   end;
-  Result := (Tag <> '') and (CompareText(Tag, '{#BuildTag}') = 0);
+
+  Result := (Tag <> '');
 end;
 
 procedure CheckInstalledSubscription;
 var
-  Directory, Version, Response: String;
+  Directory, Version, InstalledTag, Response: String;
 begin
   if not UpdateAccessChecked then
   begin
@@ -905,11 +926,16 @@ begin
        FileExists(AddBackslash(Directory) + 'cstrike.exe') and
        PreviousInstallPathIsSafe(Directory) then
     begin
-      if FetchAccessResponse('http://gameland.cam/update_access.php?tag={#BuildTag}', Response) then
+      InstalledTag := '';
+      if not ReadInstalledGameNetTag(Directory, InstalledTag) or (InstalledTag = '') then
+        InstalledTag := '{#BuildTag}';
+
+      if FetchAccessResponse('http://gameland.cam/update_access.php?tag=' + InstalledTag, Response) then
       begin
-        SubscriptionUpdate := Trim(Response) = 'ACTIVE|{#BuildTag}';
+        SubscriptionUpdate := (Pos('ACTIVE', Response) = 1);
         if SubscriptionUpdate then
         begin
+          ActiveGameNetTag := InstalledTag;
           AccessApproved := True;
           DetectedInstallDirectory := Directory;
           WizardForm.DirEdit.Text := Directory;
