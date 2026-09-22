@@ -127,6 +127,7 @@ var
   PayloadDownloadUrl: String;
   PayloadDownloadPage: TDownloadWizardPage;
   ActiveGameNetTag: String;
+  IsPatchMode: Boolean;
 
 function GetActiveGameNetTag(Param: String): String;
 begin
@@ -695,14 +696,26 @@ end;
 function RemovePreviousAllclient(var ErrorMessage: String): Boolean;
 var
   InstallDirectory, InstalledVersion: String;
+  TargetAppDir: String;
 begin
   Result := False;
   ErrorMessage := '';
+  TargetAppDir := RemoveBackslashUnlessRoot(
+    ExpandFileName(ExpandConstant('{app}')));
 
   { If a locked file prevented direct cleanup, retry only the directory that
     was previously read from Allclient's own registered installation record. }
   if PreviousInstallDirectoryPendingCleanup <> '' then
   begin
+    if CompareText(TargetAppDir, PreviousInstallDirectoryPendingCleanup) = 0 then
+    begin
+      { User is installing/updating right inside the existing directory; preserve assets! }
+      RemovePreviousRegistrationAndShortcuts;
+      PreviousInstallDirectoryPendingCleanup := '';
+      Result := True;
+      Exit;
+    end;
+
     if (not DirExists(PreviousInstallDirectoryPendingCleanup)) or
        DelTree(PreviousInstallDirectoryPendingCleanup, True, True, True) then
     begin
@@ -729,6 +742,17 @@ begin
     Exit;
   end;
 
+  { If installing into the exact same folder as the previously registered install,
+    do NOT wipe the directory; let Smart Patch handle it safely without losing maps/configs. }
+  if CompareText(TargetAppDir, InstallDirectory) = 0 then
+  begin
+    RemovePreviousRegistrationAndShortcuts;
+    PreviousInstallDirectoryPendingCleanup := '';
+    Result := True;
+    Exit;
+  end;
+
+  { If user explicitly picked a completely DIFFERENT folder, clean up the old one so no orphan remains. }
   SetAccessStatus('در حال پاک‌سازی نسخه قبلی Allclient…', clGray);
   PreviousInstallDirectoryPendingCleanup := InstallDirectory;
   if DirExists(InstallDirectory) and
@@ -774,6 +798,52 @@ begin
     DirExists(AddBackslash(Directory) + 'platform\steam\games\SmartEmu2');
 end;
 
+procedure SmartPatchTargetDirectory(const TargetDir: String);
+var
+  BaseDir: String;
+  MetamodIni: String;
+  Lines: TArrayOfString;
+  I: Integer;
+begin
+  BaseDir := AddBackslash(TargetDir);
+
+  { 1. Remove outdated launcher and core executables }
+  DeleteFile(BaseDir + 'Allclient.exe');
+  DeleteFile(BaseDir + 'cstrike.exe');
+  DeleteFile(BaseDir + 'hl.exe');
+  DeleteFile(BaseDir + 'hltv.exe');
+  DeleteFile(BaseDir + 'updater.exe');
+
+  { 2. Remove outdated engine and proxy DLLs }
+  DeleteFile(BaseDir + 'FileSystem_Proxy.dll');
+  DeleteFile(BaseDir + 'next_engine_mini.dll');
+  DeleteFile(BaseDir + 'nitro_api2.dll');
+  DeleteFile(BaseDir + 'steam_api.dll');
+  DeleteFile(BaseDir + 'vgui2.dll');
+
+  { 3. Remove outdated client UI and hook DLLs }
+  DeleteFile(BaseDir + 'cstrike\cl_dlls\client_mini.dll');
+  DeleteFile(BaseDir + 'cstrike\cl_dlls\GameUI.dll');
+
+  { 4. Clean up problematic/crash-inducing files and debug dumps }
+  DeleteFile(BaseDir + 'hitbox_vis.asi');
+  DeleteFile(BaseDir + 'hitbox_vis.asi.disabled');
+  DeleteFile(BaseDir + 'cstrike\addons\hitbox_fixer\dlls\hitbox_fix_mm.dll');
+  DeleteFile(BaseDir + 'debug.log');
+
+  { 5. Ensure Metamod plugins.ini does not load buggy hitbox_fixer }
+  MetamodIni := BaseDir + 'cstrike\addons\metamod\plugins.ini';
+  if FileExists(MetamodIni) and LoadStringsFromFile(MetamodIni, Lines) then
+  begin
+    for I := 0 to GetArrayLength(Lines) - 1 do
+    begin
+      if (Pos('hitbox_fix_mm.dll', Lines[I]) > 0) and (Pos(';', Trim(Lines[I])) <> 1) then
+        Lines[I] := '; ' + Lines[I];
+    end;
+    SaveStringsToFile(MetamodIni, Lines, False);
+  end;
+end;
+
 function CleanSelectedInstallDirectory(var ErrorMessage: String): Boolean;
 var
   InstallDirectory, BuildSourceDirectory: String;
@@ -814,6 +884,18 @@ begin
     Exit;
   end;
 
+  { SMART PATCH MODE: If directory already has CS 1.6 / Allclient files,
+    do NOT wipe the folder! Clean old binaries safely and overlay new ones. }
+  if DirectoryLooksLikeAllclient(InstallDirectory) then
+  begin
+    IsPatchMode := True;
+    SetAccessStatus('در حال آماده‌سازی و به‌روزرسانی هوشمند فایل‌های کلاینت…', clGray);
+    SmartPatchTargetDirectory(InstallDirectory);
+    Result := True;
+    Exit;
+  end;
+
+  { Otherwise, if it was an empty/temporary folder, clean it normally }
   SetAccessStatus('در حال پاک‌سازی پوشه انتخاب‌شده Allclient…', clGray);
   if not DelTree(InstallDirectory, True, True, True) then
   begin
