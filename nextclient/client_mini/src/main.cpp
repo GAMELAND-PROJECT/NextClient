@@ -11,6 +11,7 @@
 #include <string_view>
 #include <next_client_mini/client_mini.h>
 #include <parsemsg.h>
+#include <demo_api.h>
 
 #include "camera.h"
 #include "studiorenderer.h"
@@ -151,14 +152,52 @@ namespace
         g_DemoMenuVisible = true;
     }
 
+    void ToggleDemoMenu()
+    {
+        g_DemoMenuVisible = !g_DemoMenuVisible;
+    }
+
     void ShowDemoMenuCommand()
     {
-        ShowDemoMenu();
+        ToggleDemoMenu();
     }
 
     void HideDemoMenu()
     {
         g_DemoMenuVisible = false;
+    }
+
+    bool IsClientDemoRecording()
+    {
+        if (gEngfuncs.pDemoAPI != nullptr && gEngfuncs.pDemoAPI->IsRecording != nullptr)
+        {
+            if (gEngfuncs.pDemoAPI->IsRecording())
+                return true;
+        }
+
+        if (eng() != nullptr && eng()->client_static != nullptr)
+        {
+            if (eng()->client_static->demorecording)
+                return true;
+        }
+
+        return false;
+    }
+
+    std::string GetCurrentRecordingDemoName()
+    {
+        if (eng() != nullptr && eng()->client_static != nullptr && eng()->client_static->demorecording)
+        {
+            if (eng()->client_static->demofilename[0] != '\0')
+            {
+                std::string fname = eng()->client_static->demofilename;
+                const size_t slash = fname.find_last_of("/\\");
+                if (slash != std::string::npos)
+                    fname.erase(0, slash + 1);
+                return fname;
+            }
+        }
+        return "active";
     }
 
     void DrawHudString(int x, int y, const char* text)
@@ -167,15 +206,99 @@ namespace
             gEngfuncs.pfnDrawConsoleString(x, y, const_cast<char*>(text));
     }
 
+    void DrawHudBox(int x, int y, int w, int h, int r, int g, int b, int a)
+    {
+        if (gEngfuncs.pfnFillRGBA != nullptr)
+            gEngfuncs.pfnFillRGBA(x, y, w, h, r, g, b, a);
+    }
+
     void DrawDemoMenu()
     {
-        gEngfuncs.pfnDrawSetTextColor(1.0f, 0.67f, 0.16f);
-        DrawHudString(38, 158, "AllClient Demo");
+        const bool isRecording = IsClientDemoRecording();
 
-        gEngfuncs.pfnDrawSetTextColor(1.0f, 1.0f, 1.0f);
-        DrawHudString(38, 182, "1. Start Demo");
-        DrawHudString(38, 202, "2. Stop Demo");
-        DrawHudString(38, 222, "0. Close");
+        const int menuX = 35;
+        const int menuY = 130;
+        const int menuW = 285;
+        const int menuH = 175;
+
+        // Background panel (Dark translucent CS-style)
+        DrawHudBox(menuX, menuY, menuW, menuH, 12, 16, 20, 215);
+
+        // Header accent bar (Gold / Amber)
+        DrawHudBox(menuX, menuY, menuW, 3, 255, 178, 28, 255);
+
+        // Border outline
+        DrawHudBox(menuX, menuY, menuW, 1, 60, 75, 90, 160);
+        DrawHudBox(menuX, menuY + menuH - 1, menuW, 1, 60, 75, 90, 160);
+        DrawHudBox(menuX, menuY, 1, menuH, 60, 75, 90, 160);
+        DrawHudBox(menuX + menuW - 1, menuY, 1, menuH, 60, 75, 90, 160);
+
+        // Header Title
+        gEngfuncs.pfnDrawSetTextColor(1.0f, 0.78f, 0.12f);
+        DrawHudString(menuX + 16, menuY + 12, "GAMELAND DEMO RECORDER");
+
+        // Separator line
+        DrawHudBox(menuX + 12, menuY + 34, menuW - 24, 1, 70, 85, 100, 120);
+
+        // Status section
+        gEngfuncs.pfnDrawSetTextColor(0.70f, 0.75f, 0.80f);
+        DrawHudString(menuX + 16, menuY + 44, "STATUS:");
+
+        if (isRecording)
+        {
+            // Vivid green pulse indicator
+            gEngfuncs.pfnDrawSetTextColor(0.15f, 1.0f, 0.25f);
+            DrawHudString(menuX + 75, menuY + 44, "[*] RECORDING IN PROGRESS");
+
+            const std::string curDemo = GetCurrentRecordingDemoName();
+            char demoInfo[96]{};
+            std::snprintf(demoInfo, sizeof(demoInfo), "File: %s", curDemo.c_str());
+            gEngfuncs.pfnDrawSetTextColor(0.55f, 0.80f, 0.60f);
+            DrawHudString(menuX + 16, menuY + 62, demoInfo);
+        }
+        else
+        {
+            // Dim standby indicator
+            gEngfuncs.pfnDrawSetTextColor(0.95f, 0.35f, 0.20f);
+            DrawHudString(menuX + 75, menuY + 44, "[o] STANDBY / IDLE");
+
+            gEngfuncs.pfnDrawSetTextColor(0.55f, 0.60f, 0.65f);
+            DrawHudString(menuX + 16, menuY + 62, "Ready to capture current match.");
+        }
+
+        // Sub separator
+        DrawHudBox(menuX + 12, menuY + 84, menuW - 24, 1, 55, 65, 75, 100);
+
+        // Menu Option 1
+        if (isRecording)
+        {
+            gEngfuncs.pfnDrawSetTextColor(0.55f, 0.55f, 0.55f);
+            DrawHudString(menuX + 16, menuY + 95, "1. Start New Demo");
+        }
+        else
+        {
+            gEngfuncs.pfnDrawSetTextColor(1.0f, 0.82f, 0.20f);
+            DrawHudString(menuX + 16, menuY + 95, "1. Start Demo Recording");
+        }
+
+        // Menu Option 2
+        if (isRecording)
+        {
+            gEngfuncs.pfnDrawSetTextColor(1.0f, 0.30f, 0.30f);
+            DrawHudString(menuX + 16, menuY + 118, "2. Stop Demo Recording");
+        }
+        else
+        {
+            gEngfuncs.pfnDrawSetTextColor(0.55f, 0.55f, 0.55f);
+            DrawHudString(menuX + 16, menuY + 118, "2. Stop Demo (Inactive)");
+        }
+
+        // Bottom separator
+        DrawHudBox(menuX + 12, menuY + 142, menuW - 24, 1, 55, 65, 75, 100);
+
+        // Menu Option 0 / F4 Close
+        gEngfuncs.pfnDrawSetTextColor(0.75f, 0.78f, 0.82f);
+        DrawHudString(menuX + 16, menuY + 151, "0. Close Menu  (Press F4)");
     }
 
     std::string TrimExtension(std::string value, std::string_view extension)
@@ -335,7 +458,7 @@ namespace
 
         if (IsDemoMenuKey(keynum) || BindingEquals(pszCurrentBinding, "allclient_demo_menu"))
         {
-            ShowDemoMenu();
+            ToggleDemoMenu();
             return 0;
         }
 
@@ -362,7 +485,9 @@ namespace
             return 0;
         }
 
-        return 0;
+        // Allow all other keys (movement W/A/S/D, jump, crouch, mouse buttons, etc.)
+        // to pass through seamlessly so the player can continue playing while menu is open.
+        return next->Invoke(down, keynum, pszCurrentBinding);
     }
 }
 
