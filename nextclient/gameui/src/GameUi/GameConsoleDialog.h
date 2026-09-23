@@ -97,6 +97,7 @@ private:
 
     // vgui overrides
     virtual void PerformLayout();
+    void OnThink() override;
     virtual void ApplySchemeSettings(vgui2::IScheme *pScheme);
     virtual void OnCommand(const char *command);
     virtual void OnKeyCodeTyped(enum vgui2::KeyCode code);

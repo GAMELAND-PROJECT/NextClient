@@ -10,6 +10,8 @@
 #include "GameConsoleNext.h"
 #include "GameConsoleDialog.h"
 #include "LoadingDialog.h"
+#include <cstdarg>
+#include <cstdio>
 #include <vgui/ISurfaceNext.h>
 
 #include <KeyValues.h>
@@ -138,16 +140,28 @@ void CGameConsole::Clear()
 //-----------------------------------------------------------------------------
 // Purpose: prints a message to the console
 //-----------------------------------------------------------------------------
-void CGameConsole::Printf(const char *, ...)
+void CGameConsole::Printf(const char *format, ...)
 {
+    if (!m_bInitialized || !engine || engine->pfnGetCvarFloat("developer") <= 0.0f)
+        return;
+    char text[4096];
+    va_list args;
+    va_start(args, format);
+    vsnprintf(text, sizeof(text), format, args);
+    va_end(args);
+    m_pConsole->Print(text);
 }
 
-void CGameConsole::PrintfWithoutJsEvent(Color, const std::wstring&)
+void CGameConsole::PrintfWithoutJsEvent(Color color, const std::wstring& text)
 {
+    if (m_bInitialized)
+        m_pConsole->ColorPrintWithoutJsEvent(color, text.c_str());
 }
 
-void CGameConsole::PrintfWithoutJsEvent(Color, const std::string&)
+void CGameConsole::PrintfWithoutJsEvent(Color color, const std::string& text)
 {
+    if (m_bInitialized)
+        m_pConsole->ColorPrintWithoutJsEvent(color, text.c_str());
 }
 
 void CGameConsole::ExecuteTempConsoleBuffer()
@@ -171,8 +185,16 @@ void CGameConsole::ExecuteTempConsoleBuffer()
 //-----------------------------------------------------------------------------
 // Purpose: printes a debug message to the console
 //-----------------------------------------------------------------------------
-void CGameConsole::DPrintf(const char *, ...)
+void CGameConsole::DPrintf(const char *format, ...)
 {
+    if (!m_bInitialized || !engine || engine->pfnGetCvarFloat("developer") <= 0.0f)
+        return;
+    char text[4096];
+    va_list args;
+    va_start(args, format);
+    vsnprintf(text, sizeof(text), format, args);
+    va_end(args);
+    m_pConsole->DPrint(text);
 }
 
 //-----------------------------------------------------------------------------

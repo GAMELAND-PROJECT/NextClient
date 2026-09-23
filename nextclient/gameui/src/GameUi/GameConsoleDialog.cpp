@@ -305,6 +305,14 @@ void CGameConsoleDialog::Clear()
 
 void CGameConsoleDialog::ShowLanHostGuide(bool show)
 {
+    if (engine->pfnGetCvarFloat("developer") > 0.0f)
+    {
+        m_pLanHostGuide->SetVisible(false);
+        m_pHistory->SetMaximumCharCount(32768);
+        m_pHistory->SetVerticalScrollbar(true);
+        m_pHistory->SetVisible(true);
+        return;
+    }
     m_pHistory->SetVisible(false);
     m_pLanHostGuide->SetVisible(show);
     m_pHistory->SetVerticalScrollbar(false);
@@ -340,31 +348,74 @@ void CGameConsoleDialog::Print(const wchar_t *begin, const wchar_t *end)
     ColorPrint(m_PrintColor, begin, end);
 }
 
-void CGameConsoleDialog::ColorPrint(Color, const char *)
+void CGameConsoleDialog::ColorPrint(Color color, const char *text)
 {
+    if (engine->pfnGetCvarFloat("developer") <= 0.0f)
+        return;
+    if (!m_pHistory->IsVisible())
+        ShowLanHostGuide(false);
+    m_pHistory->InsertColorChange(color);
+    m_pHistory->InsertString(text);
 }
 
-void CGameConsoleDialog::ColorPrint(Color, const char *, const char *)
+void CGameConsoleDialog::ColorPrint(Color color, const char *begin, const char *end)
 {
+    if (engine->pfnGetCvarFloat("developer") <= 0.0f)
+        return;
+    if (!m_pHistory->IsVisible())
+        ShowLanHostGuide(false);
+    m_pHistory->InsertColorChange(color);
+    m_pHistory->InsertString(begin, end);
 }
 
-void CGameConsoleDialog::ColorPrint(Color, const wchar_t *, const wchar_t *)
+void CGameConsoleDialog::ColorPrint(Color color, const wchar_t *begin, const wchar_t *end)
 {
+    if (engine->pfnGetCvarFloat("developer") <= 0.0f)
+        return;
+    if (!m_pHistory->IsVisible())
+        ShowLanHostGuide(false);
+    m_pHistory->InsertColorChange(color);
+    m_pHistory->InsertString(begin, end);
 }
 
-void CGameConsoleDialog::ColorPrintWithoutJsEvent(Color, const char*)
+void CGameConsoleDialog::ColorPrintWithoutJsEvent(Color color, const char* text)
 {
+    ColorPrint(color, text);
 }
 
-void CGameConsoleDialog::ColorPrintWithoutJsEvent(Color, const wchar_t*)
+void CGameConsoleDialog::ColorPrintWithoutJsEvent(Color color, const wchar_t* text)
 {
+    if (engine->pfnGetCvarFloat("developer") <= 0.0f)
+        return;
+    if (!m_pHistory->IsVisible())
+        ShowLanHostGuide(false);
+    m_pHistory->InsertColorChange(color);
+    m_pHistory->InsertString(text);
 }
 
 //-----------------------------------------------------------------------------
 // Purpose: debug text print
 //-----------------------------------------------------------------------------
-void CGameConsoleDialog::DPrint(const char *)
+void CGameConsoleDialog::DPrint(const char *text)
 {
+    ColorPrint(m_DPrintColor, text);
+}
+
+void CGameConsoleDialog::OnThink()
+{
+    BaseClass::OnThink();
+    const bool debugging = engine->pfnGetCvarFloat("developer") > 0.0f;
+    if (m_pHistory->IsVisible() != debugging)
+    {
+        ShowLanHostGuide(GameUI().IsInLevel() &&
+            engine->pfnGetCvarFloat("sv_lan") != 0.0f &&
+            EngineMini() && EngineMini()->IsListenServerActive());
+        if (!debugging)
+        {
+            m_pHistory->SetText("");
+            m_pHistory->SetMaximumCharCount(1);
+        }
+    }
 }
 
 //-----------------------------------------------------------------------------

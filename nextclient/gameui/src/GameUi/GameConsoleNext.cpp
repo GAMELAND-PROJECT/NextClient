@@ -1,6 +1,8 @@
 #include "GameConsoleNext.h"
 #include <strtools.h>
 #include <cstdarg>
+#include <cstdio>
+#include <cwchar>
 #include <nitro_utils/string_utils.h>
 #include <nitro_utils/config/FileConfigProvider.h>
 
@@ -29,20 +31,56 @@ void CGameConsoleNext::Initialize(CGameConsoleDialog *console_dialog)
     });
 }
 
-void CGameConsoleNext::ColorPrintf(uint8_t, uint8_t, uint8_t, const char *, ...)
+void CGameConsoleNext::ColorPrintf(uint8_t r, uint8_t g, uint8_t b, const char *format, ...)
 {
+    if (!initialized_ || !engine || engine->pfnGetCvarFloat("developer") <= 0.0f)
+        return;
+    char text[4096]{};
+    va_list args;
+    va_start(args, format);
+    vsnprintf(text, 4096, format, args);
+    va_end(args);
+    text[4095] = 0;
+    console_dialog_->ColorPrintWithoutJsEvent(Color(r, g, b, 255), text);
 }
 
-void CGameConsoleNext::ColorPrintfWide(uint8_t, uint8_t, uint8_t, const wchar_t *, ...)
+void CGameConsoleNext::ColorPrintfWide(uint8_t r, uint8_t g, uint8_t b, const wchar_t *format, ...)
 {
+    if (!initialized_ || !engine || engine->pfnGetCvarFloat("developer") <= 0.0f)
+        return;
+    wchar_t text[4096]{};
+    va_list args;
+    va_start(args, format);
+    vswprintf(text, 4096, format, args);
+    va_end(args);
+    text[4095] = 0;
+    console_dialog_->ColorPrintWithoutJsEvent(Color(r, g, b, 255), text);
 }
 
-void CGameConsoleNext::PrintfEx(const char *, ...)
+void CGameConsoleNext::PrintfEx(const char *format, ...)
 {
+    if (!initialized_ || !engine || engine->pfnGetCvarFloat("developer") <= 0.0f)
+        return;
+    char text[4096]{};
+    va_list args;
+    va_start(args, format);
+    vsnprintf(text, 4096, format, args);
+    va_end(args);
+    text[4095] = 0;
+    console_dialog_->ColorPrintWithoutJsEvent(Color(240, 240, 240, 255), text);
 }
 
-void CGameConsoleNext::PrintfExWide(const wchar_t *, ...)
+void CGameConsoleNext::PrintfExWide(const wchar_t *format, ...)
 {
+    if (!initialized_ || !engine || engine->pfnGetCvarFloat("developer") <= 0.0f)
+        return;
+    wchar_t text[4096]{};
+    va_list args;
+    va_start(args, format);
+    vswprintf(text, 4096, format, args);
+    va_end(args);
+    text[4095] = 0;
+    console_dialog_->ColorPrintWithoutJsEvent(Color(240, 240, 240, 255), text);
 }
 
 void CGameConsoleNext::ExecuteTempConsoleBuffer()
