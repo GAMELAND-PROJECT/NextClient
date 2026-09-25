@@ -1732,10 +1732,20 @@ LRESULT CALLBACK OtpRegisterProc(HWND window, UINT message, WPARAM wParam, LPARA
             EnableWindow(g_regRequestOtpBtn, FALSE);
             const std::string body = std::string("action=request_otp&mobile=") + UrlEncode(NarrowUtf8(mobile));
             std::string response;
-            const bool ok = PostUrlEncoded(kAuthOtpPath, body, response);
+            bool ok = false;
+            std::string success;
+            std::string msgStr;
+            for (int attempt = 0; attempt < 2; ++attempt)
+            {
+                ok = PostUrlEncoded(kAuthOtpPath, body, response);
+                success = ExtractJsonString(response, "success");
+                msgStr = ExtractJsonStringDecoded(response, "message");
+                if (ok && success == "true")
+                    break;
+                if (attempt == 0)
+                    Sleep(350);
+            }
 
-            const std::string success = ExtractJsonString(response, "success");
-            const std::string msgStr = ExtractJsonStringDecoded(response, "message");
             if (ok && success == "true")
             {
                 g_otpCooldownSeconds = 120;

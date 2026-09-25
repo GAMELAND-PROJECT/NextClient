@@ -69,36 +69,58 @@ try {
             exit;
         }
 
-        // Generate 4-digit numeric OTP
-        $randomOtp = (string)random_int(1000, 9999);
+        // Generate 5-digit numeric OTP
+        $randomOtp = (string)random_int(10000, 99999);
         $validMinutes = 3; // 3 minutes validity
 
-        // Call MrOTP setOTP API
-        $ch = curl_init();
-        curl_setopt_array($ch, [
-            CURLOPT_URL => 'https://my.mrotp.ir/api/OTP/v1/setRandomOTP',
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_TIMEOUT => 10,
-            CURLOPT_POST => true,
-            CURLOPT_POSTFIELDS => [
-                'apiKey' => $MROTP_API_KEY,
-                'mobile' => $mobile,
-                'length' => '5',
-                'validTime' => (string)$validMinutes,
-                'type' => 'SMS'
-            ]
-        ]);
-        $response = curl_exec($ch);
-        $curlError = curl_error($ch);
-        curl_close($ch);
+        // Call MrOTP setOTP API with IPv4 enforcement, DNS cache, and auto-retry to prevent DNS timeout on first call
+        $response = false;
+        $curlError = '';
+        for ($attempt = 1; $attempt <= 2; $attempt++) {
+            $ch = curl_init();
+            curl_setopt_array($ch, [
+                CURLOPT_URL => 'https://my.mrotp.ir/api/OTP/v1/setOTP',
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_CONNECTTIMEOUT => 8,
+                CURLOPT_TIMEOUT => 15,
+                CURLOPT_IPRESOLVE => CURL_IPRESOLVE_V4,
+                CURLOPT_DNS_CACHE_TIMEOUT => 7200,
+                CURLOPT_SSL_VERIFYPEER => true,
+                CURLOPT_SSL_VERIFYHOST => 2,
+                CURLOPT_POST => true,
+                CURLOPT_POSTFIELDS => [
+                    'apiKey' => $MROTP_API_KEY,
+                    'mobile' => $mobile,
+                    'OTP' => $randomOtp,
+                    'validTime' => (string)$validMinutes,
+                    'type' => 'SMS'
+                ]
+            ]);
+            $response = curl_exec($ch);
+            $curlError = curl_error($ch);
+            curl_close($ch);
 
-        if ($curlError) {
-            echo json_encode(['success' => false, 'message' => 'خطا در ارتباط با سامانه OTP: ' . $curlError]);
+            if (!$curlError && $response) {
+                break;
+            }
+            if ($attempt < 2) {
+                usleep(250000); // 250ms backoff before second attempt
+            }
+        }
+
+        if ($curlError || !$response) {
+            echo json_encode(['success' => false, 'message' => 'خطا در ارتباط با سامانه OTP: ' . ($curlError ?: 'پاسخی دریافت نشد')]);
             exit;
         }
 
         $mrotpResult = json_decode($response, true);
-        $generatedOtp = (string)($mrotpResult['OTP'] ?? $randomOtp);
+        if (!$mrotpResult || !isset($mrotpResult['code']) || (int)$mrotpResult['code'] <= 0) {
+            $errDetail = $mrotpResult['message'] ?? 'خطای ناشناخته در سامانه پیامکی';
+            echo json_encode(['success' => false, 'message' => 'سامانه پیامک: ' . $errDetail]);
+            exit;
+        }
+
+        $generatedOtp = $randomOtp;
         $ussdCode = $mrotpResult['USSD'] ?? '';
 
         // Store OTP in local db with 3 minutes expiration
