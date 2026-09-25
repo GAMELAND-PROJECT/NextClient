@@ -21,7 +21,9 @@ namespace
 
     bool ShouldBypassLocalDeveloperFilter()
     {
-        return g_CommandSource == CommandSource::Console && developer != nullptr && developer->value > 0.0f;
+        // Console commands must strictly pass through security filtering
+        // so sv_cheats, impulse cheats, and custom aliases cannot evade inspection.
+        return false;
     }
 
     char* Cbuf_AddTextHandler(const char* text, sizebuf_t* buf, nitroapi::NextHandlerInterface<char*, const char*, sizebuf_t*>* next)

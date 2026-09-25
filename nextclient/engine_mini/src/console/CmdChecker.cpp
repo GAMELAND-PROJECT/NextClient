@@ -104,6 +104,80 @@ namespace
 
         return false;
     }
+
+    std::string_view StripQuotesAndAscii(std::string_view value)
+    {
+        value = TrimAscii(value);
+        if (value.size() >= 2)
+        {
+            const char f = value.front();
+            const char b = value.back();
+            if ((f == '"' && b == '"') || (f == 39 && b == 39))
+            {
+                value.remove_prefix(1);
+                value.remove_suffix(1);
+                value = TrimAscii(value);
+            }
+        }
+        return value;
+    }
+
+    bool EqualsIgnoreCase(std::string_view a, std::string_view b)
+    {
+        return nitro_utils::equals(a, b, nitro_utils::CompareOptions::RegisterIndependent);
+    }
+
+    bool IsAllowedAliasName(std::string_view alias_name)
+    {
+        alias_name = StripQuotesAndAscii(alias_name);
+        if (alias_name.empty())
+            return false;
+
+        static constexpr auto kWhitelistedAliases = std::to_array<std::string_view>({
+            // Host match & round management
+            "r",
+            "warm",
+            "warmup",
+            "mix",
+            "1v1",
+            "ff0",
+            "ff1",
+            "fr0",
+            "fr1",
+            "fr2",
+            "fr3",
+            "fr4",
+            "fr5",
+            "fr6",
+            "fr7",
+            "fr8",
+            "fr9",
+            "fr10",
+            "fr11",
+            "fr12",
+            "w5",
+            "lv",
+            "live",
+
+            // Client convenience shortcuts
+            "d",
+            "q",
+            "ret",
+
+            // LAN host profiles
+            "gl_lan_perf",
+            "gl_lan_quality",
+            "gl_lan_debug",
+        });
+
+        for (const auto& allowed : kWhitelistedAliases)
+        {
+            if (EqualsIgnoreCase(alias_name, allowed))
+                return true;
+        }
+
+        return false;
+    }
 }
 
 CmdChecker::CmdChecker(
@@ -165,23 +239,92 @@ bool CmdChecker::FilterSingleCmd(const std::string_view& cmd, CommandSource comm
         return true;
     }
 
-    if (nitro_utils::contains(first_cmd_token.token, "dlfile", nitro_utils::CompareOptions::RegisterIndependent))
+    const std::string_view cmd_name = StripQuotesAndAscii(first_cmd_token.token);
+
+    if (nitro_utils::contains(cmd_name, "dlfile", nitro_utils::CompareOptions::RegisterIndependent))
     {
         return false;
     }
 
-    // Do not persist a protected server cvar inside a key binding. Match the
-    // whole bind command name, but inspect its quoted payload case-insensitively
-    // so whitespace, casing and an arbitrary numeric value cannot bypass it.
-    const bool is_bind = first_cmd_token.token.size() == 4 &&
-        nitro_utils::contains(first_cmd_token.token, "bind", nitro_utils::CompareOptions::RegisterIndependent);
-    if (is_bind && nitro_utils::contains(cmd, "sv_clienttrace", nitro_utils::CompareOptions::RegisterIndependent))
+    // Direct cheat commands: blocked under all circumstances
+    if (EqualsIgnoreCase(cmd_name, "god") ||
+        EqualsIgnoreCase(cmd_name, "noclip") ||
+        EqualsIgnoreCase(cmd_name, "notarget") ||
+        EqualsIgnoreCase(cmd_name, "fly"))
     {
         return false;
     }
 
-    const bool is_exec = first_cmd_token.token.size() == 4 &&
-        nitro_utils::contains(first_cmd_token.token, "exec", nitro_utils::CompareOptions::RegisterIndependent);
+    // sv_cheats and sv_cheat: can NEVER be set to non-zero under any state
+    if (EqualsIgnoreCase(cmd_name, "sv_cheats") || EqualsIgnoreCase(cmd_name, "sv_cheat"))
+    {
+        size_t arg_pos = pos;
+        SplitData arg_token;
+        if (GetNextSplitToken(cmd, [](char ch) { return ch <= ' '; }, &arg_pos, arg_token))
+        {
+            std::string_view arg = StripQuotesAndAscii(arg_token.token);
+            if (!arg.empty() && arg != "0" && arg != "0.0" && arg != "0.000000")
+            {
+                return false;
+            }
+        }
+    }
+
+    // impulse: only allow legitimate gameplay impulses (100 = flashlight, 201 = spray logo, 0 = clear)
+    // Block impulse 101 (give money/weapons), impulse 102, etc.
+    if (EqualsIgnoreCase(cmd_name, "impulse"))
+    {
+        size_t arg_pos = pos;
+        SplitData arg_token;
+        if (GetNextSplitToken(cmd, [](char ch) { return ch <= ' '; }, &arg_pos, arg_token))
+        {
+            std::string_view arg = StripQuotesAndAscii(arg_token.token);
+            if (!arg.empty() && arg != "100" && arg != "201" && arg != "0")
+            {
+                return false;
+            }
+        }
+    }
+
+    // alias: users can NEVER define custom aliases, only inspect or use whitelisted aliases
+    if (EqualsIgnoreCase(cmd_name, "alias"))
+    {
+        size_t alias_pos = pos;
+        SplitData alias_token;
+        if (GetNextSplitToken(cmd, [](char ch) { return ch <= ' '; }, &alias_pos, alias_token))
+        {
+            std::string_view target_alias = StripQuotesAndAscii(alias_token.token);
+
+            while (alias_pos < cmd.size() && static_cast<unsigned char>(cmd[alias_pos]) <= ' ')
+                alias_pos++;
+
+            if (alias_pos < cmd.size())
+            {
+                // This command attempts to define or redefine an alias!
+                if (!IsAllowedAliasName(target_alias))
+                {
+                    return false;
+                }
+            }
+        }
+    }
+
+    // Do not persist a protected server cvar, cheat command, or custom alias inside a key binding.
+    const bool is_bind = cmd_name.size() == 4 &&
+        nitro_utils::contains(cmd_name, "bind", nitro_utils::CompareOptions::RegisterIndependent);
+    if (is_bind)
+    {
+        if (nitro_utils::contains(cmd, "sv_clienttrace", nitro_utils::CompareOptions::RegisterIndependent) ||
+            nitro_utils::contains(cmd, "sv_cheats", nitro_utils::CompareOptions::RegisterIndependent) ||
+            nitro_utils::contains(cmd, "sv_cheat", nitro_utils::CompareOptions::RegisterIndependent) ||
+            nitro_utils::contains(cmd, "impulse 101", nitro_utils::CompareOptions::RegisterIndependent))
+        {
+            return false;
+        }
+    }
+
+    const bool is_exec = cmd_name.size() == 4 &&
+        nitro_utils::contains(cmd_name, "exec", nitro_utils::CompareOptions::RegisterIndependent);
     if (is_exec)
     {
         // Remote exec is never legitimate. Local exec is restricted to the
@@ -191,7 +334,11 @@ bool CmdChecker::FilterSingleCmd(const std::string_view& cmd, CommandSource comm
             return false;
     }
 
-    auto it = blocked_commands_.find(first_cmd_token.token);
+    auto it = blocked_commands_.find(cmd_name);
+    if (it == blocked_commands_.end())
+    {
+        it = blocked_commands_.find(first_cmd_token.token);
+    }
     if (it == blocked_commands_.end())
     {
         out.append(cmd);

@@ -4,10 +4,9 @@ double oldrealtime;
 
 qboolean Host_IsSinglePlayerGame()
 {
-	if (g_psv->active)
-		return g_psvs->maxclients == 1;
-
-	return cl->maxclients == 1;
+	// Counter-Strike 1.6 has no single-player mode. Treating 1-client listen servers
+	// as single player allows game DLLs and engine to bypass cheat restrictions (impulse 101, etc.).
+	return false;
 }
 
 qboolean Host_IsServerActive()

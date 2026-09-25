@@ -297,6 +297,8 @@ struct LockedCvar
 };
 
 constexpr auto kLockedClientProfile = std::to_array<LockedCvar>({
+    {"sv_cheats", "0"},
+    {"sv_cheat", "0"},
     {"cl_allowdownload", "1"},
     {"cl_download_ingame", "0"},
     {"fps_override", "0"},
@@ -849,11 +851,24 @@ static void OnGameInitializing(void* mainwindow, HDC* pmaindc, HGLRC* pbaseRC, c
 
     g_Unsubs.emplace_back(eng()->Cvar_Command |= [](const auto& next) -> qboolean {
         const auto cvar_name = g_engfuncs.pfnCmd_Argv(0);
+        if (cvar_name != nullptr && (!Q_stricmp(cvar_name, "sv_cheats") || !Q_stricmp(cvar_name, "sv_cheat")))
+        {
+            if (g_engfuncs.pfnCmd_Argc() > 1)
+            {
+                const char* val = g_engfuncs.pfnCmd_Argv(1);
+                if (val != nullptr && Q_strcmp(val, "0") != 0 && Q_strcmp(val, "0.0") != 0)
+                {
+                    Con_Printf("\"sv_cheats\" cannot be enabled (locked to 0)\n");
+                    return TRUE;
+                }
+            }
+        }
+
         const auto cvar = g_engfuncs.pfnCVarGetPointer(cvar_name);
 
         if (cvar != nullptr && cvar->flags & FCVAR_CHEAT)
         {
-            if (!Host_IsSinglePlayerGame() && sv_cheats->value == 0 && !cls->spectator && !cls->demoplayback)
+            if (!Host_IsSinglePlayerGame() && (sv_cheats == nullptr || sv_cheats->value == 0) && !cls->spectator && !cls->demoplayback)
             {
                 Con_Printf("Can't use cheat cvar %s with disabled cheats\n", cvar_name);
                 return TRUE;
@@ -893,6 +908,16 @@ static void OnGameInitializing(void* mainwindow, HDC* pmaindc, HGLRC* pbaseRC, c
     });
 
     g_Unsubs.emplace_back(eng()->Host_FrameInternal += [](float) {
+        if (sv_cheats != nullptr && sv_cheats->value != 0.0f)
+        {
+            sv_cheats->value = 0.0f;
+            if (sv_cheats->string != nullptr)
+            {
+                sv_cheats->string[0] = '0';
+                sv_cheats->string[1] = '\0';
+            }
+        }
+
         if (!g_pTaskCoroImpl)
             return;
 
