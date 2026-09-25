@@ -53,6 +53,13 @@ function getDb($dbFile) {
         created_at INTEGER NOT NULL
     )");
 
+    $db->exec("CREATE TABLE IF NOT EXISTS otp_logs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        mobile TEXT NOT NULL,
+        created_at INTEGER NOT NULL
+    )");
+    $db->exec("CREATE INDEX IF NOT EXISTS idx_otp_logs_mobile_time ON otp_logs(mobile, created_at)");
+
     return $db;
 }
 
@@ -65,8 +72,41 @@ try {
     if ($action === 'request_otp') {
         $mobile = trim($input['mobile'] ?? '');
         if (!preg_match('/^09[0-9]{9}$/', $mobile)) {
-            echo json_encode(['success' => false, 'message' => 'شماره موبایل نامعتبر است (مثال: 09121234567)']);
+            echo json_encode(['success' => false, 'message' => 'شماره موبایل نامعتبر است (مثال: 09121234567)'], JSON_UNESCAPED_UNICODE);
             exit;
+        }
+
+        // Check monthly quota (Max 5 requests per 30 days)
+        $maxMonthly = 5;
+        $thirtyDaysAgo = time() - (30 * 86400);
+        $stmt = $db->prepare("SELECT COUNT(*) FROM otp_logs WHERE mobile = :mobile AND created_at > :since");
+        $stmt->execute([':mobile' => $mobile, ':since' => $thirtyDaysAgo]);
+        $monthlyCount = (int)$stmt->fetchColumn();
+
+        if ($monthlyCount >= $maxMonthly) {
+            echo json_encode([
+                'success' => false,
+                'message' => 'سقف مجاز درخواست کد (حداکثر ۵ بار در ماه) برای این شماره تکمیل شده است.'
+            ], JSON_UNESCAPED_UNICODE);
+            exit;
+        }
+
+        // Check 120-second cooldown between requests (Prevent bypass by closing dialog)
+        $stmt = $db->prepare("SELECT * FROM otp_sessions WHERE mobile = :mobile");
+        $stmt->execute([':mobile' => $mobile]);
+        $activeSession = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        if ($activeSession && isset($activeSession['created_at'])) {
+            $timePassed = time() - (int)$activeSession['created_at'];
+            if ($timePassed < 120) {
+                $remaining = 120 - $timePassed;
+                echo json_encode([
+                    'success' => false,
+                    'cooldown' => $remaining,
+                    'message' => "جهت درخواست مجدد، لطفاً {$remaining} ثانیه صبوری فرمایید."
+                ], JSON_UNESCAPED_UNICODE);
+                exit;
+            }
         }
 
         // Generate 5-digit numeric OTP
@@ -134,13 +174,21 @@ try {
             ':created' => time()
         ]);
 
+        // Log successful request for monthly quota
+        $db->prepare("INSERT INTO otp_logs (mobile, created_at) VALUES (:mobile, :created)")
+           ->execute([':mobile' => $mobile, ':created' => time()]);
+
+        $remainingRequests = $maxMonthly - ($monthlyCount + 1);
+
         echo json_encode([
             'success' => true,
-            'message' => 'کد تایید پیامکی ارسال شد. لطفاً آن را وارد کنید.',
+            'message' => 'کد تایید پیامکی ارسال شد. (' . $remainingRequests . ' بار دیگر در این ماه مجاز هستید)',
             'ussd' => $ussdCode,
             'mobile' => $mobile,
-            'expires_in' => $validMinutes * 60
-        ]);
+            'expires_in' => $validMinutes * 60,
+            'cooldown' => 120,
+            'remaining_monthly' => $remainingRequests
+        ], JSON_UNESCAPED_UNICODE);
         exit;
     }
 

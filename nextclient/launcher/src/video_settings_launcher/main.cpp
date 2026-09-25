@@ -164,6 +164,7 @@ HWND g_regOtp{};
 HWND g_regPassword{};
 HWND g_regSubmitBtn{};
 HWND g_regStatusLabel{};
+HWND s_regPolicyNoticeLbl{};
 int g_otpCooldownSeconds = 0;
 
 static WNDPROC s_origTrackbarProc = nullptr;
@@ -262,6 +263,29 @@ public:
 private:
     HKEY key_{};
 };
+
+static uint64_t GetOtpCooldownRemaining()
+{
+    RegistryKey key(HKEY_CURRENT_USER, kLauncherKey, KEY_QUERY_VALUE);
+    const DWORD until = key.ReadDword(L"OtpCooldownUntil", 0);
+    const auto now = static_cast<DWORD>(time(nullptr));
+    if (until > now)
+        return static_cast<uint64_t>(until - now);
+    return 0;
+}
+
+static void SetOtpCooldown(uint32_t seconds)
+{
+    RegistryKey key(HKEY_CURRENT_USER, kLauncherKey, KEY_SET_VALUE);
+    const auto until = static_cast<DWORD>(time(nullptr) + seconds);
+    key.WriteDword(L"OtpCooldownUntil", until);
+}
+
+static void ClearOtpCooldown()
+{
+    RegistryKey key(HKEY_CURRENT_USER, kLauncherKey, KEY_SET_VALUE);
+    key.WriteDword(L"OtpCooldownUntil", 0);
+}
 
 void InitializeNativeResolutionIfNeeded()
 {
@@ -1613,9 +1637,26 @@ LRESULT CALLBACK OtpRegisterProc(HWND window, UINT message, WPARAM wParam, LPARA
         HWND hintLbl = addCtrl(L"STATIC", L"(\u062c\u0647\u062a \u0645\u0634\u0627\u0647\u062f\u0647 \u0631\u0645\u0632 \u0642\u0628\u0644\u06cc\u060c \u06a9\u0627\u062f\u0631 \u0631\u0645\u0632 \u0631\u0627 \u062e\u0627\u0644\u06cc \u0628\u06af\u0630\u0627\u0631\u06cc\u062f)", SS_CENTER, 20, 168, 440, 18, 0);
         SendMessageW(hintLbl, WM_SETFONT, reinterpret_cast<WPARAM>(g_badgeFont), TRUE);
 
-        g_regSubmitBtn = addCtrl(L"BUTTON", L"\u062a\u0623\u06cc\u06cc\u062f \u0648 \u0648\u0631\u0648\u062f \u0628\u0647 \u062d\u0633\u0627\u0628", BS_OWNERDRAW | WS_TABSTOP, 244, 196, 206, 36, IdRegSubmit);
-        addCtrl(L"BUTTON", L"\u0628\u0633\u062a\u0646", BS_OWNERDRAW | WS_TABSTOP, 24, 196, 206, 36, IdRegClose);
-        g_regStatusLabel = addCtrl(L"STATIC", L"", SS_CENTER, 20, 244, 440, 44, IdRegStatus);
+        RegistryKey regKey(HKEY_CURRENT_USER, kLauncherKey, KEY_QUERY_VALUE);
+        DWORD savedRem = regKey.ReadDword(L"OtpRemainingMonthly", 999);
+        std::wstring policyTxt = L"\u062a\u0648\u062c\u0647: \u062c\u0647\u062a \u0627\u0645\u0646\u06cc\u062a\u060c \u0647\u0631 \u0634\u0645\u0627\u0631\u0647 \u0645\u062c\u0627\u0632 \u0628\u0647 \u06f5 \u0628\u0627\u0631 \u062f\u0631\u062e\u0648\u0627\u0633\u062a \u06a9\u062f \u062f\u0631 \u0645\u0627\u0647 \u0645\u06cc\u200c\u0628\u0627\u0634\u062f.";
+        if (savedRem <= 5)
+            policyTxt = L"\u062a\u0648\u062c\u0647: " + std::to_wstring(savedRem) + L" \u062f\u0631\u062e\u0648\u0627\u0633\u062a \u062f\u06cc\u06af\u0631 \u062f\u0631 \u0627\u06cc\u0646 \u0645\u0627\u0647 \u0628\u0631\u0627\u06cc \u0627\u06cc\u0646 \u0634\u0645\u0627\u0631\u0647 \u0628\u0627\u0642\u06cc \u0645\u0627\u0646\u062f\u0647 \u0627\u0633\u062a.";
+        s_regPolicyNoticeLbl = addCtrl(L"STATIC", policyTxt.c_str(), SS_CENTER, 20, 190, 440, 18, 0);
+        SendMessageW(s_regPolicyNoticeLbl, WM_SETFONT, reinterpret_cast<WPARAM>(g_badgeFont), TRUE);
+
+        g_regSubmitBtn = addCtrl(L"BUTTON", L"\u062a\u0623\u06cc\u06cc\u062f \u0648 \u0648\u0631\u0648\u062f \u0628\u0647 \u062d\u0633\u0627\u0628", BS_OWNERDRAW | WS_TABSTOP, 244, 214, 206, 36, IdRegSubmit);
+        addCtrl(L"BUTTON", L"\u0628\u0633\u062a\u0646", BS_OWNERDRAW | WS_TABSTOP, 24, 214, 206, 36, IdRegClose);
+        g_regStatusLabel = addCtrl(L"STATIC", L"", SS_CENTER, 20, 258, 440, 44, IdRegStatus);
+
+        const uint64_t remSec = GetOtpCooldownRemaining();
+        if (remSec > 0)
+        {
+            EnableWindow(g_regRequestOtpBtn, FALSE);
+            const std::wstring btnTxt = std::to_wstring(remSec) + L" \u062b\u0627\u0646\u06cc\u0647 \u0635\u0628\u0631\u0627...";
+            SetWindowTextW(g_regRequestOtpBtn, btnTxt.c_str());
+            SetTimer(window, 999, 1000, nullptr);
+        }
         return 0;
     }
     case WM_CTLCOLORSTATIC:
@@ -1625,6 +1666,8 @@ LRESULT CALLBACK OtpRegisterProc(HWND window, UINT message, WPARAM wParam, LPARA
         SetBkMode(hdc, TRANSPARENT);
         if (hwndCtl == g_regStatusLabel)
             SetTextColor(hdc, RGB(0, 210, 160));
+        else if (hwndCtl == s_regPolicyNoticeLbl)
+            SetTextColor(hdc, RGB(245, 175, 75));
         else
             SetTextColor(hdc, RGB(220, 228, 240));
         static HBRUSH s_otpBgBrush = CreateSolidBrush(RGB(26, 27, 30));
@@ -1695,17 +1738,18 @@ LRESULT CALLBACK OtpRegisterProc(HWND window, UINT message, WPARAM wParam, LPARA
     {
         if (wParam == 999)
         {
-            if (g_otpCooldownSeconds > 0)
+            const uint64_t remSec = GetOtpCooldownRemaining();
+            if (remSec > 0)
             {
-                g_otpCooldownSeconds--;
-                const std::wstring btnTxt = std::to_wstring(g_otpCooldownSeconds) + L" ثانیه صبرا...";
+                const std::wstring btnTxt = std::to_wstring(remSec) + L" \u062b\u0627\u0646\u06cc\u0647 \u0635\u0628\u0631\u0627...";
                 SetWindowTextW(g_regRequestOtpBtn, btnTxt.c_str());
             }
             else
             {
                 KillTimer(window, 999);
+                ClearOtpCooldown();
                 EnableWindow(g_regRequestOtpBtn, TRUE);
-                SetWindowTextW(g_regRequestOtpBtn, L"دریافت کد پیامکی");
+                SetWindowTextW(g_regRequestOtpBtn, L"\u062f\u0631\u06cc\u0627\u0641\u062a \u06a9\u062f \u067e\u06cc\u0627\u0645\u06a9\u06cc");
             }
         }
         return 0;
@@ -1748,22 +1792,58 @@ LRESULT CALLBACK OtpRegisterProc(HWND window, UINT message, WPARAM wParam, LPARA
 
             if (ok && success == "true")
             {
-                g_otpCooldownSeconds = 120;
+                SetOtpCooldown(120);
                 SetTimer(window, 999, 1000, nullptr);
-                const std::wstring btnTxt = std::to_wstring(g_otpCooldownSeconds) + L" ثانیه صبرا...";
+                const std::wstring btnTxt = L"120 \u062b\u0627\u0646\u06cc\u0647 \u0635\u0628\u0631\u0627...";
                 SetWindowTextW(g_regRequestOtpBtn, btnTxt.c_str());
 
-                const std::wstring msgWide = msgStr.empty() ? L"کد پیامکی ارسال شد. لطفاً آن را وارد نمایید." : WidenUtf8(msgStr);
-                SetWindowTextW(g_regStatusLabel, msgWide.c_str());
+                const std::string remStr = ExtractJsonString(response, "remaining_monthly");
+                int remVal = -1;
+                if (!remStr.empty())
+                    remVal = std::atoi(remStr.c_str());
+
+                if (remVal >= 0)
+                {
+                    RegistryKey key(HKEY_CURRENT_USER, kLauncherKey, KEY_SET_VALUE);
+                    key.WriteDword(L"OtpRemainingMonthly", static_cast<DWORD>(remVal));
+                    const std::wstring remNotice = L"\u062a\u0648\u062c\u0647: " + std::to_wstring(remVal) + L" \u062f\u0631\u062e\u0648\u0627\u0633\u062a \u062f\u06cc\u06af\u0631 \u062f\u0631 \u0627\u06cc\u0646 \u0645\u0627\u0647 \u0628\u0631\u0627\u06cc \u0627\u06cc\u0646 \u0634\u0645\u0627\u0631\u0647 \u0628\u0627\u0642\u06cc \u0645\u0627\u0646\u062f\u0647 \u0627\u0633\u062a.";
+                    SetWindowTextW(s_regPolicyNoticeLbl, remNotice.c_str());
+                }
+
+                std::wstring msgWide = msgStr.empty() ? L"\u06a9\u062f \u067e\u06cc\u0627\u0645\u06a9\u06cc \u0627\u0631\u0633\u0627\u0644 \u0634\u062f. \u0644\u0637\u0641\u0627\u064b \u0622\u0646 \u0631\u0627 \u0648\u0627\u0631\u062f \u0646\u0645\u0627\u06cc\u06cc\u062f." : WidenUtf8(msgStr);
+                if (remVal >= 0)
+                    msgWide += L"\n(\u062a\u0639\u062f\u0627\u062f \u062f\u0631\u062e\u0648\u0627\u0633\u062a\u200c\u0647\u0627\u06cc \u0628\u0627\u0642\u06cc\u0645\u0627\u0646\u062f\u0647 \u062f\u0631 \u0627\u06cc\u0646 \u0645\u0627\u0647: " + std::to_wstring(remVal) + L" \u0628\u0627\u0631)";
+
+                std::wstring statusText = L"\u06a9\u062f \u067e\u06cc\u0627\u0645\u06a9\u06cc \u0627\u0631\u0633\u0627\u0644 \u0634\u062f.";
+                if (remVal >= 0)
+                    statusText += L" (" + std::to_wstring(remVal) + L" \u062f\u0631\u062e\u0648\u0627\u0633\u062a \u0628\u0627\u0642\u06cc\u0645\u0627\u0646\u062f\u0647)";
+
+                SetWindowTextW(g_regStatusLabel, statusText.c_str());
                 SetFocus(g_regOtp);
-                MessageBoxW(window, msgWide.c_str(), L"پیامک تأیید", MB_OK | MB_ICONINFORMATION);
+                MessageBoxW(window, msgWide.c_str(), L"\u067e\u06cc\u0627\u0645\u06a9 \u062a\u0623\u06cc\u06cc\u062f", MB_OK | MB_ICONINFORMATION);
             }
             else
             {
-                EnableWindow(g_regRequestOtpBtn, TRUE);
-                const std::wstring err = msgStr.empty() ? L"خطا در ارسال پیامک." : WidenUtf8(msgStr);
+                const std::string cdStr = ExtractJsonString(response, "cooldown");
+                int cdVal = 0;
+                if (!cdStr.empty())
+                    cdVal = std::atoi(cdStr.c_str());
+
+                if (cdVal > 0)
+                {
+                    SetOtpCooldown(static_cast<uint32_t>(cdVal));
+                    SetTimer(window, 999, 1000, nullptr);
+                    const std::wstring btnTxt = std::to_wstring(cdVal) + L" \u062b\u0627\u0646\u06cc\u0647 \u0635\u0628\u0631\u0627...";
+                    SetWindowTextW(g_regRequestOtpBtn, btnTxt.c_str());
+                }
+                else
+                {
+                    EnableWindow(g_regRequestOtpBtn, TRUE);
+                }
+
+                const std::wstring err = msgStr.empty() ? L"\u062e\u0637\u0627 \u062f\u0631 \u0627\u0631\u0633\u0627\u0644 \u067e\u06cc\u0627\u0645\u06a9." : WidenUtf8(msgStr);
                 SetWindowTextW(g_regStatusLabel, err.c_str());
-                MessageBoxW(window, err.c_str(), L"خطا", MB_OK | MB_ICONERROR);
+                MessageBoxW(window, err.c_str(), L"\u062e\u0637\u0627", MB_OK | MB_ICONERROR);
             }
             return 0;
         }
@@ -1876,7 +1956,7 @@ void ShowOtpRegisterDialog(HWND parent)
     RECT pRc{};
     GetWindowRect(parent, &pRc);
     const int dlgW = 480;
-    const int dlgH = 340;
+        const int dlgH = 356;
     const int dlgX = pRc.left + ((pRc.right - pRc.left) - dlgW) / 2;
     const int dlgY = pRc.top + ((pRc.bottom - pRc.top) - dlgH) / 2;
 
