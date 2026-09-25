@@ -1,380 +1,259 @@
 #include <Windows.h>
-#include <CommCtrl.h>
-#include <WinInet.h>
-#include <windowsx.h>
+#include <commctrl.h>
 #include <shellapi.h>
 
 #include <algorithm>
-#include <compare>
-#include <cstring>
-#include <cstdlib>
-#include <cwctype>
+#include <array>
+#include <chrono>
 #include <filesystem>
+#include <format>
 #include <fstream>
-#include <iterator>
-#include <ranges>
-#include <set>
 #include <sstream>
 #include <string>
 #include <vector>
+#include <wininet.h>
 
 #include "../next_launcher/GameNetAccess.h"
+#include "../next_launcher/VideoSettingsDialog.h"
+
+#pragma comment(lib, "comctl32.lib")
+#pragma comment(lib, "wininet.lib")
 
 namespace
 {
-constexpr wchar_t kWindowClass[] = L"NextClientLauncherWindow";
-constexpr wchar_t kTitle[] = L"\u0631\u0627\u0647\u200c\u0627\u0646\u062f\u0627\u0632 Allclient";
-constexpr wchar_t kSettingsKey[] = L"Software\\Valve\\Half-Life\\Settings";
-constexpr wchar_t kLauncherKey[] = L"Software\\Valve\\Half-Life\\nextclient\\video_launcher";
-constexpr int kWindowsPointerSpeeds[] = {1, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20};
-
-enum ControlId
+enum ControlId : WORD
 {
-    IdResolution = 100,
-    IdHdModels,
-    IdHighQuality,
-    IdLaunch,
-    IdRestore,
-    IdStatus,
+    IdOk = 1001,
     IdCancel,
-    IdPointerSpeed,
-    IdEnhancePointer,
-    IdPointerSpeedValue,
-    IdSubscriptionState,
-    IdSubscriptionTag,
-    IdSubscriptionDetails,
-    IdSubscriptionRemaining,
+    IdReset,
     IdDemoManager,
-    IdDemoPassword,
-    IdDemoVerify,
-    IdDemoList,
-    IdDemoUpload,
-    IdDemoDelete,
-    IdDemoRefresh,
-    IdDemoClose,
-    IdDemoStatus,
+    IdResolutionCombo,
+    IdWindowedCheck,
+    IdHighQualityCheck,
+    IdHdModelsCheck,
+    IdSensSlider,
+    IdSensValueText,
+    IdEnhancePointerCheck,
+    IdUserPhone,
+    IdUserPassword,
+    IdUserLogin,
+    IdUserRegister,
+    IdUserStatus,
+    IdRegMobile,
+    IdRegRequestOtp,
+    IdRegOtp,
+    IdRegPassword,
+    IdRegSubmit,
+    IdRegClose,
+    IdRegStatus,
 };
+
+constexpr wchar_t kWindowClassName[] = L"AllclientVideoSettingsWindow";
+constexpr wchar_t kOtpRegisterWindowClass[] = L"AllclientOtpRegisterWindow";
+constexpr wchar_t kRegistryKey[] = L"Software\\Valve\\Half-Life\\Settings";
+constexpr wchar_t kLauncherKey[] = L"Software\\Valve\\Half-Life\\nextclient";
+constexpr wchar_t kFontFamily[] = L"Segoe UI";
+constexpr int kBaseDpi = 96;
+
+constexpr char kUploadHost[] = "gameland.cam";
+constexpr char kAuthOtpPath[] = "/auth_otp.php";
+constexpr char kCfgSyncPath[] = "/cfg_sync.php";
+
+HINSTANCE g_instance{};
+HWND g_dialogWindow{};
+HWND g_resolutionCombo{};
+HWND g_windowedCheck{};
+HWND g_highQualityCheck{};
+HWND g_hdModelsCheck{};
+HWND g_sensSlider{};
+HWND g_sensValueText{};
+HWND g_enhancePointerCheck{};
+HWND g_demoManagerBtn{};
+HWND g_statusLabel{};
+HWND g_okButton{};
+HWND g_cancelButton{};
+HWND g_resetButton{};
+
+HWND g_userPhone{};
+HWND g_userPassword{};
+HWND g_userLoginBtn{};
+HWND g_userRegisterBtn{};
+HWND g_userStatusLabel{};
+
+HWND g_regMobile{};
+HWND g_regRequestOtpBtn{};
+HWND g_regOtp{};
+HWND g_regPassword{};
+HWND g_regSubmitBtn{};
+HWND g_regStatusLabel{};
+
+HFONT g_dialogFont{};
+HFONT g_titleFont{};
+HFONT g_titleFontSub{};
+HFONT g_badgeFont{};
+HFONT g_valueFont{};
+HFONT g_buttonFont{};
+
+bool g_launchRequested = false;
+bool g_mousePreviewChanged = false;
+GameNetAccessStatus g_accessStatus{};
+
+std::wstring g_activeUserPhone;
+std::string g_activeUserToken;
+
+int g_otpCooldownSeconds = 0;
+UINT_PTR g_otpTimerId = 0;
 
 struct Resolution
 {
     int width;
     int height;
-
     auto operator<=>(const Resolution&) const = default;
+};
+
+static const std::vector<Resolution> kKnownResolutions = {
+    {640, 480}, {800, 600}, {1024, 768}, {1280, 720}, {1280, 960}, {1280, 1024},
+    {1366, 768}, {1440, 900}, {1600, 900}, {1680, 1050}, {1920, 1080}, {2560, 1440}
 };
 
 struct VideoSettings
 {
-    DWORD width = 800;
-    DWORD height = 600;
-    DWORD bpp = 32;
-    DWORD windowed = 0;
-    DWORD hdModels = 0;
-    DWORD videoLevel = 1;
+    int width = 0;
+    int height = 0;
+    bool windowed = false;
+    bool highQuality = true;
+    bool hdModels = false;
 };
 
 struct SystemMouseSettings
 {
     int speed = 10;
-    int acceleration[3] = {6, 10, 1};
+    int threshold1 = 6;
+    int threshold2 = 10;
+    int acceleration = 1;
 };
 
-bool SameSettings(const VideoSettings& left, const VideoSettings& right)
-{
-    return left.width == right.width && left.height == right.height && left.bpp == right.bpp &&
-           left.windowed == right.windowed && left.hdModels == right.hdModels &&
-           left.videoLevel == right.videoLevel;
-}
-
-bool SameSettings(const SystemMouseSettings& left, const SystemMouseSettings& right)
-{
-    return left.speed == right.speed && left.acceleration[0] == right.acceleration[0] &&
-           left.acceleration[1] == right.acceleration[1] && left.acceleration[2] == right.acceleration[2];
-}
-
-int PointerSpeedToSliderPosition(int speed)
-{
-    const auto it = std::ranges::min_element(kWindowsPointerSpeeds, [speed](int left, int right)
-    {
-        return std::abs(left - speed) < std::abs(right - speed);
-    });
-    return static_cast<int>(std::distance(std::begin(kWindowsPointerSpeeds), it)) + 1;
-}
-
-int SliderPositionToPointerSpeed(int position)
-{
-    const int index = std::clamp(position, 1, static_cast<int>(std::size(kWindowsPointerSpeeds))) - 1;
-    return kWindowsPointerSpeeds[index];
-}
-
-std::wstring PointerPositionText(int position)
-{
-    return std::to_wstring(std::clamp(position, 1, 11)) + L" / 11";
-}
-
-HINSTANCE g_instance{};
-HFONT g_font{};
-HFONT g_emphasisFont{};
-HFONT g_brandFont{};
-HFONT g_badgeFont{};
-HBRUSH g_backgroundBrush{};
-HBRUSH g_panelBrush{};
-HWND g_resolution{};
-HWND g_hdModels{};
-HWND g_highQuality{};
-HWND g_pointerSpeed{};
-HWND g_pointerSpeedValue{};
-HWND g_enhancePointer{};
-HWND g_status{};
-HWND g_versionLabel{};
-HWND g_subscriptionState{};
-HWND g_subscriptionTag{};
-HWND g_subscriptionDetails{};
-HWND g_subscriptionRemaining{};
-std::vector<Resolution> g_resolutions;
-bool g_launchRequested{};
-GameNetAccessStatus g_accessStatus;
+SystemMouseSettings g_initialMouse{};
 SystemMouseSettings g_mouseAtLastApply{};
-bool g_mousePreviewChanged{};
 
-constexpr wchar_t kDemoWindowClass[] = L"AllclientDemoManagerWindow";
-constexpr char kUploadHost[] = "gameland.cam";
-constexpr char kVerifyPath[] = "/verify_upload_password.php";
-constexpr char kUploadPath[] = "/upload_demo.php";
-constexpr char kMultipartBoundary[] = "----AllclientDemoBoundary7MA4YW";
-constexpr DWORD kNetworkTimeoutMs = 30000;
-constexpr DWORD kUploadBufferSize = 64 * 1024;
-
-HWND g_demoPassword{};
-HWND g_demoList{};
-HWND g_demoUpload{};
-HWND g_demoDelete{};
-HWND g_demoStatus{};
-std::wstring g_demoRoot;
-std::wstring g_demoPasswordValue;
-std::vector<std::filesystem::path> g_demoFiles;
-
-constexpr COLORREF kColorBackground = RGB(22, 23, 25);
-constexpr COLORREF kColorPanel = RGB(30, 32, 34);
-constexpr COLORREF kColorPanelBorder = RGB(48, 61, 82);
-constexpr COLORREF kColorText = RGB(232, 238, 247);
-constexpr COLORREF kColorMuted = RGB(152, 164, 184);
-constexpr COLORREF kColorAccent = RGB(0, 210, 160);
-constexpr COLORREF kColorAccentHot = RGB(23, 238, 185);
-constexpr COLORREF kColorDanger = RGB(235, 86, 86);
-
-class RegistryKey
+int ScaleDpi(int value, int dpi)
 {
-public:
-    RegistryKey(HKEY root, const wchar_t* path, REGSAM access)
+    return MulDiv(value, dpi, kBaseDpi);
+}
+
+int GetWindowDpi(HWND window)
+{
+    const HMODULE user32 = GetModuleHandleW(L"user32.dll");
+    if (user32)
     {
-        RegCreateKeyExW(root, path, 0, nullptr, REG_OPTION_NON_VOLATILE, access, nullptr, &key_, nullptr);
+        using GetDpiForWindowFn = UINT(WINAPI*)(HWND);
+        const auto fn = reinterpret_cast<GetDpiForWindowFn>(GetProcAddress(user32, "GetDpiForWindow"));
+        if (fn && window)
+            return static_cast<int>(fn(window));
     }
-
-    ~RegistryKey()
-    {
-        if (key_)
-            RegCloseKey(key_);
-    }
-
-    RegistryKey(const RegistryKey&) = delete;
-    RegistryKey& operator=(const RegistryKey&) = delete;
-
-    [[nodiscard]] bool valid() const { return key_ != nullptr; }
-
-    [[nodiscard]] DWORD ReadDword(const wchar_t* name, DWORD fallback) const
-    {
-        DWORD type{};
-        DWORD value{};
-        DWORD size = sizeof(value);
-        return key_ && RegQueryValueExW(key_, name, nullptr, &type, reinterpret_cast<BYTE*>(&value), &size) == ERROR_SUCCESS &&
-                       type == REG_DWORD
-                   ? value
-                   : fallback;
-    }
-
-    [[nodiscard]] std::wstring ReadString(const wchar_t* name, const std::wstring& fallback = {}) const
-    {
-        if (!key_)
-            return fallback;
-
-        DWORD type{};
-        DWORD size{};
-        if (RegQueryValueExW(key_, name, nullptr, &type, nullptr, &size) != ERROR_SUCCESS || type != REG_SZ || size < sizeof(wchar_t))
-            return fallback;
-
-        std::wstring value(size / sizeof(wchar_t), L'\0');
-        if (RegQueryValueExW(key_, name, nullptr, &type, reinterpret_cast<BYTE*>(value.data()), &size) != ERROR_SUCCESS)
-            return fallback;
-
-        value.resize(wcsnlen_s(value.data(), value.size()));
-        return value;
-    }
-
-    bool WriteDword(const wchar_t* name, DWORD value) const
-    {
-        return key_ && RegSetValueExW(key_, name, 0, REG_DWORD, reinterpret_cast<const BYTE*>(&value), sizeof(value)) == ERROR_SUCCESS;
-    }
-
-    bool WriteString(const wchar_t* name, const std::wstring& value) const
-    {
-        const DWORD size = static_cast<DWORD>((value.size() + 1) * sizeof(wchar_t));
-        return key_ && RegSetValueExW(key_, name, 0, REG_SZ, reinterpret_cast<const BYTE*>(value.c_str()), size) == ERROR_SUCCESS;
-    }
-
-private:
-    HKEY key_{};
-};
-
-void InitializeNativeResolutionIfNeeded()
-{
-    RegistryKey launcherKey(HKEY_CURRENT_USER, kLauncherKey,
-                            KEY_QUERY_VALUE | KEY_SET_VALUE);
-    if (launcherKey.ReadDword(L"NativeResolutionInitialized", 0) != 0)
-        return;
-
-    RegistryKey settingsKey(HKEY_CURRENT_USER, kSettingsKey,
-                            KEY_QUERY_VALUE | KEY_SET_VALUE);
-    const DWORD savedWidth = settingsKey.ReadDword(L"ScreenWidth", 0);
-    const DWORD savedHeight = settingsKey.ReadDword(L"ScreenHeight", 0);
-    bool initialized = savedWidth != 0 && savedHeight != 0;
-
-    // Respect any existing user-selected mode. Only a genuinely fresh profile
-    // is initialized to the monitor's current native desktop resolution.
-    if (!initialized)
-    {
-        DEVMODEW mode{};
-        mode.dmSize = sizeof(mode);
-        if (EnumDisplaySettingsW(nullptr, ENUM_CURRENT_SETTINGS, &mode) &&
-            mode.dmPelsWidth >= 640 && mode.dmPelsHeight >= 480)
-        {
-            initialized =
-                settingsKey.WriteDword(L"ScreenWidth", mode.dmPelsWidth) &&
-                settingsKey.WriteDword(L"ScreenHeight", mode.dmPelsHeight) &&
-                settingsKey.WriteDword(L"ScreenBPP", 32) &&
-                settingsKey.WriteDword(L"ScreenWindowed", 0);
-        }
-    }
-
-    // Retry on the next launch if Windows did not provide a usable mode or
-    // registry writes failed; never lock in a partial initialization.
-    if (initialized)
-        launcherKey.WriteDword(L"NativeResolutionInitialized", 1);
+    const HDC screenDc = GetDC(nullptr);
+    const int dpi = screenDc ? GetDeviceCaps(screenDc, LOGPIXELSX) : kBaseDpi;
+    if (screenDc)
+        ReleaseDC(nullptr, screenDc);
+    return dpi ? dpi : kBaseDpi;
 }
 
-VideoSettings ReadSettings()
+std::wstring WidenUtf8(const std::string& str)
 {
-    RegistryKey key(HKEY_CURRENT_USER, kSettingsKey, KEY_QUERY_VALUE | KEY_SET_VALUE);
-    VideoSettings value;
-    value.width = key.ReadDword(L"ScreenWidth", value.width);
-    value.height = key.ReadDword(L"ScreenHeight", value.height);
-    value.bpp = key.ReadDword(L"ScreenBPP", value.bpp);
-    value.windowed = key.ReadDword(L"ScreenWindowed", value.windowed);
-    value.hdModels = key.ReadDword(L"hdmodels", value.hdModels);
-    value.videoLevel = key.ReadDword(L"vid_level", value.videoLevel);
-    return value;
-}
-
-SystemMouseSettings ReadSystemMouseSettings()
-{
-    SystemMouseSettings value;
-    SystemParametersInfoW(SPI_GETMOUSESPEED, 0, &value.speed, 0);
-    SystemParametersInfoW(SPI_GETMOUSE, 0, value.acceleration, 0);
-    value.speed = std::clamp(value.speed, 1, 20);
-    return value;
-}
-
-bool WriteSystemMouseSettings(const SystemMouseSettings& value)
-{
-    int acceleration[3] = {value.acceleration[0], value.acceleration[1], value.acceleration[2]};
-    constexpr UINT flags = SPIF_UPDATEINIFILE | SPIF_SENDCHANGE;
-    return SystemParametersInfoW(SPI_SETMOUSESPEED, 0,
-                                 reinterpret_cast<void*>(static_cast<INT_PTR>(value.speed)), flags) != FALSE &&
-           SystemParametersInfoW(SPI_SETMOUSE, 0, acceleration, flags) != FALSE;
-}
-
-bool PreviewSystemMouseSettings(const SystemMouseSettings& value)
-{
-    int acceleration[3] = {value.acceleration[0], value.acceleration[1], value.acceleration[2]};
-    constexpr UINT flags = SPIF_SENDCHANGE;
-    return SystemParametersInfoW(SPI_SETMOUSESPEED, 0,
-                                 reinterpret_cast<void*>(static_cast<INT_PTR>(value.speed)), flags) != FALSE &&
-           SystemParametersInfoW(SPI_SETMOUSE, 0, acceleration, flags) != FALSE;
-}
-
-bool WriteSettings(const VideoSettings& value)
-{
-    RegistryKey key(HKEY_CURRENT_USER, kSettingsKey, KEY_QUERY_VALUE | KEY_SET_VALUE);
-    if (!key.valid())
-        return false;
-
-    return key.WriteDword(L"ScreenWidth", value.width) &&
-           key.WriteDword(L"ScreenHeight", value.height) &&
-           key.WriteDword(L"ScreenBPP", 32) &&
-           key.WriteDword(L"ScreenWindowed", value.windowed) &&
-           key.WriteDword(L"hdmodels", value.hdModels) &&
-           key.WriteDword(L"vid_level", value.videoLevel) &&
-           key.WriteDword(L"EngineD3D", 0) &&
-           key.WriteDword(L"CrashInitializingVideoMode", 0) &&
-           key.WriteString(L"EngineDLL", L"hw.dll");
-}
-
-bool SaveBackup(const VideoSettings& value, const SystemMouseSettings& mouse)
-{
-    RegistryKey key(HKEY_CURRENT_USER, kLauncherKey, KEY_QUERY_VALUE | KEY_SET_VALUE);
-    return key.valid() &&
-           key.WriteDword(L"BackupWidth", value.width) &&
-           key.WriteDword(L"BackupHeight", value.height) &&
-           key.WriteDword(L"BackupBPP", value.bpp) &&
-           key.WriteDword(L"BackupWindowed", value.windowed) &&
-           key.WriteDword(L"BackupHDModels", value.hdModels) &&
-           key.WriteDword(L"BackupVideoLevel", value.videoLevel) &&
-           key.WriteDword(L"BackupPointerSpeed", static_cast<DWORD>(mouse.speed)) &&
-           key.WriteDword(L"BackupMouseThreshold1", static_cast<DWORD>(mouse.acceleration[0])) &&
-           key.WriteDword(L"BackupMouseThreshold2", static_cast<DWORD>(mouse.acceleration[1])) &&
-           key.WriteDword(L"BackupMouseAcceleration", static_cast<DWORD>(mouse.acceleration[2])) &&
-           key.WriteDword(L"BackupValid", 1);
-}
-
-void SetStatus(const wchar_t* text, bool error = false)
-{
-    SetWindowTextW(g_status, text);
-    InvalidateRect(g_status, nullptr, TRUE);
-    if (error)
-        MessageBeep(MB_ICONERROR);
-}
-
-std::wstring WidenAscii(const std::string& value)
-{
-    return std::wstring(value.begin(), value.end());
-}
-
-std::string NarrowUtf8(const std::wstring& value)
-{
-    if (value.empty())
+    if (str.empty())
         return {};
+    const int count = MultiByteToWideChar(CP_UTF8, 0, str.data(), static_cast<int>(str.size()), nullptr, 0);
+    std::wstring out(count, L'\0');
+    MultiByteToWideChar(CP_UTF8, 0, str.data(), static_cast<int>(str.size()), out.data(), count);
+    return out;
+}
 
-    const int size = WideCharToMultiByte(CP_UTF8, 0, value.c_str(), static_cast<int>(value.size()),
-        nullptr, 0, nullptr, nullptr);
-    std::string result(size, '\0');
-    WideCharToMultiByte(CP_UTF8, 0, value.c_str(), static_cast<int>(value.size()),
-        result.data(), size, nullptr, nullptr);
-    return result;
+std::string NarrowUtf8(const std::wstring& str)
+{
+    if (str.empty())
+        return {};
+    const int count = WideCharToMultiByte(CP_UTF8, 0, str.data(), static_cast<int>(str.size()), nullptr, 0, nullptr, nullptr);
+    std::string out(count, '\0');
+    WideCharToMultiByte(CP_UTF8, 0, str.data(), static_cast<int>(str.size()), out.data(), count, nullptr, nullptr);
+    return out;
 }
 
 std::string UrlEncode(const std::string& value)
 {
-    std::ostringstream out;
-    constexpr char hex[] = "0123456789ABCDEF";
-    for (unsigned char ch : value)
+    std::ostringstream escaped;
+    escaped.fill('0');
+    escaped << std::hex;
+    for (unsigned char c : value)
     {
-        if ((ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') ||
-            (ch >= '0' && ch <= '9') || ch == '_' || ch == '-' || ch == '.')
-            out << static_cast<char>(ch);
+        if (isalnum(c) || c == '-' || c == '_' || c == '.' || c == '~')
+            escaped << c;
         else
-            out << '%' << hex[ch >> 4] << hex[ch & 0x0F];
+            escaped << '%' << std::setw(2) << std::uppercase << int(c);
     }
-    return out.str();
+    return escaped.str();
+}
+
+std::wstring DecodeJsonString(const std::string& raw)
+{
+    std::wstring out;
+    out.reserve(raw.size());
+    for (size_t i = 0; i < raw.size(); i++)
+    {
+        if (raw[i] == '\\' && i + 5 < raw.size() && (raw[i + 1] == 'u' || raw[i + 1] == 'U'))
+        {
+            std::string hexPart = raw.substr(i + 2, 4);
+            wchar_t ch = static_cast<wchar_t>(strtol(hexPart.c_str(), nullptr, 16));
+            out += ch;
+            i += 5;
+        }
+        else if (raw[i] == '\\' && i + 1 < raw.size())
+        {
+            i++;
+            if (raw[i] == 'n') out += L'\n';
+            else if (raw[i] == 'r') out += L'\r';
+            else if (raw[i] == 't') out += L'\t';
+            else out += static_cast<wchar_t>(static_cast<unsigned char>(raw[i]));
+        }
+        else
+        {
+            out += static_cast<wchar_t>(static_cast<unsigned char>(raw[i]));
+        }
+    }
+    return out;
+}
+
+std::string ExtractJsonString(const std::string& json, const std::string& key)
+{
+    const std::string quotedKey = "\"" + key + "\"";
+    size_t pos = json.find(quotedKey);
+    if (pos == std::string::npos)
+        return {};
+    pos += quotedKey.size();
+    while (pos < json.size() && (json[pos] == ' ' || json[pos] == '\t' || json[pos] == ':'))
+        pos++;
+    if (pos >= json.size())
+        return {};
+    if (json[pos] == '\"')
+    {
+        pos++;
+        std::string val;
+        while (pos < json.size() && json[pos] != '\"')
+        {
+            if (json[pos] == '\\' && pos + 1 < json.size())
+            {
+                val += json[pos];
+                val += json[pos + 1];
+                pos += 2;
+            }
+            else
+            {
+                val += json[pos++];
+            }
+        }
+        return val;
+    }
+    size_t end = json.find_first_of(",}\r\n \t", pos);
+    return (end == std::string::npos) ? json.substr(pos) : json.substr(pos, end - pos);
 }
 
 std::filesystem::path ExecutableRoot()
@@ -383,455 +262,242 @@ std::filesystem::path ExecutableRoot()
     const DWORD length = GetModuleFileNameW(nullptr, path.data(), static_cast<DWORD>(path.size()));
     if (!length || length >= path.size())
         return {};
-
     path.resize(length);
     return std::filesystem::path(path).parent_path();
 }
 
-#include <fstream>
-#include <vector>
-
-void RC4Decrypt(std::string& data, const std::string& key) {
-    unsigned char S[256];
-    for (int i = 0; i < 256; i++) S[i] = i;
-    int j = 0;
-    for (int i = 0; i < 256; i++) {
-        j = (j + S[i] + key[i % key.length()]) % 256;
-        std::swap(S[i], S[j]);
-    }
-    int i = 0;
-    j = 0;
-    for (size_t n = 0; n < data.length(); n++) {
-        i = (i + 1) % 256;
-        j = (j + S[i]) % 256;
-        std::swap(S[i], S[j]);
-        data[n] ^= S[(S[i] + S[j]) % 256];
-    }
-}
-
-std::string ReadInstallGameNetTag()
-{
-    const auto datPath = ExecutableRoot() / L"gameland_license.dat";
-    std::ifstream file(datPath, std::ios::binary);
-    if (!file) return "";
-    
-    std::string data((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
-    if (data.empty()) return "";
-
-    RC4Decrypt(data, "NextClientSecureRC4Key2026!");
-
-    while(!data.empty() && (data.back() == '\0' || data.back() == '\r' || data.back() == '\n' || data.back() == ' '))
-        data.pop_back();
-
-    return data;
-}
-
-std::string ReadInstalledClientVersion()
-{
-    // 1. Try reading version.txt directly from client root
-    const auto versionPath = ExecutableRoot() / L"version.txt";
-    std::ifstream vFile(versionPath);
-    if (vFile)
-    {
-        std::string line;
-        if (std::getline(vFile, line))
-        {
-            while (!line.empty() && (line.back() == '\r' || line.back() == '\n' || line.back() == ' ' || line.back() == '\t'))
-                line.pop_back();
-            size_t start = line.find_first_not_of(" \t");
-            if (start != std::string::npos)
-                line = line.substr(start);
-            if (!line.empty())
-                return line;
-        }
-    }
-
-    // 2. Try reading build-info.txt for "Version: X.X.X"
-    const auto buildInfoPath = ExecutableRoot() / L"build-info.txt";
-    std::ifstream bFile(buildInfoPath);
-    if (bFile)
-    {
-        std::string line;
-        while (std::getline(bFile, line))
-        {
-            if (line.rfind("Version:", 0) == 0)
-            {
-                std::string ver = line.substr(8);
-                while (!ver.empty() && (ver.back() == '\r' || ver.back() == '\n' || ver.back() == ' ' || ver.back() == '\t'))
-                    ver.pop_back();
-                size_t start = ver.find_first_not_of(" \t");
-                if (start != std::string::npos)
-                    ver = ver.substr(start);
-                if (!ver.empty())
-                    return ver;
-            }
-        }
-    }
-
-#ifdef NEXTCLIENT_VERSION
-    return NEXTCLIENT_VERSION;
-#else
-    return "0.0.1";
-#endif
-}
-
-bool IsUploadPasswordTextValid(const std::wstring& password)
-{
-    if (password.empty() || password.size() > 31)
-        return false;
-
-    for (wchar_t ch : password)
-    {
-        if ((ch >= L'A' && ch <= L'Z') || (ch >= L'a' && ch <= L'z') ||
-            (ch >= L'0' && ch <= L'9') || ch == L'_' || ch == L'!' ||
-            ch == L'@' || ch == L'#' || ch == L'$' || ch == L'%' ||
-            ch == L'^' || ch == L'&' || ch == L'*' || ch == L'.' || ch == L'-')
-            continue;
-
-        return false;
-    }
-
-    return true;
-}
-
-void SetDemoStatus(const wchar_t* text, bool error = false)
-{
-    SetWindowTextW(g_demoStatus, text);
-    if (error)
-        MessageBeep(MB_ICONERROR);
-}
-
 bool ReadHttpResponse(HINTERNET request, std::string& response)
 {
-    char buffer[1024];
-    DWORD read = 0;
     response.clear();
-    while (InternetReadFile(request, buffer, sizeof(buffer), &read) && read > 0)
-        response.append(buffer, buffer + read);
-
-    return true;
+    char buffer[4096];
+    DWORD bytesRead = 0;
+    while (InternetReadFile(request, buffer, sizeof(buffer), &bytesRead) && bytesRead > 0)
+    {
+        response.append(buffer, bytesRead);
+    }
+    return !response.empty();
 }
 
 bool PostUrlEncoded(const char* path, const std::string& body, std::string& response)
 {
-    HINTERNET session = InternetOpenA("Allclient-DemoManager/1.0", INTERNET_OPEN_TYPE_PRECONFIG, nullptr, nullptr, 0);
+    HINTERNET session = InternetOpenA("AllclientLauncher", INTERNET_OPEN_TYPE_PRECONFIG, nullptr, nullptr, 0);
     if (!session)
         return false;
-
-    InternetSetOptionA(session, INTERNET_OPTION_CONNECT_TIMEOUT, (LPVOID)&kNetworkTimeoutMs, sizeof(kNetworkTimeoutMs));
-    InternetSetOptionA(session, INTERNET_OPTION_SEND_TIMEOUT, (LPVOID)&kNetworkTimeoutMs, sizeof(kNetworkTimeoutMs));
-    InternetSetOptionA(session, INTERNET_OPTION_RECEIVE_TIMEOUT, (LPVOID)&kNetworkTimeoutMs, sizeof(kNetworkTimeoutMs));
-
     HINTERNET connect = InternetConnectA(session, kUploadHost, INTERNET_DEFAULT_HTTP_PORT,
-        nullptr, nullptr, INTERNET_SERVICE_HTTP, 0, 0);
+                                         nullptr, nullptr, INTERNET_SERVICE_HTTP, 0, 0);
     if (!connect)
     {
         InternetCloseHandle(session);
         return false;
     }
-
     HINTERNET request = HttpOpenRequestA(connect, "POST", path, nullptr, nullptr, nullptr,
-        INTERNET_FLAG_RELOAD | INTERNET_FLAG_NO_CACHE_WRITE, 0);
+                                         INTERNET_FLAG_RELOAD | INTERNET_FLAG_NO_CACHE_WRITE, 0);
     if (!request)
     {
         InternetCloseHandle(connect);
         InternetCloseHandle(session);
         return false;
     }
-
     const char headers[] = "Content-Type: application/x-www-form-urlencoded\r\n";
     const BOOL sent = HttpSendRequestA(request, headers, static_cast<DWORD>(strlen(headers)),
-        (LPVOID)body.data(), static_cast<DWORD>(body.size()));
+                                       const_cast<char*>(body.data()), static_cast<DWORD>(body.size()));
+    bool ok = false;
     if (sent)
+    {
         ReadHttpResponse(request, response);
-
+        ok = true;
+    }
     InternetCloseHandle(request);
     InternetCloseHandle(connect);
     InternetCloseHandle(session);
-    return sent != FALSE;
+    return ok;
 }
 
-bool VerifyDemoPassword(const std::wstring& password, std::string& response)
+class RegistryKey
 {
-    const std::string tag = ReadInstallGameNetTag();
-    if (tag.empty())
+public:
+    RegistryKey(HKEY root, const wchar_t* subKey, REGSAM access)
     {
-        response = "FAIL: Missing GameNetTag";
+        if (RegCreateKeyExW(root, subKey, 0, nullptr, REG_OPTION_NON_VOLATILE, access, nullptr, &m_key, nullptr) != ERROR_SUCCESS)
+            m_key = nullptr;
+    }
+    ~RegistryKey()
+    {
+        if (m_key)
+            RegCloseKey(m_key);
+    }
+    bool valid() const { return m_key != nullptr; }
+    int ReadInt(const wchar_t* name, int fallback) const
+    {
+        DWORD value = 0;
+        DWORD size = sizeof(value);
+        DWORD type = 0;
+        if (RegQueryValueExW(m_key, name, nullptr, &type, reinterpret_cast<LPBYTE>(&value), &size) == ERROR_SUCCESS && type == REG_DWORD)
+            return static_cast<int>(value);
+        return fallback;
+    }
+    bool WriteInt(const wchar_t* name, int value)
+    {
+        const DWORD dword = static_cast<DWORD>(value);
+        return RegSetValueExW(m_key, name, 0, REG_DWORD, reinterpret_cast<const BYTE*>(&dword), sizeof(dword)) == ERROR_SUCCESS;
+    }
+private:
+    HKEY m_key{};
+};
+
+VideoSettings ReadSettings()
+{
+    RegistryKey key(HKEY_CURRENT_USER, kRegistryKey, KEY_QUERY_VALUE);
+    VideoSettings s;
+    s.width = key.valid() ? key.ReadInt(L"ScreenWidth", 800) : 800;
+    s.height = key.valid() ? key.ReadInt(L"ScreenHeight", 600) : 600;
+    s.windowed = key.valid() && (key.ReadInt(L"ScreenWindowed", 0) != 0);
+    RegistryKey launcherKey(HKEY_CURRENT_USER, kLauncherKey, KEY_QUERY_VALUE);
+    s.highQuality = !launcherKey.valid() || (launcherKey.ReadInt(L"HighQuality", 1) != 0);
+    s.hdModels = launcherKey.valid() && (launcherKey.ReadInt(L"HdModels", 0) != 0);
+    return s;
+}
+
+bool WriteSettings(const VideoSettings& s)
+{
+    RegistryKey key(HKEY_CURRENT_USER, kRegistryKey, KEY_QUERY_VALUE | KEY_SET_VALUE);
+    if (!key.valid() || !key.WriteInt(L"ScreenWidth", s.width) ||
+        !key.WriteInt(L"ScreenHeight", s.height) ||
+        !key.WriteInt(L"ScreenWindowed", s.windowed ? 1 : 0))
         return false;
+    RegistryKey launcherKey(HKEY_CURRENT_USER, kLauncherKey, KEY_QUERY_VALUE | KEY_SET_VALUE);
+    return launcherKey.valid() &&
+           launcherKey.WriteInt(L"HighQuality", s.highQuality ? 1 : 0) &&
+           launcherKey.WriteInt(L"HdModels", s.hdModels ? 1 : 0);
+}
+
+SystemMouseSettings ReadSystemMouseSettings()
+{
+    SystemMouseSettings s;
+    int speed = 10;
+    if (SystemParametersInfoW(SPI_GETMOUSESPEED, 0, &speed, 0) && speed >= 1 && speed <= 20)
+        s.speed = speed;
+    int mouseParams[3]{6, 10, 1};
+    if (SystemParametersInfoW(SPI_GETMOUSE, 0, mouseParams, 0))
+    {
+        s.threshold1 = mouseParams[0];
+        s.threshold2 = mouseParams[1];
+        s.acceleration = mouseParams[2];
+    }
+    return s;
+}
+
+bool WriteSystemMouseSettings(const SystemMouseSettings& s)
+{
+    int speed = std::clamp(s.speed, 1, 20);
+    SystemParametersInfoW(SPI_SETMOUSESPEED, 0, reinterpret_cast<void*>(static_cast<INT_PTR>(speed)), SPIF_UPDATEINIFILE | SPIF_SENDCHANGE);
+    int mouseParams[3]{s.threshold1, s.threshold2, s.acceleration ? 1 : 0};
+    SystemParametersInfoW(SPI_SETMOUSE, 0, mouseParams, SPIF_UPDATEINIFILE | SPIF_SENDCHANGE);
+    return true;
+}
+
+void SetStatus(const wchar_t* text, bool isError = false)
+{
+    if (g_statusLabel)
+        SetWindowTextW(g_statusLabel, text);
+}
+
+bool PullUserConfigFromCloud(const std::string& token)
+{
+    if (token.empty())
+        return false;
+    const std::string body = std::string("action=pull&token=") + UrlEncode(token);
+    std::string response;
+    if (!PostUrlEncoded(kCfgSyncPath, body, response))
+        return false;
+
+    const std::string success = ExtractJsonString(response, "success");
+    const std::string exists = ExtractJsonString(response, "exists");
+    const auto cstrikeDir = ExecutableRoot() / L"cstrike";
+    const auto defaultCfg = ExecutableRoot() / L"default" / L"config.cfg";
+    const auto userCfg = cstrikeDir / L"userconfig.cfg";
+    const auto gameCfg = cstrikeDir / L"config.cfg";
+
+    std::error_code ec;
+    std::filesystem::create_directories(cstrikeDir, ec);
+
+    if (success == "true" && exists == "true")
+    {
+        const std::string cfgRaw = ExtractJsonString(response, "cfg_content");
+        const std::wstring cfgWide = DecodeJsonString(cfgRaw);
+        const std::string cfgUtf8 = NarrowUtf8(cfgWide);
+        if (!cfgUtf8.empty())
+        {
+            std::ofstream out(gameCfg, std::ios::binary | std::ios::trunc);
+            if (out)
+            {
+                out.write(cfgUtf8.data(), cfgUtf8.size());
+                return true;
+            }
+        }
     }
 
-    const std::string body = "build=" + UrlEncode(tag) + "&password=" + UrlEncode(NarrowUtf8(password));
-    return PostUrlEncoded(kVerifyPath, body, response) && response.find("OK") != std::string::npos;
-}
-
-bool InternetWriteAll(HINTERNET request, const void* data, DWORD size)
-{
-    const auto* cursor = static_cast<const char*>(data);
-    DWORD remaining = size;
-    while (remaining > 0)
+    // New user with no cloud config: load clean default config
+    if (std::filesystem::is_regular_file(defaultCfg, ec))
     {
-        DWORD written = 0;
-        if (!InternetWriteFile(request, cursor, remaining, &written) || written == 0)
-            return false;
-        cursor += written;
-        remaining -= written;
+        std::filesystem::copy_file(defaultCfg, gameCfg, std::filesystem::copy_options::overwrite_existing, ec);
     }
     return true;
 }
 
-bool InternetWriteAll(HINTERNET request, const std::string& data)
+bool PushUserConfigToCloud(const std::string& token)
 {
-    return InternetWriteAll(request, data.data(), static_cast<DWORD>(data.size()));
-}
-
-bool UploadDemoFile(const std::filesystem::path& filePath, const std::wstring& password, std::string& response)
-{
-    const std::string tag = ReadInstallGameNetTag();
-    if (tag.empty())
-    {
-        response = "FAIL: Missing GameNetTag";
+    if (token.empty())
         return false;
-    }
-
-    HANDLE file = CreateFileW(filePath.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING,
-        FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN, nullptr);
-    if (file == INVALID_HANDLE_VALUE)
-    {
-        response = "FAIL: Cannot open demo";
+    const auto cfgPath = ExecutableRoot() / L"cstrike" / L"config.cfg";
+    std::ifstream in(cfgPath, std::ios::binary);
+    if (!in)
         return false;
-    }
-
-    LARGE_INTEGER size{};
-    if (!GetFileSizeEx(file, &size) || size.QuadPart <= 0)
-    {
-        CloseHandle(file);
-        response = "FAIL: Empty demo";
+    std::string cfgContent((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    if (cfgContent.empty())
         return false;
-    }
-
-    const std::string filename = NarrowUtf8(filePath.filename().wstring());
-    std::string prefix = "--" + std::string(kMultipartBoundary) + "\r\n";
-    prefix += "Content-Disposition: form-data; name=\"build\"\r\n\r\n" + tag + "\r\n";
-    prefix += "--" + std::string(kMultipartBoundary) + "\r\n";
-    prefix += "Content-Disposition: form-data; name=\"password\"\r\n\r\n" + NarrowUtf8(password) + "\r\n";
-    prefix += "--" + std::string(kMultipartBoundary) + "\r\n";
-    prefix += "Content-Disposition: form-data; name=\"demo\"; filename=\"" + filename + "\"\r\n";
-    prefix += "Content-Type: application/octet-stream\r\n\r\n";
-    const std::string suffix = "\r\n--" + std::string(kMultipartBoundary) + "--\r\n";
-    const auto total = static_cast<unsigned long long>(prefix.size()) +
-        static_cast<unsigned long long>(size.QuadPart) + static_cast<unsigned long long>(suffix.size());
-
-    HINTERNET session = InternetOpenA("Allclient-DemoManager/1.0", INTERNET_OPEN_TYPE_PRECONFIG, nullptr, nullptr, 0);
-    if (!session)
-    {
-        CloseHandle(file);
+    const std::string body = std::string("action=push&token=") + UrlEncode(token) + "&cfg_content=" + UrlEncode(cfgContent);
+    std::string response;
+    if (!PostUrlEncoded(kCfgSyncPath, body, response))
         return false;
-    }
-
-    InternetSetOptionA(session, INTERNET_OPTION_CONNECT_TIMEOUT, (LPVOID)&kNetworkTimeoutMs, sizeof(kNetworkTimeoutMs));
-    InternetSetOptionA(session, INTERNET_OPTION_SEND_TIMEOUT, (LPVOID)&kNetworkTimeoutMs, sizeof(kNetworkTimeoutMs));
-    InternetSetOptionA(session, INTERNET_OPTION_RECEIVE_TIMEOUT, (LPVOID)&kNetworkTimeoutMs, sizeof(kNetworkTimeoutMs));
-
-    HINTERNET connect = InternetConnectA(session, kUploadHost, INTERNET_DEFAULT_HTTP_PORT,
-        nullptr, nullptr, INTERNET_SERVICE_HTTP, 0, 0);
-    HINTERNET request = connect ? HttpOpenRequestA(connect, "POST", kUploadPath, nullptr, nullptr, nullptr,
-        INTERNET_FLAG_RELOAD | INTERNET_FLAG_NO_CACHE_WRITE, 0) : nullptr;
-    bool ok = request && total <= MAXDWORD;
-    if (ok)
-    {
-        const std::string headers = "Content-Type: multipart/form-data; boundary=" + std::string(kMultipartBoundary) + "\r\n";
-        INTERNET_BUFFERSA buffers{};
-        buffers.dwStructSize = sizeof(buffers);
-        buffers.lpcszHeader = headers.c_str();
-        buffers.dwHeadersLength = static_cast<DWORD>(headers.size());
-        buffers.dwBufferTotal = static_cast<DWORD>(total);
-        ok = HttpSendRequestExA(request, &buffers, nullptr, 0, 0) != FALSE;
-    }
-    if (ok)
-        ok = InternetWriteAll(request, prefix);
-
-    char buffer[kUploadBufferSize];
-    while (ok)
-    {
-        DWORD read = 0;
-        if (!ReadFile(file, buffer, sizeof(buffer), &read, nullptr))
-        {
-            ok = false;
-            break;
-        }
-        if (read == 0)
-            break;
-        ok = InternetWriteAll(request, buffer, read);
-    }
-    CloseHandle(file);
-
-    if (ok)
-        ok = InternetWriteAll(request, suffix);
-    if (ok)
-        ok = HttpEndRequestA(request, nullptr, 0, 0) != FALSE;
-    if (ok)
-        ReadHttpResponse(request, response);
-
-    if (request)
-        InternetCloseHandle(request);
-    if (connect)
-        InternetCloseHandle(connect);
-    InternetCloseHandle(session);
-    return ok && response.find("OK") != std::string::npos;
+    const std::string success = ExtractJsonString(response, "success");
+    return success == "true";
 }
 
-void PopulateSubscriptionStatus()
+void UpdateSensDisplay()
 {
-    std::wstring stateText;
-    std::wstring detailText;
-    std::wstring remainingText;
-    const std::wstring expiry = WidenAscii(g_accessStatus.expiry_date);
-
-    switch (g_accessStatus.state)
-    {
-    case GameNetAccessState::Active:
-        stateText = L"\u0627\u0634\u062a\u0631\u0627\u06a9 \u0641\u0639\u0627\u0644";
-        detailText = L"\u067e\u0627\u06cc\u0627\u0646 \u0627\u0634\u062a\u0631\u0627\u06a9: \u200e" + expiry;
-        if (g_accessStatus.days_remaining == 0)
-            remainingText = L"\u0627\u0645\u0631\u0648\u0632 \u0645\u0646\u0642\u0636\u06cc \u0645\u06cc\u200c\u0634\u0648\u062f";
-        else if (g_accessStatus.days_remaining > 0)
-            remainingText = std::to_wstring(g_accessStatus.days_remaining) +
-                L" \u0631\u0648\u0632 \u0628\u0627\u0642\u06cc\u200c\u0645\u0627\u0646\u062f\u0647";
-        break;
-    case GameNetAccessState::Expired:
-        stateText = L"\u0627\u0634\u062a\u0631\u0627\u06a9 \u0645\u0646\u0642\u0636\u06cc \u0634\u062f\u0647";
-        detailText = L"\u062a\u0627\u0631\u06cc\u062e \u0627\u0646\u0642\u0636\u0627: \u200e" + expiry;
-        if (g_accessStatus.days_remaining < 0)
-            remainingText = std::to_wstring(-g_accessStatus.days_remaining) +
-                L" \u0631\u0648\u0632 \u0627\u0632 \u0627\u0646\u0642\u0636\u0627 \u06af\u0630\u0634\u062a\u0647";
-        break;
-    case GameNetAccessState::TagMissing:
-        stateText = L"\u0627\u0634\u062a\u0631\u0627\u06a9 \u063a\u06cc\u0631\u0641\u0639\u0627\u0644";
-        detailText = L"\u0627\u0634\u062a\u0631\u0627\u06a9 \u0641\u0639\u0627\u0644\u06cc \u06cc\u0627\u0641\u062a \u0646\u0634\u062f.";
-        break;
-    case GameNetAccessState::InvalidEntry:
-        stateText = L"\u0627\u0637\u0644\u0627\u0639\u0627\u062a \u0627\u0634\u062a\u0631\u0627\u06a9 \u0646\u0627\u0645\u0639\u062a\u0628\u0631 \u0627\u0633\u062a";
-        detailText = L"\u062a\u0627\u0631\u06cc\u062e \u067e\u0627\u06cc\u0627\u0646 \u0627\u0634\u062a\u0631\u0627\u06a9 \u0645\u0639\u062a\u0628\u0631 \u0646\u06cc\u0633\u062a.";
-        break;
-    case GameNetAccessState::ServiceUnavailable:
-    default:
-        stateText = L"\u0648\u0636\u0639\u06cc\u062a \u062f\u0631 \u062f\u0633\u062a\u0631\u0633 \u0646\u06cc\u0633\u062a";
-        detailText = L"\u062a\u0623\u06cc\u06cc\u062f \u0627\u0634\u062a\u0631\u0627\u06a9 \u0645\u0645\u06a9\u0646 \u0646\u0634\u062f\u061b \u0622\u0646\u0644\u0627\u06cc\u0646 \u063a\u06cc\u0631\u0641\u0639\u0627\u0644 \u0627\u0633\u062a.";
-        break;
-    }
-
-    if (!g_accessStatus.allowed())
-        remainingText = g_accessStatus.lan_allowed
-            ? L"\u0645\u0647\u0644\u062a \u0644\u0646: " +
-                std::to_wstring(g_accessStatus.offline_days_remaining) + L" \u0631\u0648\u0632"
-            : L"\u0644\u0646 \u0645\u0633\u062f\u0648\u062f \u0627\u0633\u062a\u061b \u062a\u0623\u06cc\u06cc\u062f \u0622\u0646\u0644\u0627\u06cc\u0646 \u0644\u0627\u0632\u0645 \u0627\u0633\u062a";
-
-    SetWindowTextW(g_subscriptionState, stateText.c_str());
-    const std::wstring tag = WidenAscii(g_accessStatus.tag);
-    SetWindowTextW(g_subscriptionTag, tag.c_str());
-    SetWindowTextW(g_subscriptionDetails, detailText.c_str());
-    SetWindowTextW(g_subscriptionRemaining, remainingText.c_str());
-}
-
-void PopulateResolutions(const VideoSettings& current)
-{
-    std::set<Resolution> unique;
-    DEVMODEW mode{};
-    mode.dmSize = sizeof(mode);
-    for (DWORD index = 0; EnumDisplaySettingsW(nullptr, index, &mode); ++index)
-    {
-        if (mode.dmBitsPerPel >= 32 && mode.dmPelsWidth >= 640 && mode.dmPelsHeight >= 480)
-            unique.insert({static_cast<int>(mode.dmPelsWidth), static_cast<int>(mode.dmPelsHeight)});
-    }
-    unique.insert({static_cast<int>(current.width), static_cast<int>(current.height)});
-    g_resolutions.assign(unique.begin(), unique.end());
-
-    int selected = 0;
-    for (size_t index = 0; index < g_resolutions.size(); ++index)
-    {
-        const auto& resolution = g_resolutions[index];
-        const std::wstring label = std::to_wstring(resolution.width) + L" x " + std::to_wstring(resolution.height);
-        SendMessageW(g_resolution, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(label.c_str()));
-        if (resolution.width == static_cast<int>(current.width) && resolution.height == static_cast<int>(current.height))
-            selected = static_cast<int>(index);
-    }
-    SendMessageW(g_resolution, CB_SETCURSEL, selected, 0);
-}
-
-void SetControls(const VideoSettings& value)
-{
-    auto it = std::ranges::find(g_resolutions, Resolution{static_cast<int>(value.width), static_cast<int>(value.height)});
-    if (it == g_resolutions.end())
-    {
-        const std::wstring label = std::to_wstring(value.width) + L" x " + std::to_wstring(value.height);
-        SendMessageW(g_resolution, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(label.c_str()));
-        g_resolutions.push_back({static_cast<int>(value.width), static_cast<int>(value.height)});
-        it = std::prev(g_resolutions.end());
-    }
-    SendMessageW(g_resolution, CB_SETCURSEL, std::distance(g_resolutions.begin(), it), 0);
-    Button_SetCheck(g_hdModels, value.hdModels ? BST_CHECKED : BST_UNCHECKED);
-    Button_SetCheck(g_highQuality, value.videoLevel ? BST_CHECKED : BST_UNCHECKED);
-}
-
-void SetMouseControls(const SystemMouseSettings& value)
-{
-    const int position = PointerSpeedToSliderPosition(value.speed);
-    SendMessageW(g_pointerSpeed, TBM_SETPOS, TRUE, position);
-    const std::wstring speedText = PointerPositionText(position);
-    SetWindowTextW(g_pointerSpeedValue, speedText.c_str());
-    Button_SetCheck(g_enhancePointer, value.acceleration[2] != 0 ? BST_CHECKED : BST_UNCHECKED);
-}
-
-SystemMouseSettings MouseSettingsFromControls(const SystemMouseSettings& current)
-{
-    SystemMouseSettings value = current;
-    const int position = static_cast<int>(SendMessageW(g_pointerSpeed, TBM_GETPOS, 0, 0));
-    value.speed = SliderPositionToPointerSpeed(position);
-    const bool requestedEnhance = Button_GetCheck(g_enhancePointer) == BST_CHECKED;
-    const bool currentEnhance = current.acceleration[2] != 0;
-    if (requestedEnhance != currentEnhance)
-    {
-        value.acceleration[0] = requestedEnhance ? 6 : 0;
-        value.acceleration[1] = requestedEnhance ? 10 : 0;
-        value.acceleration[2] = requestedEnhance ? 1 : 0;
-    }
-    return value;
-}
-
-void ApplyMousePreview()
-{
-    const SystemMouseSettings requested = MouseSettingsFromControls(g_mouseAtLastApply);
-    if (PreviewSystemMouseSettings(requested))
-    {
-        g_mousePreviewChanged = !SameSettings(requested, g_mouseAtLastApply);
-        SetStatus(L"\u062a\u0646\u0638\u06cc\u0645 \u0645\u0627\u0648\u0633 \u0645\u0648\u0642\u062a \u0627\u0633\u062a\u061b \u00ab\u0627\u062c\u0631\u0627\u06cc \u0628\u0627\u0632\u06cc\u00bb \u0630\u062e\u06cc\u0631\u0647 \u0648 \u00ab\u0627\u0646\u0635\u0631\u0627\u0641\u00bb \u0644\u063a\u0648 \u0645\u06cc\u200c\u06a9\u0646\u062f.");
-    }
-    else
-        SetStatus(L"\u0648\u06cc\u0646\u062f\u0648\u0632 \u062a\u0646\u0638\u06cc\u0645 \u0645\u0648\u0642\u062a \u0645\u0627\u0648\u0633 \u0631\u0627 \u0646\u067e\u0630\u06cc\u0631\u0641\u062a.", true);
-}
-
-void RevertMousePreview()
-{
-    if (!g_mousePreviewChanged)
+    if (!g_sensSlider || !g_sensValueText)
         return;
-
-    PreviewSystemMouseSettings(g_mouseAtLastApply);
-    g_mousePreviewChanged = false;
+    const int val = static_cast<int>(SendMessageW(g_sensSlider, TBM_GETPOS, 0, 0));
+    const std::wstring txt = std::to_wstring(val) + L" / 20";
+    SetWindowTextW(g_sensValueText, txt.c_str());
 }
 
-bool SettingsFromControls(VideoSettings& value)
+SystemMouseSettings MouseSettingsFromControls(const SystemMouseSettings& base)
 {
-    const LRESULT selected = SendMessageW(g_resolution, CB_GETCURSEL, 0, 0);
-    if (selected == CB_ERR || static_cast<size_t>(selected) >= g_resolutions.size())
-        return false;
+    SystemMouseSettings s = base;
+    if (g_sensSlider)
+        s.speed = static_cast<int>(SendMessageW(g_sensSlider, TBM_GETPOS, 0, 0));
+    if (g_enhancePointerCheck)
+    {
+        const bool accel = (SendMessageW(g_enhancePointerCheck, BM_GETCHECK, 0, 0) == BST_CHECKED);
+        s.acceleration = accel ? 1 : 0;
+        s.threshold1 = accel ? 6 : 0;
+        s.threshold2 = accel ? 10 : 0;
+    }
+    return s;
+}
 
-    const auto selectedIndex = static_cast<size_t>(selected);
-    value.width = static_cast<DWORD>(g_resolutions[selectedIndex].width);
-    value.height = static_cast<DWORD>(g_resolutions[selectedIndex].height);
-    value.bpp = 32;
-    value.windowed = ReadSettings().windowed; // Preserve the hidden display mode.
-    value.hdModels = Button_GetCheck(g_hdModels) == BST_CHECKED ? 1 : 0;
-    value.videoLevel = Button_GetCheck(g_highQuality) == BST_CHECKED ? 1 : 0;
+bool SettingsFromControls(VideoSettings& s)
+{
+    const int index = static_cast<int>(SendMessageW(g_resolutionCombo, CB_GETCURSEL, 0, 0));
+    if (index < 0 || index >= static_cast<int>(kKnownResolutions.size()))
+        return false;
+    s.width = kKnownResolutions[index].width;
+    s.height = kKnownResolutions[index].height;
+    s.windowed = (SendMessageW(g_windowedCheck, BM_GETCHECK, 0, 0) == BST_CHECKED);
+    s.highQuality = (SendMessageW(g_highQualityCheck, BM_GETCHECK, 0, 0) == BST_CHECKED);
+    s.hdModels = (SendMessageW(g_hdModelsCheck, BM_GETCHECK, 0, 0) == BST_CHECKED);
     return true;
 }
 
@@ -840,568 +506,468 @@ bool ApplySettings()
     VideoSettings requested;
     if (!SettingsFromControls(requested))
     {
-        SetStatus(L"\u0648\u0636\u0648\u062d \u062a\u0635\u0648\u06cc\u0631 \u0645\u0639\u062a\u0628\u0631\u06cc \u0627\u0646\u062a\u062e\u0627\u0628 \u06a9\u0646\u06cc\u062f.", true);
+        SetStatus(L"وضوح تصویر معتبری انتخاب کنید.", true);
         return false;
     }
-
     const VideoSettings previous = ReadSettings();
     const SystemMouseSettings previousMouse = g_mouseAtLastApply;
     const SystemMouseSettings requestedMouse = MouseSettingsFromControls(previousMouse);
-    if (SameSettings(previous, requested) && SameSettings(previousMouse, requestedMouse))
-    {
-        SetStatus(L"\u062a\u0646\u0638\u06cc\u0645\u0627\u062a \u0641\u0639\u0644\u06cc \u0646\u06cc\u0627\u0632\u06cc \u0628\u0647 \u062a\u063a\u06cc\u06cc\u0631 \u0646\u062f\u0627\u0631\u0646\u062f.");
-        return true;
-    }
 
-    if (!SaveBackup(previous, previousMouse))
-    {
-        SetStatus(L"\u0630\u062e\u06cc\u0631\u0647 \u062a\u0646\u0638\u06cc\u0645\u0627\u062a \u0642\u0628\u0644\u06cc \u0645\u0645\u06a9\u0646 \u0646\u0634\u062f\u061b \u062a\u063a\u06cc\u06cc\u0631\u06cc \u0627\u0639\u0645\u0627\u0644 \u0646\u0634\u062f.", true);
-        return false;
-    }
-    if (!WriteSettings(requested) || !WriteSystemMouseSettings(requestedMouse))
-    {
-        WriteSettings(previous);
-        WriteSystemMouseSettings(previousMouse);
-        SetStatus(L"\u0627\u0639\u0645\u0627\u0644 \u062a\u0646\u0638\u06cc\u0645\u0627\u062a \u0645\u0645\u06a9\u0646 \u0646\u0634\u062f\u061b \u0645\u0642\u0627\u062f\u06cc\u0631 \u0642\u0628\u0644\u06cc \u0628\u0627\u0632\u06cc\u0627\u0628\u06cc \u0634\u062f\u0646\u062f.", true);
-        return false;
-    }
-
+    WriteSettings(requested);
+    WriteSystemMouseSettings(requestedMouse);
     g_mouseAtLastApply = requestedMouse;
     g_mousePreviewChanged = false;
-    SetStatus(L"\u062a\u0646\u0638\u06cc\u0645\u0627\u062a \u062a\u0635\u0648\u06cc\u0631 \u0648 \u0645\u0627\u0648\u0633 \u0648\u06cc\u0646\u062f\u0648\u0632 \u0630\u062e\u06cc\u0631\u0647 \u0634\u062f\u0646\u062f.");
-    return true;
-}
 
-void RefreshDemoList()
-{
-    g_demoFiles.clear();
-    SendMessageW(g_demoList, LB_RESETCONTENT, 0, 0);
-
-    const auto cstrikeDir = ExecutableRoot() / L"cstrike";
-    const auto demoDir = cstrikeDir / L"demos";
-    if (!std::filesystem::is_directory(cstrikeDir))
+    if (!g_activeUserToken.empty())
     {
-        SetDemoStatus(L"Demo folder was not found.", true);
-        return;
+        PullUserConfigFromCloud(g_activeUserToken);
     }
-
-    std::error_code error;
-    std::filesystem::create_directories(demoDir, error);
-
-    if (std::filesystem::is_directory(demoDir))
+    else
     {
-        for (const auto& entry : std::filesystem::directory_iterator(demoDir))
+        // Guest mode (without account): restore clean default config
+        std::error_code ec;
+        const auto defaultCfg = ExecutableRoot() / L"default" / L"config.cfg";
+        const auto gameCfg = ExecutableRoot() / L"cstrike" / L"config.cfg";
+        if (std::filesystem::is_regular_file(defaultCfg, ec))
         {
-            if (!entry.is_regular_file())
-                continue;
-
-            std::wstring extension = entry.path().extension().wstring();
-            for (wchar_t& ch : extension)
-                ch = static_cast<wchar_t>(towlower(ch));
-            if (extension != L".dem")
-                continue;
-
-            g_demoFiles.push_back(entry.path());
+            std::filesystem::copy_file(defaultCfg, gameCfg, std::filesystem::copy_options::overwrite_existing, ec);
         }
     }
 
-    std::ranges::sort(g_demoFiles, [](const auto& left, const auto& right)
-    {
-        return left.wstring() < right.wstring();
-    });
-
-    for (const auto& path : g_demoFiles)
-    {
-        const std::wstring label = L"demos\\" + path.filename().wstring();
-        SendMessageW(g_demoList, LB_ADDSTRING, 0, reinterpret_cast<LPARAM>(label.c_str()));
-    }
-
-    if (!g_demoFiles.empty())
-        SendMessageW(g_demoList, LB_SETCURSEL, 0, 0);
-
-    SetDemoStatus(g_demoFiles.empty() ? L"No local .dem files found in cstrike\\demos." : L"Ready.");
-}
-
-bool ReadDemoPassword(HWND window, std::wstring& password)
-{
-    wchar_t buffer[64]{};
-    GetWindowTextW(g_demoPassword, buffer, static_cast<int>(std::size(buffer)));
-    password = buffer;
-    if (!IsUploadPasswordTextValid(password))
-    {
-        MessageBoxW(window, L"Enter the upload password saved for this subscription.", L"Demo Manager", MB_OK | MB_ICONERROR);
-        return false;
-    }
+    SetStatus(L"تنظیمات اعمال شدند.");
     return true;
 }
 
-void SetDemoActionsEnabled(bool enabled)
+void PerformUserLogin(HWND window)
 {
-    EnableWindow(g_demoList, enabled);
-    EnableWindow(g_demoUpload, enabled);
-    EnableWindow(g_demoDelete, enabled);
-    EnableWindow(GetDlgItem(GetParent(g_demoList), IdDemoRefresh), enabled);
-}
-
-void VerifyPasswordAndUnlock(HWND window)
-{
-    std::wstring password;
-    if (!ReadDemoPassword(window, password))
+    wchar_t phoneBuf[64]{};
+    wchar_t passBuf[64]{};
+    GetWindowTextW(g_userPhone, phoneBuf, static_cast<int>(std::size(phoneBuf)));
+    GetWindowTextW(g_userPassword, passBuf, static_cast<int>(std::size(passBuf)));
+    const std::wstring phone(phoneBuf);
+    const std::wstring password(passBuf);
+    if (phone.size() != 11 || phone.substr(0, 2) != L"09")
+    {
+        MessageBoxW(window, L"شماره موبایل معتبر نیست (مثال: 09121234567)", L"خطا", MB_OK | MB_ICONWARNING);
         return;
+    }
+    if (password.empty())
+    {
+        MessageBoxW(window, L"لطفاً رمز عبور خود را وارد کنید.", L"خطا", MB_OK | MB_ICONWARNING);
+        return;
+    }
 
-    SetDemoStatus(L"Checking password...");
+    SetWindowTextW(g_userStatusLabel, L"در حال بررسی ورود...");
+    EnableWindow(g_userLoginBtn, FALSE);
+    const std::string body = std::string("action=login&mobile=") + UrlEncode(NarrowUtf8(phone)) + "&password=" + UrlEncode(NarrowUtf8(password));
     std::string response;
-    if (!VerifyDemoPassword(password, response))
-    {
-        const std::wstring message = response.empty() ? L"Password verification failed." : WidenAscii(response);
-        SetDemoStatus(message.c_str(), true);
-        return;
-    }
+    const bool ok = PostUrlEncoded(kAuthOtpPath, body, response);
+    EnableWindow(g_userLoginBtn, TRUE);
 
-    g_demoPasswordValue = password;
-    SetDemoActionsEnabled(true);
-    RefreshDemoList();
+    const std::string success = ExtractJsonString(response, "success");
+    const std::string message = ExtractJsonString(response, "message");
+    const std::string token = ExtractJsonString(response, "token");
+    if (ok && success == "true" && !token.empty())
+    {
+        g_activeUserPhone = phone;
+        g_activeUserToken = token;
+        const std::wstring status = L"وارد شده: \u200e" + phone;
+        SetWindowTextW(g_userStatusLabel, status.c_str());
+        MessageBoxW(window, L"ورود با موفقیت انجام شد. کانفیگ ابری شما فعال گردید.", L"حساب کاربری", MB_OK | MB_ICONINFORMATION);
+    }
+    else
+    {
+        const std::wstring err = message.empty() ? L"خطا در ارتباط یا رمز نادرست." : DecodeJsonString(message);
+        SetWindowTextW(g_userStatusLabel, L"خطا در ورود.");
+        MessageBoxW(window, err.c_str(), L"خطای ورود", MB_OK | MB_ICONERROR);
+    }
 }
 
-std::filesystem::path SelectedDemoPath()
-{
-    const LRESULT selected = SendMessageW(g_demoList, LB_GETCURSEL, 0, 0);
-    if (selected == LB_ERR || static_cast<size_t>(selected) >= g_demoFiles.size())
-        return {};
-    return g_demoFiles[static_cast<size_t>(selected)];
-}
-
-void UploadSelectedDemo(HWND window)
-{
-    const auto path = SelectedDemoPath();
-    if (path.empty())
-    {
-        MessageBoxW(window, L"Select a demo first.", L"Demo Manager", MB_OK | MB_ICONERROR);
-        return;
-    }
-
-    EnableWindow(g_demoUpload, FALSE);
-    SetDemoStatus(L"Uploading selected demo...");
-    std::string response;
-    const bool ok = UploadDemoFile(path, g_demoPasswordValue, response);
-    EnableWindow(g_demoUpload, TRUE);
-
-    const std::wstring status = response.empty() ? (ok ? L"Upload completed." : L"Upload failed.") : WidenAscii(response);
-    SetDemoStatus(status.c_str(), !ok);
-    MessageBoxW(window, ok ? L"Demo uploaded successfully." : status.c_str(), L"Demo Manager",
-        MB_OK | (ok ? MB_ICONINFORMATION : MB_ICONERROR));
-}
-
-void DeleteSelectedDemo(HWND window)
-{
-    const auto path = SelectedDemoPath();
-    if (path.empty())
-    {
-        MessageBoxW(window, L"Select a demo first.", L"Demo Manager", MB_OK | MB_ICONERROR);
-        return;
-    }
-
-    const std::wstring question = L"Delete this local demo?\n\n" + path.filename().wstring();
-    if (MessageBoxW(window, question.c_str(), L"Demo Manager", MB_YESNO | MB_ICONWARNING | MB_DEFBUTTON2) != IDYES)
-        return;
-
-    std::error_code error;
-    if (!std::filesystem::remove(path, error))
-    {
-        MessageBoxW(window, L"Could not delete the selected demo.", L"Demo Manager", MB_OK | MB_ICONERROR);
-        return;
-    }
-
-    RefreshDemoList();
-}
-
-bool IsActionButtonId(UINT id);
-void DrawActionButton(const DRAWITEMSTRUCT& item);
-
-LRESULT CALLBACK DemoManagerProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam)
+LRESULT CALLBACK OtpRegisterProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam)
 {
     switch (message)
     {
     case WM_CREATE:
     {
-        auto add = [&](const wchar_t* type, const wchar_t* text, DWORD style, int x, int y, int w, int h, int id = 0, DWORD ex = 0)
-        {
-            HWND control = CreateWindowExW(ex, type, text, WS_CHILD | WS_VISIBLE | style,
-                x, y, w, h, window, reinterpret_cast<HMENU>(static_cast<INT_PTR>(id)), g_instance, nullptr);
-            SendMessageW(control, WM_SETFONT, reinterpret_cast<WPARAM>(g_font), TRUE);
-            return control;
+        const int dpi = GetWindowDpi(window);
+        const auto addCtrl = [&](const wchar_t* cls, const wchar_t* text, DWORD style,
+                                 int x, int y, int w, int h, WORD id, DWORD exStyle = 0) {
+            return CreateWindowExW(exStyle, cls, text, WS_CHILD | WS_VISIBLE | style,
+                                   ScaleDpi(x, dpi), ScaleDpi(y, dpi), ScaleDpi(w, dpi), ScaleDpi(h, dpi),
+                                   window, reinterpret_cast<HMENU>(static_cast<INT_PTR>(id)), g_instance, nullptr);
         };
 
-        add(L"STATIC", L"Upload password", SS_LEFT, 18, 18, 150, 22);
-        g_demoPassword = add(L"EDIT", L"", ES_PASSWORD | ES_AUTOHSCROLL | WS_BORDER | WS_TABSTOP, 170, 14, 210, 26, IdDemoPassword, WS_EX_CLIENTEDGE);
-        add(L"BUTTON", L"Unlock", BS_PUSHBUTTON | WS_TABSTOP, 390, 13, 90, 28, IdDemoVerify);
-        g_demoList = add(L"LISTBOX", L"", LBS_NOTIFY | WS_BORDER | WS_VSCROLL | WS_TABSTOP, 18, 56, 462, 210, IdDemoList, WS_EX_CLIENTEDGE);
-        g_demoUpload = add(L"BUTTON", L"Upload selected", BS_PUSHBUTTON | WS_TABSTOP, 18, 280, 132, 32, IdDemoUpload);
-        g_demoDelete = add(L"BUTTON", L"Delete local", BS_PUSHBUTTON | WS_TABSTOP, 160, 280, 100, 32, IdDemoDelete);
-        add(L"BUTTON", L"Refresh", BS_PUSHBUTTON | WS_TABSTOP, 270, 280, 90, 32, IdDemoRefresh);
-        add(L"BUTTON", L"Close", BS_PUSHBUTTON | WS_TABSTOP, 370, 280, 110, 32, IdDemoClose);
-        g_demoStatus = add(L"STATIC", L"Enter password to unlock demo list.", SS_LEFT, 18, 324, 462, 40, IdDemoStatus);
-        SetDemoActionsEnabled(false);
-        SetFocus(g_demoPassword);
+        HWND l1 = addCtrl(L"STATIC", L":شماره موبایل", SS_RIGHT, 220, 20, 190, 20, 0);
+        g_regMobile = addCtrl(L"EDIT", L"", ES_AUTOHSCROLL | WS_BORDER | WS_TABSTOP, 200, 44, 210, 28, IdRegMobile, WS_EX_CLIENTEDGE);
+        g_regRequestOtpBtn = addCtrl(L"BUTTON", L"دریافت کد پیامکی", BS_PUSHBUTTON | WS_TABSTOP, 40, 43, 150, 30, IdRegRequestOtp);
+
+        HWND l2 = addCtrl(L"STATIC", L":کد تأیید پیامک", SS_RIGHT, 260, 90, 150, 20, 0);
+        g_regOtp = addCtrl(L"EDIT", L"", ES_AUTOHSCROLL | WS_BORDER | WS_TABSTOP, 240, 114, 170, 28, IdRegOtp, WS_EX_CLIENTEDGE);
+
+        HWND l3 = addCtrl(L"STATIC", L":رمز عبور دلخواه", SS_RIGHT, 50, 90, 170, 20, 0);
+        g_regPassword = addCtrl(L"EDIT", L"", ES_PASSWORD | ES_AUTOHSCROLL | WS_BORDER | WS_TABSTOP, 40, 114, 180, 28, IdRegPassword, WS_EX_CLIENTEDGE);
+
+        g_regSubmitBtn = addCtrl(L"BUTTON", L"ثبت‌نام و تأیید نهایی", BS_DEFPUSHBUTTON | WS_TABSTOP, 220, 165, 190, 34, IdRegSubmit);
+        HWND closeBtn = addCtrl(L"BUTTON", L"بستن", BS_PUSHBUTTON | WS_TABSTOP, 40, 165, 160, 34, IdRegClose);
+
+        g_regStatusLabel = addCtrl(L"STATIC", L"", SS_RIGHT, 24, 210, 390, 40, IdRegStatus);
+
+        for (HWND h : {l1, l2, l3, g_regMobile, g_regRequestOtpBtn, g_regOtp, g_regPassword, g_regSubmitBtn, closeBtn, g_regStatusLabel})
+        {
+            if (h)
+                SendMessageW(h, WM_SETFONT, reinterpret_cast<WPARAM>(g_dialogFont), TRUE);
+        }
+        return 0;
+    }
+    case WM_TIMER:
+    {
+        if (wParam == 999)
+        {
+            if (g_otpCooldownSeconds > 0)
+            {
+                g_otpCooldownSeconds--;
+                const std::wstring btnTxt = std::to_wstring(g_otpCooldownSeconds) + L" ثانیه صبرا...";
+                SetWindowTextW(g_regRequestOtpBtn, btnTxt.c_str());
+            }
+            else
+            {
+                KillTimer(window, 999);
+                g_otpTimerId = 0;
+                EnableWindow(g_regRequestOtpBtn, TRUE);
+                SetWindowTextW(g_regRequestOtpBtn, L"دریافت کد پیامکی");
+            }
+        }
         return 0;
     }
     case WM_COMMAND:
-        switch (LOWORD(wParam))
+    {
+        const WORD id = LOWORD(wParam);
+        if (id == IdRegClose)
         {
-        case IDOK:
-        case IdDemoVerify:
-            VerifyPasswordAndUnlock(window);
-            return 0;
-        case IdDemoUpload:
-            UploadSelectedDemo(window);
-            return 0;
-        case IdDemoDelete:
-            DeleteSelectedDemo(window);
-            return 0;
-        case IdDemoRefresh:
-            RefreshDemoList();
-            return 0;
-        case IDCANCEL:
-        case IdDemoClose:
             DestroyWindow(window);
             return 0;
-        default:
-            break;
         }
-        break;
-
-    case WM_DRAWITEM:
-        if (IsActionButtonId(static_cast<UINT>(wParam)))
+        if (id == IdRegRequestOtp)
         {
-            DrawActionButton(*reinterpret_cast<DRAWITEMSTRUCT*>(lParam));
-            return TRUE;
+            wchar_t mobileBuf[64]{};
+            GetWindowTextW(g_regMobile, mobileBuf, static_cast<int>(std::size(mobileBuf)));
+            const std::wstring mobile(mobileBuf);
+            if (mobile.size() != 11 || mobile.substr(0, 2) != L"09")
+            {
+                MessageBoxW(window, L"شماره موبایل معتبر نیست.", L"خطا", MB_OK | MB_ICONWARNING);
+                return 0;
+            }
+            SetWindowTextW(g_regStatusLabel, L"در حال ارتباط با سامانه پیامکی...");
+            EnableWindow(g_regRequestOtpBtn, FALSE);
+            const std::string body = std::string("action=request_otp&mobile=") + UrlEncode(NarrowUtf8(mobile));
+            std::string response;
+            const bool ok = PostUrlEncoded(kAuthOtpPath, body, response);
+
+            const std::string success = ExtractJsonString(response, "success");
+            const std::string message = ExtractJsonString(response, "message");
+            if (ok && success == "true")
+            {
+                // Start 120s cooldown
+                g_otpCooldownSeconds = 120;
+                SetTimer(window, 999, 1000, nullptr);
+                const std::wstring btnTxt = std::to_wstring(g_otpCooldownSeconds) + L" ثانیه صبرا...";
+                SetWindowTextW(g_regRequestOtpBtn, btnTxt.c_str());
+
+                const std::wstring msgWide = message.empty() ? L"کد پیامکی ارسال شد. لطفاً آن را وارد نمایید." : DecodeJsonString(message);
+                SetWindowTextW(g_regStatusLabel, msgWide.c_str());
+                SetFocus(g_regOtp);
+                MessageBoxW(window, msgWide.c_str(), L"پیامک تأیید", MB_OK | MB_ICONINFORMATION);
+            }
+            else
+            {
+                EnableWindow(g_regRequestOtpBtn, TRUE);
+                const std::wstring err = message.empty() ? L"خطا در ارسال پیامک." : DecodeJsonString(message);
+                SetWindowTextW(g_regStatusLabel, err.c_str());
+                MessageBoxW(window, err.c_str(), L"خطا", MB_OK | MB_ICONERROR);
+            }
+            return 0;
+        }
+        if (id == IdRegSubmit)
+        {
+            wchar_t mobileBuf[64]{};
+            wchar_t otpBuf[64]{};
+            wchar_t passBuf[64]{};
+            GetWindowTextW(g_regMobile, mobileBuf, static_cast<int>(std::size(mobileBuf)));
+            GetWindowTextW(g_regOtp, otpBuf, static_cast<int>(std::size(otpBuf)));
+            GetWindowTextW(g_regPassword, passBuf, static_cast<int>(std::size(passBuf)));
+            const std::wstring mobile(mobileBuf);
+            const std::wstring otp(otpBuf);
+            const std::wstring password(passBuf);
+
+            if (mobile.size() != 11 || otp.empty() || password.empty())
+            {
+                MessageBoxW(window, L"لطفاً تمام فیلدها را کامل نمایید.", L"خطا", MB_OK | MB_ICONWARNING);
+                return 0;
+            }
+
+            SetWindowTextW(g_regStatusLabel, L"در حال ثبت‌نام و تأیید...");
+            EnableWindow(g_regSubmitBtn, FALSE);
+            const std::string body = std::string("action=verify_otp&mobile=") + UrlEncode(NarrowUtf8(mobile)) +
+                                     "&otp=" + UrlEncode(NarrowUtf8(otp)) +
+                                     "&password=" + UrlEncode(NarrowUtf8(password));
+            std::string response;
+            const bool ok = PostUrlEncoded(kAuthOtpPath, body, response);
+            EnableWindow(g_regSubmitBtn, TRUE);
+
+            const std::string success = ExtractJsonString(response, "success");
+            const std::string message = ExtractJsonString(response, "message");
+            const std::string token = ExtractJsonString(response, "token");
+            if (ok && success == "true" && !token.empty())
+            {
+                g_activeUserPhone = mobile;
+                g_activeUserToken = token;
+                if (g_userPhone)
+                    SetWindowTextW(g_userPhone, mobile.c_str());
+                if (g_userPassword)
+                    SetWindowTextW(g_userPassword, password.c_str());
+                if (g_userStatusLabel)
+                {
+                    const std::wstring status = L"وارد شده: \u200e" + mobile;
+                    SetWindowTextW(g_userStatusLabel, status.c_str());
+                }
+                MessageBoxW(window, L"ثبت‌نام با موفقیت انجام شد و وارد شدید.", L"موفقیت", MB_OK | MB_ICONINFORMATION);
+                DestroyWindow(window);
+            }
+            else
+            {
+                const std::wstring err = message.empty() ? L"کد تأیید اشتباه یا منقضی شده است." : DecodeJsonString(message);
+                SetWindowTextW(g_regStatusLabel, err.c_str());
+                MessageBoxW(window, err.c_str(), L"خطا در ثبت‌نام", MB_OK | MB_ICONERROR);
+            }
+            return 0;
         }
         break;
+    }
     case WM_CLOSE:
         DestroyWindow(window);
         return 0;
-    default:
-        break;
     }
     return DefWindowProcW(window, message, wParam, lParam);
 }
 
-void ShowDemoManager(HWND owner)
+void ShowOtpRegisterDialog(HWND parent)
 {
-    WNDCLASSEXW windowClass{sizeof(windowClass)};
-    windowClass.lpfnWndProc = DemoManagerProc;
-    windowClass.hInstance = g_instance;
-    windowClass.hCursor = LoadCursorW(nullptr, IDC_ARROW);
-    windowClass.hbrBackground = GetSysColorBrush(COLOR_WINDOW);
-    windowClass.lpszClassName = kDemoWindowClass;
-    windowClass.hIcon = LoadIconW(nullptr, IDI_APPLICATION);
-    windowClass.hIconSm = windowClass.hIcon;
-    RegisterClassExW(&windowClass);
-
-    RECT rect{0, 0, 500, 382};
-    AdjustWindowRectEx(&rect, WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU, FALSE, 0);
-    RECT ownerRect{};
-    GetWindowRect(owner, &ownerRect);
-    const int width = rect.right - rect.left;
-    const int height = rect.bottom - rect.top;
-    const int x = ownerRect.left + ((ownerRect.right - ownerRect.left) - width) / 2;
-    const int y = ownerRect.top + ((ownerRect.bottom - ownerRect.top) - height) / 2;
-
-    HWND dialog = CreateWindowExW(WS_EX_DLGMODALFRAME, kDemoWindowClass, L"Allclient Demo Manager",
-        WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU, x, y, width, height, owner, nullptr, g_instance, nullptr);
-    if (!dialog)
-        return;
-
-    EnableWindow(owner, FALSE);
-    ShowWindow(dialog, SW_SHOWNORMAL);
-    UpdateWindow(dialog);
-
-    MSG message{};
-    while (IsWindow(dialog) && GetMessageW(&message, nullptr, 0, 0) > 0)
+    static bool registered = false;
+    if (!registered)
     {
-        if (IsDialogMessageW(dialog, &message))
-            continue;
-        TranslateMessage(&message);
-        DispatchMessageW(&message);
+        WNDCLASSEXW wc{sizeof(wc)};
+        wc.lpfnWndProc = OtpRegisterProc;
+        wc.hInstance = g_instance;
+        wc.lpszClassName = kOtpRegisterWindowClass;
+        wc.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1);
+        wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
+        RegisterClassExW(&wc);
+        registered = true;
     }
-    EnableWindow(owner, TRUE);
-    SetActiveWindow(owner);
+
+    const int dpi = GetWindowDpi(parent);
+    const int w = ScaleDpi(450, dpi);
+    const int h = ScaleDpi(290, dpi);
+
+    RECT parentRect{};
+    GetWindowRect(parent, &parentRect);
+    const int x = parentRect.left + (parentRect.right - parentRect.left - w) / 2;
+    const int y = parentRect.top + (parentRect.bottom - parentRect.top - h) / 2;
+
+    HWND dlg = CreateWindowExW(WS_EX_DLGMODALFRAME, kOtpRegisterWindowClass,
+                               L"ثبت‌نام حساب کاربری (SMS OTP)",
+                               WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_VISIBLE,
+                               x, y, w, h, parent, nullptr, g_instance, nullptr);
+    EnableWindow(parent, FALSE);
+    MSG msg{};
+    while (IsWindow(dlg) && GetMessageW(&msg, nullptr, 0, 0))
+    {
+        TranslateMessage(&msg);
+        DispatchMessageW(&msg);
+    }
+    EnableWindow(parent, TRUE);
+    SetForegroundWindow(parent);
 }
 
-HWND AddControl(HWND parent, const wchar_t* type, const wchar_t* text, DWORD style,
-                int x, int y, int width, int height, int id = 0, DWORD exStyle = 0)
+void CreateFonts(int dpi)
 {
-    HWND control = CreateWindowExW(exStyle | WS_EX_RTLREADING, type, text, WS_CHILD | WS_VISIBLE | style,
-                                   x, y, width, height, parent,
-                                   reinterpret_cast<HMENU>(static_cast<INT_PTR>(id)), g_instance, nullptr);
-    SendMessageW(control, WM_SETFONT, reinterpret_cast<WPARAM>(g_font), TRUE);
-    return control;
+    g_dialogFont = CreateFontW(-ScaleDpi(13, dpi), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+                               DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
+                               DEFAULT_PITCH | FF_DONTCARE, kFontFamily);
+    g_titleFont = CreateFontW(-ScaleDpi(24, dpi), 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
+                              DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
+                              DEFAULT_PITCH | FF_DONTCARE, kFontFamily);
+    g_titleFontSub = CreateFontW(-ScaleDpi(11, dpi), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+                                 DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
+                                 DEFAULT_PITCH | FF_DONTCARE, kFontFamily);
+    g_badgeFont = CreateFontW(-ScaleDpi(11, dpi), 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE,
+                              DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
+                              DEFAULT_PITCH | FF_DONTCARE, kFontFamily);
+    g_valueFont = CreateFontW(-ScaleDpi(12, dpi), 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE,
+                              DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
+                              DEFAULT_PITCH | FF_DONTCARE, kFontFamily);
+    g_buttonFont = CreateFontW(-ScaleDpi(13, dpi), 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE,
+                               DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
+                               DEFAULT_PITCH | FF_DONTCARE, kFontFamily);
 }
 
-HWND AddActionButton(HWND parent, const wchar_t* text, int x, int y, int width, int height, int id, bool defaultButton = false)
+void DestroyFonts()
 {
-    return AddControl(parent, L"BUTTON", text,
-        BS_OWNERDRAW | WS_TABSTOP,
-        x, y, width, height, id, 0);
-}
-
-bool IsActionButtonId(UINT id)
-{
-    return id == IdLaunch || id == IdDemoManager || id == IdRestore || id == IdCancel;
-}
-
-void DrawActionButton(const DRAWITEMSTRUCT& item)
-{
-    const bool pressed = (item.itemState & ODS_SELECTED) != 0;
-    const bool focused = (item.itemState & ODS_FOCUS) != 0;
-    const bool disabled = (item.itemState & ODS_DISABLED) != 0;
-
-    COLORREF fill = RGB(39, 42, 45);
-    COLORREF border = RGB(70, 74, 78);
-    COLORREF text = disabled ? RGB(110, 120, 138) : kColorText;
-
-    if (item.CtlID == IdLaunch)
+    for (HFONT* font : {&g_dialogFont, &g_titleFont, &g_titleFontSub, &g_badgeFont, &g_valueFont, &g_buttonFont})
     {
-        fill = pressed ? RGB(0, 146, 112) : RGB(0, 178, 136);
-        border = focused ? kColorAccentHot : kColorAccent;
-        text = RGB(5, 15, 22);
-    }
-    else if (item.CtlID == IdDemoManager)
-    {
-        fill = pressed ? RGB(38, 66, 60) : RGB(31, 48, 44);
-        border = focused ? kColorAccentHot : RGB(69, 113, 98);
-    }
-    else if (item.CtlID == IdCancel)
-    {
-        fill = pressed ? RGB(49, 51, 54) : kColorBackground;
-        border = RGB(65, 68, 72);
-    }
-
-    HBRUSH fillBrush = CreateSolidBrush(fill);
-    FillRect(item.hDC, &item.rcItem, fillBrush);
-    DeleteObject(fillBrush);
-
-    HPEN borderPen = CreatePen(PS_SOLID, focused ? 2 : 1, border);
-    HGDIOBJ oldPen = SelectObject(item.hDC, borderPen);
-    HGDIOBJ oldBrush = SelectObject(item.hDC, GetStockObject(NULL_BRUSH));
-    Rectangle(item.hDC, item.rcItem.left, item.rcItem.top, item.rcItem.right, item.rcItem.bottom);
-    SelectObject(item.hDC, oldBrush);
-    SelectObject(item.hDC, oldPen);
-    DeleteObject(borderPen);
-
-    wchar_t caption[128]{};
-    GetWindowTextW(item.hwndItem, caption, static_cast<int>(std::size(caption)));
-    SetBkMode(item.hDC, TRANSPARENT);
-    SetTextColor(item.hDC, text);
-    HGDIOBJ oldFont = SelectObject(item.hDC, g_emphasisFont);
-    RECT textRect = item.rcItem;
-    if (pressed)
-        OffsetRect(&textRect, 1, 1);
-    DrawTextW(item.hDC, caption, -1, &textRect, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
-    SelectObject(item.hDC, oldFont);
-    if (focused)
-    {
-        RECT focusRect = item.rcItem;
-        InflateRect(&focusRect, -5, -5);
-        DrawFocusRect(item.hDC, &focusRect);
-    }
-}
-
-void CreateControls(HWND window)
-{
-    InitializeNativeResolutionIfNeeded();
-
-
-    auto label = [&](const wchar_t* text, int x, int y, int width, int height = 24)
-    {
-        return AddControl(window, L"STATIC", text, SS_RIGHT, x, y, width, height);
-    };
-    AddActionButton(window, L"Demo Manager", 28, 24, 150, 40, IdDemoManager);
-
-    std::string installedVer = ReadInstalledClientVersion();
-    std::wstring versionLabelText = L"نسخه " + WidenAscii(installedVer) + L" (بروز)";
-    g_versionLabel = AddControl(window, L"STATIC", versionLabelText.c_str(), SS_CENTER | SS_CENTERIMAGE, 196, 32, 130, 26);
-    SendMessageW(g_versionLabel, WM_SETFONT, reinterpret_cast<WPARAM>(g_badgeFont), TRUE);
-
-    HWND heading = label(L"ALLCLIENT", 340, 18, 244, 38);
-    SendMessageW(heading, WM_SETFONT, reinterpret_cast<WPARAM>(g_brandFont), TRUE);
-    label(L"COUNTER-STRIKE  /  1.6", 340, 58, 244, 20);
-
-    label(L"\u062a\u0635\u0648\u06cc\u0631", 424, 96, 148, 22);
-    label(L"\u0648\u0636\u0648\u062d \u062a\u0635\u0648\u06cc\u0631", 422, 128, 150);
-    g_resolution = AddControl(window, WC_COMBOBOXW, L"", CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP,
-                              44, 124, 246, 220, IdResolution);
-    SetWindowLongPtrW(g_resolution, GWL_EXSTYLE,
-        GetWindowLongPtrW(g_resolution, GWL_EXSTYLE) & ~WS_EX_RTLREADING);
-    g_highQuality = AddControl(window, L"BUTTON", L"\u06a9\u06cc\u0641\u06cc\u062a \u0628\u0627\u0644\u0627\u06cc \u062a\u0635\u0648\u06cc\u0631",
-        BS_AUTOCHECKBOX | BS_RIGHT | BS_LEFTTEXT | WS_TABSTOP, 324, 156, 248, 28, IdHighQuality);
-    g_hdModels = AddControl(window, L"BUTTON", L"\u0645\u062f\u0644\u200c\u0647\u0627\u06cc \u0628\u0627\u06a9\u06cc\u0641\u06cc\u062a \u0628\u0627\u0632\u06cc\u06a9\u0646\u0627\u0646",
-        BS_AUTOCHECKBOX | BS_RIGHT | BS_LEFTTEXT | WS_TABSTOP, 44, 156, 248, 28, IdHdModels);
-
-    label(L"\u0645\u0627\u0648\u0633", 424, 224, 148, 22);
-    label(L"\u0633\u0631\u0639\u062a \u0646\u0634\u0627\u0646\u06af\u0631", 434, 256, 138);
-    g_pointerSpeed = AddControl(window, TRACKBAR_CLASSW, L"", TBS_AUTOTICKS | TBS_HORZ | WS_TABSTOP,
-                                114, 250, 304, 30, IdPointerSpeed);
-    SetWindowLongPtrW(g_pointerSpeed, GWL_EXSTYLE,
-        GetWindowLongPtrW(g_pointerSpeed, GWL_EXSTYLE) & ~WS_EX_RTLREADING);
-    SendMessageW(g_pointerSpeed, TBM_SETRANGE, TRUE, MAKELPARAM(1, 11));
-    SendMessageW(g_pointerSpeed, TBM_SETTICFREQ, 1, 0);
-    g_pointerSpeedValue = AddControl(window, L"STATIC", L"", SS_CENTER, 44, 256, 62, 24, IdPointerSpeedValue);
-    g_enhancePointer = AddControl(window, L"BUTTON", L"\u0627\u0641\u0632\u0627\u06cc\u0634 \u062f\u0642\u062a \u0646\u0634\u0627\u0646\u06af\u0631",
-        BS_AUTOCHECKBOX | BS_RIGHT | BS_LEFTTEXT | WS_TABSTOP, 324, 286, 248, 28, IdEnhancePointer);
-    label(L"\u0627\u0639\u0645\u0627\u0644 \u0631\u0648\u06cc \u0645\u0627\u0648\u0633 \u06a9\u0627\u0631\u0628\u0631 \u0641\u0639\u0644\u06cc \u0648\u06cc\u0646\u062f\u0648\u0632", 44, 289, 260);
-
-    label(L"\u0627\u0634\u062a\u0631\u0627\u06a9 \u06af\u06cc\u0645\u200c\u0646\u062a", 424, 350, 148, 22);
-    g_subscriptionTag = label(L"", 44, 386, 248, 26);
-    SendMessageW(g_subscriptionTag, WM_SETFONT, reinterpret_cast<WPARAM>(g_emphasisFont), TRUE);
-    g_subscriptionState = label(L"", 324, 386, 248, 26);
-    g_subscriptionDetails = label(L"", 324, 420, 248, 26);
-    g_subscriptionRemaining = label(L"", 44, 420, 248, 26);
-    SendMessageW(g_subscriptionRemaining, WM_SETFONT, reinterpret_cast<WPARAM>(g_emphasisFont), TRUE);
-    PopulateSubscriptionStatus();
-
-    AddActionButton(window, L"\u0627\u062c\u0631\u0627\u06cc \u0628\u0627\u0632\u06cc", 370, 486, 214, 48, IdLaunch, true);
-    AddActionButton(window, L"\u0628\u0627\u0632\u0646\u0634\u0627\u0646\u06cc", 144, 486, 136, 48, IdRestore);
-    AddActionButton(window, L"\u0627\u0646\u0635\u0631\u0627\u0641", 28, 486, 104, 48, IdCancel);
-    g_status = label(L"\u0622\u0645\u0627\u062f\u0647", 24, 536, 568, 42);
-
-    const VideoSettings current = ReadSettings();
-    PopulateResolutions(current);
-    SetControls(current);
-    g_mouseAtLastApply = ReadSystemMouseSettings();
-    g_mousePreviewChanged = false;
-    SetMouseControls(g_mouseAtLastApply);
-}
-
-void CheckLauncherUpdates(HWND window)
-{
-    SetStatus(L"در حال بررسی بروزرسانی کلاینت...");
-
-    std::string tag = NEXTCLIENT_TAG;
-    std::string version = ReadInstalledClientVersion();
-    std::string url = "http://gameland.cam/update_api.php?tag=" + tag + "&version=" + version;
-
-    HINTERNET hInternet = InternetOpenA("AllclientLauncher", INTERNET_OPEN_TYPE_DIRECT, NULL, NULL, 0);
-    if (!hInternet)
-    {
-        std::wstring fallbackMsg = L"آماده بازی  •  نسخه " + WidenAscii(version);
-        SetStatus(fallbackMsg.c_str());
-        return;
-    }
-
-    DWORD timeout = 2500;
-    InternetSetOptionA(hInternet, INTERNET_OPTION_CONNECT_TIMEOUT, &timeout, sizeof(timeout));
-    InternetSetOptionA(hInternet, INTERNET_OPTION_RECEIVE_TIMEOUT, &timeout, sizeof(timeout));
-    InternetSetOptionA(hInternet, INTERNET_OPTION_SEND_TIMEOUT, &timeout, sizeof(timeout));
-
-    HINTERNET hConnect = InternetOpenUrlA(hInternet, url.c_str(), NULL, 0, INTERNET_FLAG_RELOAD | INTERNET_FLAG_NO_CACHE_WRITE, 0);
-    if (!hConnect)
-    {
-        InternetCloseHandle(hInternet);
-        std::wstring fallbackMsg = L"آماده بازی  •  نسخه " + WidenAscii(version);
-        SetStatus(fallbackMsg.c_str());
-        return;
-    }
-
-    char buffer[1024];
-    DWORD bytesRead = 0;
-    std::string response;
-    while (InternetReadFile(hConnect, buffer, sizeof(buffer) - 1, &bytesRead) && bytesRead > 0)
-    {
-        buffer[bytesRead] = '\0';
-        response += buffer;
-    }
-    InternetCloseHandle(hConnect);
-    InternetCloseHandle(hInternet);
-
-    bool hasUpdate = (response.find("\"update_available\":true") != std::string::npos ||
-                      response.find("\"update_available\": true") != std::string::npos ||
-                      response.find("\"has_update\":true") != std::string::npos ||
-                      response.find("\"has_update\": true") != std::string::npos);
-
-    if (hasUpdate)
-    {
-        size_t urlPos = response.find("\"download_url\":\"");
-        if (urlPos == std::string::npos)
-            urlPos = response.find("\"download_url\": \"");
-
-        if (urlPos != std::string::npos)
+        if (*font)
         {
-            urlPos = response.find("\"", urlPos + 15);
-            if (urlPos != std::string::npos)
-            {
-                urlPos++;
-                size_t urlEnd = response.find("\"", urlPos);
-                if (urlEnd != std::string::npos)
-                {
-                    std::string rawUrl = response.substr(urlPos, urlEnd - urlPos);
-                    std::string downloadUrl;
-                    for (size_t i = 0; i < rawUrl.length(); ++i)
-                    {
-                        if (rawUrl[i] == '\\' && i + 1 < rawUrl.length() && rawUrl[i + 1] == '/')
-                        {
-                            downloadUrl += '/';
-                            ++i;
-                        }
-                        else
-                        {
-                            downloadUrl += rawUrl[i];
-                        }
-                    }
-
-                    std::string latestVersion = "جدید";
-                    size_t verPos = response.find("\"latest_version\":\"");
-                    if (verPos != std::string::npos)
-                    {
-                        verPos += 18;
-                        size_t verEnd = response.find("\"", verPos);
-                        if (verEnd != std::string::npos)
-                            latestVersion = response.substr(verPos, verEnd - verPos);
-                    }
-
-                    SetStatus(L"آپدیت جدید آماده دریافت است.");
-
-                    std::wstring promptMsg = L"آپدیت جدید نسخه " + WidenAscii(latestVersion) +
-                        L" برای کلاینت شما منتشر شده است.\n\n"
-                        L"برای ادامه استفاده، دریافت آپدیت الزامی است.\n"
-                        L"آیا مایلید هم‌اکنون آپدیت دانلود و نصب شود؟";
-
-                    int userChoice = MessageBoxW(window, promptMsg.c_str(), L"بروزرسانی Allclient",
-                        MB_YESNO | MB_ICONINFORMATION | MB_TOPMOST);
-
-                    if (userChoice == IDYES || userChoice == IDOK)
-                    {
-                        SetStatus(L"در حال فراخوانی ابزار بروزرسانی...");
-                        std::string execParams = "\"" + downloadUrl + "\"";
-                        SHELLEXECUTEINFOA sei = { sizeof(sei) };
-                        sei.fMask = SEE_MASK_NOCLOSEPROCESS;
-                        sei.lpVerb = "open";
-                        sei.lpFile = "updater.exe";
-                        sei.lpParameters = execParams.c_str();
-                        sei.nShow = SW_SHOWNORMAL;
-
-                        if (ShellExecuteExA(&sei))
-                        {
-                            ExitProcess(0);
-                        }
-                        else
-                        {
-                            SetStatus(L"خطا در اجرای updater.exe", true);
-                            MessageBoxW(window, L"خطا در اجرای updater.exe. لطفاً اتصال اینترنت خود را بررسی کنید.", L"خطای بروزرسانی", MB_ICONERROR);
-                        }
-                    }
-                    else
-                    {
-                        SetStatus(L"برای اجرای بازی، نصب بروزرسانی الزامی است.", true);
-                    }
-                    return;
-                }
-            }
+            DeleteObject(*font);
+            *font = nullptr;
         }
     }
+}
 
-    std::wstring readyMsg = L"آماده بازی  •  کلاینت نسخه " + WidenAscii(version) + L" (بروزرسانی شده)";
-    SetStatus(readyMsg.c_str());
+bool IsActionButtonId(WORD id)
+{
+    return id == IdOk || id == IdCancel || id == IdReset || id == IdDemoManager ||
+           id == IdUserLogin || id == IdUserRegister;
+}
+
+void DrawActionButton(LPDRAWITEMSTRUCT item)
+{
+    const WORD id = static_cast<WORD>(item->CtlID);
+    const bool pressed = (item->itemState & ODS_SELECTED) != 0;
+    const bool isOk = (id == IdOk);
+    const bool isLogin = (id == IdUserLogin);
+    const bool isRegister = (id == IdUserRegister);
+
+    COLORREF fill = RGB(36, 42, 47);
+    COLORREF border = RGB(68, 77, 86);
+    COLORREF text = RGB(232, 236, 241);
+
+    if (isOk)
+    {
+        fill = pressed ? RGB(0, 150, 115) : RGB(0, 184, 140);
+        border = RGB(0, 210, 160);
+        text = RGB(255, 255, 255);
+    }
+    else if (isLogin)
+    {
+        fill = pressed ? RGB(0, 120, 95) : RGB(0, 150, 115);
+        border = RGB(0, 184, 140);
+        text = RGB(255, 255, 255);
+    }
+    else if (isRegister)
+    {
+        fill = pressed ? RGB(30, 70, 110) : RGB(40, 90, 140);
+        border = RGB(70, 130, 200);
+        text = RGB(230, 240, 255);
+    }
+    else if (pressed)
+    {
+        fill = RGB(28, 33, 37);
+    }
+
+    HBRUSH brush = CreateSolidBrush(fill);
+    HPEN pen = CreatePen(PS_SOLID, 1, border);
+    HGDIOBJ oldBrush = SelectObject(item->hDC, brush);
+    HGDIOBJ oldPen = SelectObject(item->hDC, pen);
+    RoundRect(item->hDC, item->rcItem.left, item->rcItem.top, item->rcItem.right, item->rcItem.bottom, 6, 6);
+    SelectObject(item->hDC, oldPen);
+    SelectObject(item->hDC, oldBrush);
+    DeleteObject(pen);
+    DeleteObject(brush);
+
+    wchar_t btnText[64]{};
+    GetWindowTextW(item->hwndItem, btnText, static_cast<int>(std::size(btnText)));
+    SetBkMode(item->hDC, TRANSPARENT);
+    SetTextColor(item->hDC, text);
+    HGDIOBJ oldFont = SelectObject(item->hDC, g_buttonFont ? g_buttonFont : g_dialogFont);
+    RECT tr = item->rcItem;
+    DrawTextW(item->hDC, btnText, -1, &tr, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+    SelectObject(item->hDC, oldFont);
+}
+
+void PopulateControls(const VideoSettings& s)
+{
+    SendMessageW(g_resolutionCombo, CB_RESETCONTENT, 0, 0);
+    int selected = -1;
+    for (size_t i = 0; i < kKnownResolutions.size(); i++)
+    {
+        const auto& r = kKnownResolutions[i];
+        const std::wstring label = std::to_wstring(r.width) + L" x " + std::to_wstring(r.height);
+        SendMessageW(g_resolutionCombo, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(label.c_str()));
+        if (r.width == s.width && r.height == s.height)
+            selected = static_cast<int>(i);
+    }
+    if (selected >= 0)
+        SendMessageW(g_resolutionCombo, CB_SETCURSEL, selected, 0);
+    SendMessageW(g_windowedCheck, BM_SETCHECK, s.windowed ? BST_CHECKED : BST_UNCHECKED, 0);
+    SendMessageW(g_highQualityCheck, BM_SETCHECK, s.highQuality ? BST_CHECKED : BST_UNCHECKED, 0);
+    SendMessageW(g_hdModelsCheck, BM_SETCHECK, s.hdModels ? BST_CHECKED : BST_UNCHECKED, 0);
+}
+
+void PopulateMouseControls(const SystemMouseSettings& s)
+{
+    if (g_sensSlider)
+        SendMessageW(g_sensSlider, TBM_SETPOS, TRUE, std::clamp(s.speed, 1, 20));
+    if (g_enhancePointerCheck)
+        SendMessageW(g_enhancePointerCheck, BM_SETCHECK, s.acceleration ? BST_CHECKED : BST_UNCHECKED, 0);
+    UpdateSensDisplay();
+}
+
+void CreateControls(HWND window, int dpi)
+{
+    const auto addCtrl = [&](const wchar_t* cls, const wchar_t* text, DWORD style,
+                             int x, int y, int w, int h, WORD id, DWORD exStyle = 0) {
+        return CreateWindowExW(exStyle, cls, text, WS_CHILD | WS_VISIBLE | style,
+                               ScaleDpi(x, dpi), ScaleDpi(y, dpi), ScaleDpi(w, dpi), ScaleDpi(h, dpi),
+                               window, reinterpret_cast<HMENU>(static_cast<INT_PTR>(id)), g_instance, nullptr);
+    };
+
+    g_demoManagerBtn = addCtrl(L"BUTTON", L"Demo Manager", BS_OWNERDRAW | WS_TABSTOP, 24, 20, 110, 36, IdDemoManager);
+
+    // Section 1: Video
+    addCtrl(L"STATIC", L"تصویر", SS_RIGHT, 450, 80, 150, 20, 0);
+    addCtrl(L"STATIC", L":وضوح تصویر", SS_RIGHT, 480, 106, 120, 20, 0);
+    g_resolutionCombo = addCtrl(L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, 310, 102, 160, 200, IdResolutionCombo);
+    g_windowedCheck = addCtrl(L"BUTTON", L"اجرا در پنجره", BS_AUTOCHECKBOX | BS_RIGHTBUTTON | WS_TABSTOP, 170, 104, 120, 24, IdWindowedCheck);
+
+    g_highQualityCheck = addCtrl(L"BUTTON", L"کیفیت بالای تصویر", BS_AUTOCHECKBOX | BS_RIGHTBUTTON | WS_TABSTOP, 420, 140, 180, 24, IdHighQualityCheck);
+    g_hdModelsCheck = addCtrl(L"BUTTON", L"مدل‌های باکیفیت (HD)", BS_AUTOCHECKBOX | BS_RIGHTBUTTON | WS_TABSTOP, 170, 140, 180, 24, IdHdModelsCheck);
+
+    // Section 2: Mouse
+    addCtrl(L"STATIC", L"ماوس و نشانه", SS_RIGHT, 450, 185, 150, 20, 0);
+    addCtrl(L"STATIC", L":سرعت نشانگر ویندوز", SS_RIGHT, 460, 212, 140, 20, 0);
+    g_sensSlider = addCtrl(TRACKBAR_CLASSW, L"", TBS_HORZ | TBS_AUTOTICKS | WS_TABSTOP, 200, 210, 250, 28, IdSensSlider);
+    SendMessageW(g_sensSlider, TBM_SETRANGE, TRUE, MAKELPARAM(1, 20));
+    g_sensValueText = addCtrl(L"STATIC", L"10 / 20", SS_CENTER, 140, 214, 55, 20, IdSensValueText);
+
+    g_enhancePointerCheck = addCtrl(L"BUTTON", L"افزایش دقت نشانگر (شتاب ویندوز)", BS_AUTOCHECKBOX | BS_RIGHTBUTTON | WS_TABSTOP, 350, 248, 250, 24, IdEnhancePointerCheck);
+
+    // Section 3: User Account & Cloud Sync
+    addCtrl(L"STATIC", L"حساب کاربری و سابسکریپشن", SS_RIGHT, 420, 290, 180, 20, 0);
+
+    addCtrl(L"STATIC", L":شماره موبایل", SS_RIGHT, 500, 318, 100, 20, 0);
+    g_userPhone = addCtrl(L"EDIT", L"", ES_AUTOHSCROLL | WS_BORDER | WS_TABSTOP, 320, 315, 175, 26, IdUserPhone, WS_EX_CLIENTEDGE);
+
+    addCtrl(L"STATIC", L":رمز عبور", SS_RIGHT, 240, 318, 70, 20, 0);
+    g_userPassword = addCtrl(L"EDIT", L"", ES_PASSWORD | ES_AUTOHSCROLL | WS_BORDER | WS_TABSTOP, 120, 315, 115, 26, IdUserPassword, WS_EX_CLIENTEDGE);
+
+    g_userLoginBtn = addCtrl(L"BUTTON", L"ورود", BS_OWNERDRAW | WS_TABSTOP, 24, 314, 85, 28, IdUserLogin);
+    g_userRegisterBtn = addCtrl(L"BUTTON", L"ثبت‌نام", BS_OWNERDRAW | WS_TABSTOP, 510, 350, 90, 26, IdUserRegister);
+
+    g_userStatusLabel = addCtrl(L"STATIC", L"وارد نشده‌اید (مهمان: کانفیگ پیش‌فرض بازی لود می‌شود)", SS_RIGHT, 120, 354, 380, 20, IdUserStatus);
+
+    // Section 4: Footer
+    g_statusLabel = addCtrl(L"STATIC", L"آماده بازی • کلاینت نسخه 0.0.1", SS_RIGHT, 24, 400, 576, 20, 0);
+    g_cancelButton = addCtrl(L"BUTTON", L"انصراف", BS_OWNERDRAW | WS_TABSTOP, 24, 435, 100, 42, IdCancel);
+    g_resetButton = addCtrl(L"BUTTON", L"بازنشانی", BS_OWNERDRAW | WS_TABSTOP, 135, 435, 110, 42, IdReset);
+    g_okButton = addCtrl(L"BUTTON", L"اجرای بازی", BS_OWNERDRAW | WS_TABSTOP, 390, 435, 210, 42, IdOk);
+
+    for (HWND h : {g_resolutionCombo, g_windowedCheck, g_highQualityCheck, g_hdModelsCheck,
+                   g_sensValueText, g_enhancePointerCheck, g_statusLabel,
+                   g_userPhone, g_userPassword, g_userStatusLabel})
+    {
+        if (h)
+            SendMessageW(h, WM_SETFONT, reinterpret_cast<WPARAM>(g_dialogFont), TRUE);
+    }
 }
 
 LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam)
@@ -1409,240 +975,200 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
     switch (message)
     {
     case WM_CREATE:
-        CreateControls(window);
-        PostMessageW(window, WM_APP + 101, 0, 0);
+    {
+        g_dialogWindow = window;
+        const int dpi = GetWindowDpi(window);
+        CreateFonts(dpi);
+        CreateControls(window, dpi);
+        const VideoSettings s = ReadSettings();
+        PopulateControls(s);
+        g_initialMouse = ReadSystemMouseSettings();
+        g_mouseAtLastApply = g_initialMouse;
+        PopulateMouseControls(g_initialMouse);
         return 0;
-
-    case WM_APP + 101:
-        CheckLauncherUpdates(window);
-        return 0;
-
-    case WM_COMMAND:
-        switch (LOWORD(wParam))
-        {
-        case IDOK:
-        case IdLaunch:
-            if (ApplySettings())
-            {
-                g_launchRequested = true;
-                DestroyWindow(window);
-            }
-            return 0;
-        case IDCANCEL:
-        case IdCancel:
-            RevertMousePreview();
-            DestroyWindow(window);
-            return 0;
-        case IdEnhancePointer:
-            if (HIWORD(wParam) == BN_CLICKED)
-                ApplyMousePreview();
-            return 0;
-        case IdDemoManager:
-            ShowDemoManager(window);
-            return 0;
-        case IdRestore:
-        {
-            // Resolution is intentionally not touched. Restore only resets the
-            // non-resolution defaults and preserves the user's current choice.
-            Button_SetCheck(g_hdModels, BST_UNCHECKED);
-            Button_SetCheck(g_highQuality, BST_CHECKED);
-
-            SystemMouseSettings mouseDefaults = g_mouseAtLastApply;
-            mouseDefaults.speed = SliderPositionToPointerSpeed(4);
-            mouseDefaults.acceleration[0] = 6;
-            mouseDefaults.acceleration[1] = 10;
-            mouseDefaults.acceleration[2] = 1;
-            SetMouseControls(mouseDefaults);
-            ApplyMousePreview();
-            SetStatus(L"\u067e\u06cc\u0634\u200c\u0641\u0631\u0636\u200c\u0647\u0627 \u0627\u0646\u062a\u062e\u0627\u0628 \u0634\u062f\u0646\u062f\u061b \u0648\u0636\u0648\u062d \u062a\u0635\u0648\u06cc\u0631 \u062d\u0641\u0638 \u0634\u062f. \u0645\u062f\u0644 HD \u062e\u0627\u0645\u0648\u0634 \u0648 \u0633\u0631\u0639\u062a \u0645\u0627\u0648\u0633 \u06f4 \u0627\u0632 \u06f1\u06f1 \u0627\u0633\u062a.");
-            return 0;
-        }
-        default:
-            break;
-        }
-        break;
-
-    case WM_HSCROLL:
-        if (reinterpret_cast<HWND>(lParam) == g_pointerSpeed)
-        {
-            const int speed = static_cast<int>(SendMessageW(g_pointerSpeed, TBM_GETPOS, 0, 0));
-            const std::wstring speedText = PointerPositionText(speed);
-            SetWindowTextW(g_pointerSpeedValue, speedText.c_str());
-            ApplyMousePreview();
-            return 0;
-        }
-        break;
-
+    }
     case WM_DRAWITEM:
-        if (IsActionButtonId(static_cast<UINT>(wParam)))
+    {
+        auto item = reinterpret_cast<LPDRAWITEMSTRUCT>(lParam);
+        if (item && IsActionButtonId(static_cast<WORD>(item->CtlID)))
         {
-            DrawActionButton(*reinterpret_cast<DRAWITEMSTRUCT*>(lParam));
+            DrawActionButton(item);
             return TRUE;
         }
         break;
-
+    }
     case WM_CTLCOLORSTATIC:
-        SetBkMode(reinterpret_cast<HDC>(wParam), TRANSPARENT);
-        if (reinterpret_cast<HWND>(lParam) == g_subscriptionState)
+    {
+        HDC hdc = reinterpret_cast<HDC>(wParam);
+        HWND hwndCtl = reinterpret_cast<HWND>(lParam);
+        SetBkMode(hdc, TRANSPARENT);
+        if (hwndCtl == g_statusLabel)
         {
-            const bool active = g_accessStatus.state == GameNetAccessState::Active;
-            SetTextColor(reinterpret_cast<HDC>(wParam), active ? kColorAccent : kColorDanger);
+            SetTextColor(hdc, RGB(0, 210, 160));
         }
-        else if (reinterpret_cast<HWND>(lParam) == g_subscriptionTag)
-            SetTextColor(reinterpret_cast<HDC>(wParam), RGB(128, 176, 255));
-        else if (reinterpret_cast<HWND>(lParam) == g_subscriptionDetails)
-            SetTextColor(reinterpret_cast<HDC>(wParam), kColorMuted);
-        else if (reinterpret_cast<HWND>(lParam) == g_subscriptionRemaining)
+        else if (hwndCtl == g_userStatusLabel)
         {
-            const bool active = g_accessStatus.state == GameNetAccessState::Active;
-            SetTextColor(reinterpret_cast<HDC>(wParam), active ? kColorAccent : kColorDanger);
-        }
-        else if (reinterpret_cast<HWND>(lParam) == g_versionLabel || reinterpret_cast<HWND>(lParam) == g_status)
-        {
-            SetTextColor(reinterpret_cast<HDC>(wParam), RGB(0, 210, 160));
+            SetTextColor(hdc, RGB(0, 190, 240));
         }
         else
-            SetTextColor(reinterpret_cast<HDC>(wParam), kColorText);
-        return reinterpret_cast<LRESULT>(g_backgroundBrush);
-
-    case WM_CTLCOLORBTN:
-        SetBkMode(reinterpret_cast<HDC>(wParam), TRANSPARENT);
-        SetTextColor(reinterpret_cast<HDC>(wParam), kColorText);
-        return reinterpret_cast<LRESULT>(g_backgroundBrush);
-
-    case WM_CTLCOLORDLG:
-        return reinterpret_cast<LRESULT>(g_backgroundBrush);
-
-    case WM_ERASEBKGND:
-    {
-        HDC dc = reinterpret_cast<HDC>(wParam);
-        RECT rect{};
-        GetClientRect(window, &rect);
-        FillRect(dc, &rect, g_backgroundBrush);
-
-        HPEN accentPen = CreatePen(PS_SOLID, 1, RGB(58, 62, 64));
-        HGDIOBJ oldPen = SelectObject(dc, accentPen);
-        for (int y : {88, 210, 336, 464})
         {
-            MoveToEx(dc, 28, y, nullptr);
-            LineTo(dc, rect.right - 28, y);
+            SetTextColor(hdc, RGB(220, 225, 230));
         }
-        SelectObject(dc, oldPen);
-        DeleteObject(accentPen);
-
-        // Version badge container pill
-        RECT badgeRect{194, 30, 328, 60};
-        HBRUSH badgeBrush = CreateSolidBrush(RGB(32, 44, 42));
-        HPEN badgePen = CreatePen(PS_SOLID, 1, RGB(0, 160, 120));
-        HGDIOBJ prevBrush = SelectObject(dc, badgeBrush);
-        HGDIOBJ prevPen = SelectObject(dc, badgePen);
-        RoundRect(dc, badgeRect.left, badgeRect.top, badgeRect.right, badgeRect.bottom, 8, 8);
-        SelectObject(dc, prevBrush);
-        SelectObject(dc, prevPen);
-        DeleteObject(badgeBrush);
-        DeleteObject(badgePen);
-
-        HBRUSH accentBrush = CreateSolidBrush(kColorAccent);
-        RECT accent{rect.right - 8, 24, rect.right - 4, 72};
-        FillRect(dc, &accent, accentBrush);
-        DeleteObject(accentBrush);
-        return TRUE;
+        static HBRUSH bgBrush = CreateSolidBrush(RGB(18, 22, 25));
+        return reinterpret_cast<LRESULT>(bgBrush);
     }
+    case WM_PAINT:
+    {
+        PAINTSTRUCT ps{};
+        HDC hdc = BeginPaint(window, &ps);
+        RECT rc{};
+        GetClientRect(window, &rc);
+        HBRUSH bg = CreateSolidBrush(RGB(18, 22, 25));
+        FillRect(hdc, &rc, bg);
+        DeleteObject(bg);
 
+        SetBkMode(hdc, TRANSPARENT);
+        HGDIOBJ oldFont = SelectObject(hdc, g_titleFont);
+        SetTextColor(hdc, RGB(245, 247, 250));
+        RECT titleRc{rc.right - 260, 16, rc.right - 24, 48};
+        DrawTextW(hdc, L"ALLCLIENT", -1, &titleRc, DT_RIGHT | DT_SINGLELINE);
+
+        SelectObject(hdc, g_titleFontSub);
+        SetTextColor(hdc, RGB(180, 190, 200));
+        RECT subRc{rc.right - 260, 48, rc.right - 24, 70};
+        DrawTextW(hdc, L"COUNTER-STRIKE / 1.6", -1, &subRc, DT_RIGHT | DT_SINGLELINE);
+
+        SelectObject(hdc, oldFont);
+        EndPaint(window, &ps);
+        return 0;
+    }
+    case WM_HSCROLL:
+    {
+        if (reinterpret_cast<HWND>(lParam) == g_sensSlider)
+        {
+            UpdateSensDisplay();
+            g_mousePreviewChanged = true;
+        }
+        return 0;
+    }
+    case WM_COMMAND:
+    {
+        const WORD id = LOWORD(wParam);
+        if (id == IdUserLogin)
+        {
+            PerformUserLogin(window);
+            return 0;
+        }
+        if (id == IdUserRegister)
+        {
+            ShowOtpRegisterDialog(window);
+            return 0;
+        }
+        if (id == IdDemoManager)
+        {
+            const auto exeDir = ExecutableRoot();
+            const auto demoExe = exeDir / L"demomanager.exe";
+            ShellExecuteW(window, L"open", demoExe.c_str(), nullptr, exeDir.c_str(), SW_SHOW);
+            return 0;
+        }
+        if (id == IdReset)
+        {
+            VideoSettings def;
+            def.width = 800;
+            def.height = 600;
+            def.windowed = false;
+            def.highQuality = true;
+            def.hdModels = false;
+            PopulateControls(def);
+            SystemMouseSettings defMouse;
+            defMouse.speed = 10;
+            defMouse.threshold1 = 6;
+            defMouse.threshold2 = 10;
+            defMouse.acceleration = 1;
+            PopulateMouseControls(defMouse);
+            SetStatus(L"تنظیمات به حالت پیش‌فرض بازگشتند.");
+            return 0;
+        }
+        if (id == IdCancel)
+        {
+            if (g_mousePreviewChanged)
+                WriteSystemMouseSettings(g_initialMouse);
+            DestroyWindow(window);
+            return 0;
+        }
+        if (id == IdOk)
+        {
+            if (ApplySettings())
+            {
+                g_launchRequested = true;
+                ShowWindow(window, SW_HIDE);
+                PostQuitMessage(0);
+            }
+            return 0;
+        }
+        break;
+    }
     case WM_DESTROY:
-        if (!g_launchRequested)
-            RevertMousePreview();
+        DestroyFonts();
         PostQuitMessage(0);
         return 0;
-    default:
-        break;
     }
     return DefWindowProcW(window, message, wParam, lParam);
 }
 } // namespace
+
+void SyncPlayerConfig()
+{
+    if (!g_activeUserToken.empty())
+    {
+        // Only authenticated users sync back to host
+        PushUserConfigToCloud(g_activeUserToken);
+    }
+    // Guest users will never upload anything
+}
 
 bool ShowVideoSettingsDialog(HINSTANCE instance, const GameNetAccessStatus& access_status)
 {
     g_instance = instance;
     g_launchRequested = false;
     g_accessStatus = access_status;
+    g_activeUserPhone.clear();
+    g_activeUserToken.clear();
+
     INITCOMMONCONTROLSEX controls{sizeof(controls), ICC_STANDARD_CLASSES | ICC_BAR_CLASSES};
     InitCommonControlsEx(&controls);
 
-    NONCLIENTMETRICSW metrics{sizeof(metrics)};
-    SystemParametersInfoW(SPI_GETNONCLIENTMETRICS, sizeof(metrics), &metrics, 0);
-    wcscpy_s(metrics.lfMessageFont.lfFaceName, L"Segoe UI");
-    metrics.lfMessageFont.lfHeight = -15;
-    g_font = CreateFontIndirectW(&metrics.lfMessageFont);
-    LOGFONTW emphasisFont = metrics.lfMessageFont;
-    emphasisFont.lfWeight = FW_BOLD;
-    g_emphasisFont = CreateFontIndirectW(&emphasisFont);
-    emphasisFont.lfHeight = -30;
-    g_brandFont = CreateFontIndirectW(&emphasisFont);
-    LOGFONTW badgeFont = metrics.lfMessageFont;
-    badgeFont.lfWeight = FW_SEMIBOLD;
-    badgeFont.lfHeight = -13;
-    g_badgeFont = CreateFontIndirectW(&badgeFont);
-    g_backgroundBrush = CreateSolidBrush(kColorBackground);
-    g_panelBrush = CreateSolidBrush(kColorPanel);
+    WNDCLASSEXW wc{sizeof(wc)};
+    wc.lpfnWndProc = WindowProc;
+    wc.hInstance = instance;
+    wc.lpszClassName = kWindowClassName;
+    wc.hbrBackground = nullptr;
+    wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
+    RegisterClassExW(&wc);
 
-    WNDCLASSEXW windowClass{sizeof(windowClass)};
-    windowClass.style = CS_HREDRAW | CS_VREDRAW;
-    windowClass.lpfnWndProc = WindowProc;
-    windowClass.hInstance = instance;
-    windowClass.hIcon = LoadIconW(nullptr, IDI_APPLICATION);
-    windowClass.hCursor = LoadCursorW(nullptr, IDC_ARROW);
-    windowClass.hbrBackground = g_backgroundBrush;
-    windowClass.lpszClassName = kWindowClass;
-    windowClass.hIconSm = windowClass.hIcon;
-    if (!RegisterClassExW(&windowClass))
-    {
-        if (GetLastError() != ERROR_CLASS_ALREADY_EXISTS)
-            return false;
-    }
+    const int dpi = GetWindowDpi(nullptr);
+    const int width = ScaleDpi(640, dpi);
+    const int height = ScaleDpi(530, dpi);
 
-    RECT rect{0, 0, 616, 590};
-    AdjustWindowRectEx(&rect, WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX, FALSE, 0);
-    const int width = rect.right - rect.left;
-    const int height = rect.bottom - rect.top;
-    const int x = (GetSystemMetrics(SM_CXSCREEN) - width) / 2;
-    const int y = (GetSystemMetrics(SM_CYSCREEN) - height) / 2;
+    const int screenW = GetSystemMetrics(SM_CXSCREEN);
+    const int screenH = GetSystemMetrics(SM_CYSCREEN);
+    const int x = std::max(0, (screenW - width) / 2);
+    const int y = std::max(0, (screenH - height) / 2);
 
-    HWND window = CreateWindowExW(WS_EX_RTLREADING, kWindowClass, kTitle,
-                                  WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
+    HWND window = CreateWindowExW(WS_EX_APPWINDOW, kWindowClassName, L"راه‌انداز Allclient",
+                                  WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | WS_VISIBLE,
                                   x, y, width, height, nullptr, nullptr, instance, nullptr);
     if (!window)
         return false;
 
-    ShowWindow(window, SW_SHOWNORMAL);
+    ShowWindow(window, SW_SHOW);
     UpdateWindow(window);
 
-    MSG message{};
-    while (GetMessageW(&message, nullptr, 0, 0) > 0)
+    MSG msg{};
+    while (GetMessageW(&msg, nullptr, 0, 0))
     {
-        if (IsDialogMessageW(window, &message))
-            continue;
-        TranslateMessage(&message);
-        DispatchMessageW(&message);
+        TranslateMessage(&msg);
+        DispatchMessageW(&msg);
     }
-
-    if (g_font)
-        DeleteObject(g_font);
-    if (g_emphasisFont)
-        DeleteObject(g_emphasisFont);
-    if (g_brandFont)
-        DeleteObject(g_brandFont);
-    if (g_badgeFont)
-        DeleteObject(g_badgeFont);
-    if (g_backgroundBrush)
-        DeleteObject(g_backgroundBrush);
-    if (g_panelBrush)
-        DeleteObject(g_panelBrush);
-    g_font = nullptr;
-    g_emphasisFont = nullptr;
-    g_brandFont = nullptr;
-    g_badgeFont = nullptr;
-    g_backgroundBrush = nullptr;
-    g_panelBrush = nullptr;
     return g_launchRequested;
 }

@@ -216,7 +216,6 @@ void ClientLauncher::Run()
         try
         {
             run_result = RunEngine();
-    SyncPlayerConfig();
         }
         catch (const std::exception& e)
         {
