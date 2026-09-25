@@ -1015,6 +1015,13 @@ static void OnGameInitialized()
 
     if (gEngfuncs.pfnGetCvarPointer("_snd_mixahead") != nullptr)
         gEngfuncs.Cvar_Set("_snd_mixahead", "0.1");
+
+    if (gEngfuncs.pfnGetCvarPointer("mp_timelimit") != nullptr)
+        gEngfuncs.Cvar_Set("mp_timelimit", "0");
+    if (gEngfuncs.pfnGetCvarPointer("mp_maxrounds") != nullptr)
+        gEngfuncs.Cvar_Set("mp_maxrounds", "0");
+    if (gEngfuncs.pfnGetCvarPointer("mp_winlimit") != nullptr)
+        gEngfuncs.Cvar_Set("mp_winlimit", "0");
 }
 
 class EngineMini : public EngineMiniInterface
