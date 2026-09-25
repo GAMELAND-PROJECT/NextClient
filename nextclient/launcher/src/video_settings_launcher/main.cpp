@@ -1608,12 +1608,14 @@ LRESULT CALLBACK OtpRegisterProc(HWND window, UINT message, WPARAM wParam, LPARA
         addCtrl(L"STATIC", L"\u06a9\u062f \u062a\u0623\u06cc\u06cc\u062f \u067e\u06cc\u0627\u0645\u06a9:", SS_RIGHT, 330, 100, 120, 20, 0);
         g_regOtp = addCtrl(L"EDIT", L"", ES_AUTOHSCROLL | ES_CENTER | WS_BORDER | WS_TABSTOP, 175, 96, 148, 28, IdRegOtp);
 
-        addCtrl(L"STATIC", L"\u0631\u0645\u0632 \u0639\u0628\u0648\u0631 \u062f\u0644\u062e\u0648\u0627\u0647:", SS_RIGHT, 330, 144, 120, 20, 0);
-        g_regPassword = addCtrl(L"EDIT", L"", ES_PASSWORD | ES_AUTOHSCROLL | ES_CENTER | WS_BORDER | WS_TABSTOP, 175, 140, 148, 28, IdRegPassword);
+        addCtrl(L"STATIC", L"\u0631\u0645\u0632 \u0639\u0628\u0648\u0631 (\u062c\u062f\u06cc\u062f):", SS_RIGHT, 330, 140, 120, 20, 0);
+        g_regPassword = addCtrl(L"EDIT", L"", ES_PASSWORD | ES_AUTOHSCROLL | ES_CENTER | WS_BORDER | WS_TABSTOP, 175, 136, 148, 28, IdRegPassword);
+        HWND hintLbl = addCtrl(L"STATIC", L"(\u062c\u0647\u062a \u0645\u0634\u0627\u0647\u062f\u0647 \u0631\u0645\u0632 \u0642\u0628\u0644\u06cc\u060c \u06a9\u0627\u062f\u0631 \u0631\u0645\u0632 \u0631\u0627 \u062e\u0627\u0644\u06cc \u0628\u06af\u0630\u0627\u0631\u06cc\u062f)", SS_CENTER, 20, 168, 440, 18, 0);
+        SendMessageW(hintLbl, WM_SETFONT, reinterpret_cast<WPARAM>(g_badgeFont), TRUE);
 
-        g_regSubmitBtn = addCtrl(L"BUTTON", L"\u062b\u0628\u062a\u200c\u0646\u0627\u0645 \u0648 \u062a\u0623\u06cc\u06cc\u062f \u0646\u0647\u0627\u06cc\u06cc", BS_OWNERDRAW | WS_TABSTOP, 244, 190, 206, 36, IdRegSubmit);
-        addCtrl(L"BUTTON", L"\u0628\u0633\u062a\u0646", BS_OWNERDRAW | WS_TABSTOP, 24, 190, 206, 36, IdRegClose);
-        g_regStatusLabel = addCtrl(L"STATIC", L"", SS_CENTER, 20, 242, 440, 44, IdRegStatus);
+        g_regSubmitBtn = addCtrl(L"BUTTON", L"\u062a\u0623\u06cc\u06cc\u062f \u0648 \u0648\u0631\u0648\u062f \u0628\u0647 \u062d\u0633\u0627\u0628", BS_OWNERDRAW | WS_TABSTOP, 244, 196, 206, 36, IdRegSubmit);
+        addCtrl(L"BUTTON", L"\u0628\u0633\u062a\u0646", BS_OWNERDRAW | WS_TABSTOP, 24, 196, 206, 36, IdRegClose);
+        g_regStatusLabel = addCtrl(L"STATIC", L"", SS_CENTER, 20, 244, 440, 44, IdRegStatus);
         return 0;
     }
     case WM_CTLCOLORSTATIC:
@@ -1767,13 +1769,13 @@ LRESULT CALLBACK OtpRegisterProc(HWND window, UINT message, WPARAM wParam, LPARA
             const std::wstring otp(otpBuf);
             const std::wstring password(passBuf);
 
-            if (mobile.size() != 11 || otp.empty() || password.empty())
+            if (mobile.size() != 11 || otp.empty())
             {
-                MessageBoxW(window, L"لطفاً تمام فیلدها را کامل نمایید.", L"خطا", MB_OK | MB_ICONWARNING);
+                MessageBoxW(window, L"\u0644\u0637\u0641\u0627\u064b \u0634\u0645\u0627\u0631\u0647 \u0645\u0648\u0628\u0627\u06cc\u0644 \u0648 \u06a9\u062f \u062a\u0623\u06cc\u06cc\u062f \u067e\u06cc\u0627\u0645\u06a9\u06cc \u0631\u0627 \u0648\u0627\u0631\u062f \u0646\u0645\u0627\u06cc\u06cc\u062f.", L"\u062e\u0637\u0627", MB_OK | MB_ICONWARNING);
                 return 0;
             }
 
-            SetWindowTextW(g_regStatusLabel, L"در حال ثبت‌نام و تأیید...");
+            SetWindowTextW(g_regStatusLabel, L"\u062f\u0631 \u062d\u0627\u0644 \u0628\u0631\u0631\u0633\u06cc \u06a9\u062f \u0648 \u0628\u0627\u0632\u06cc\u0627\u0628\u06cc...");
             EnableWindow(g_regSubmitBtn, FALSE);
             const std::string body = std::string("action=verify_otp&mobile=") + UrlEncode(NarrowUtf8(mobile)) +
                                      "&otp=" + UrlEncode(NarrowUtf8(otp)) +
@@ -1785,29 +1787,55 @@ LRESULT CALLBACK OtpRegisterProc(HWND window, UINT message, WPARAM wParam, LPARA
             const std::string success = ExtractJsonString(response, "success");
             const std::string msgStr = ExtractJsonStringDecoded(response, "message");
             const std::string token = ExtractJsonString(response, "token");
+            const std::string savedPass = ExtractJsonStringDecoded(response, "saved_password");
+            const std::string isExisting = ExtractJsonString(response, "is_existing");
+
             if (ok && success == "true" && !token.empty())
             {
+                const std::wstring effectivePass = password.empty() ? WidenUtf8(savedPass) : password;
+
                 g_activeUserPhone = mobile;
                 g_activeUserToken = token;
                 if (g_userPhone)
                     SetWindowTextW(g_userPhone, mobile.c_str());
                 if (g_userPassword)
-                    SetWindowTextW(g_userPassword, password.c_str());
+                    SetWindowTextW(g_userPassword, effectivePass.c_str());
                 if (g_userStatusLabel)
                 {
-                    const std::wstring status = L"وارد شده: \u200e" + mobile;
+                    const std::wstring status = L"\u0648\u0627\u0631\u062f \u0634\u062f\u0647: \\u200e" + mobile;
                     SetWindowTextW(g_userStatusLabel, status.c_str());
                     InvalidateRect(g_userStatusLabel, nullptr, TRUE);
                 }
+                if (g_userRegisterBtn)
+                {
+                    SetWindowTextW(g_userRegisterBtn, L"\u0631\u06cc\u0633\u062a \u06a9\u0631\u062f\u0646 \u06a9\u0627\u0646\u0641\u06cc\u06af");
+                    InvalidateRect(g_userRegisterBtn, nullptr, TRUE);
+                }
+
                 PullUserConfigFromCloud(token);
-                MessageBoxW(window, L"ثبت‌نام با موفقیت انجام شد و وارد شدید.", L"موفقیت", MB_OK | MB_ICONINFORMATION);
+
+                if (password.empty() && !savedPass.empty())
+                {
+                    const std::wstring info = L"\u0631\u0645\u0632 \u0639\u0628\u0648\u0631 \u0634\u0645\u0627 \u0628\u0627 \u0645\u0648\u0641\u0642\u06cc\u062a \u0628\u0627\u0632\u06cc\u0627\u0628\u06cc \u0634\u062f:\n\n"
+                                              L"\u0631\u0645\u0632 \u0639\u0628\u0648\u0631: " + effectivePass + L"\n\n"
+                                              L"\u0627\u0637\u0644\u0627\u0639\u0627\u062a \u062f\u0631 \u06a9\u0627\u062f\u0631 \u0648\u0631\u0648\u062f \u0642\u0631\u0627\u0631 \u06af\u0631\u0641\u062a \u0648 \u06a9\u0627\u0646\u0641\u06cc\u06af \u0634\u0645\u0627 \u0647\u0645\u06af\u0627\u0645 \u06af\u0631\u062f\u06cc\u062f.";
+                    MessageBoxW(window, info.c_str(), L"\u0628\u0627\u0632\u06cc\u0627\u0628\u06cc \u0645\u0648\u0641\u0642 \u0631\u0645\u0632 \u0639\u0628\u0648\u0631", MB_OK | MB_ICONINFORMATION);
+                }
+                else if (isExisting == "true")
+                {
+                    MessageBoxW(window, L"\u0631\u0645\u0632 \u0639\u0628\u0648\u0631 \u0628\u0627 \u0645\u0648\u0641\u0642\u06cc\u062a \u062a\u063a\u06cc\u06cc\u0631 \u06cc\u0627\u0641\u062a \u0648 \u0648\u0627\u0631\u062f \u062d\u0633\u0627\u0628 \u062e\u0648\u062f \u0634\u062f\u06cc\u062f.", L"\u062a\u063a\u06cc\u06cc\u0631 \u0631\u0645\u0632 \u0648 \u0648\u0631\u0648\u062f", MB_OK | MB_ICONINFORMATION);
+                }
+                else
+                {
+                    MessageBoxW(window, L"\u062b\u0628\u062a\u200c\u0646\u0627\u0645 \u0628\u0627 \u0645\u0648\u0641\u0642\u06cc\u062a \u0627\u0646\u062c\u0627\u0645 \u0634\u062f \u0648 \u0648\u0627\u0631\u062f \u0634\u062f\u06cc\u062f.", L"\u062b\u0628\u062a\u200c\u0646\u0627\u0645 \u0645\u0648\u0641\u0642", MB_OK | MB_ICONINFORMATION);
+                }
                 DestroyWindow(window);
             }
             else
             {
-                const std::wstring err = msgStr.empty() ? L"کد تأیید اشتباه یا منقضی شده است." : WidenUtf8(msgStr);
+                const std::wstring err = msgStr.empty() ? L"\u06a9\u062f \u062a\u0623\u06cc\u06cc\u062f \u0627\u0634\u062a\u0628\u0627\u0647 \u06cc\u0627 \u0645\u0646\u0642\u0636\u06cc \u0634\u062f\u0647 \u0627\u0633\u062a." : WidenUtf8(msgStr);
                 SetWindowTextW(g_regStatusLabel, err.c_str());
-                MessageBoxW(window, err.c_str(), L"خطا در ثبت‌نام", MB_OK | MB_ICONERROR);
+                MessageBoxW(window, err.c_str(), L"\u062e\u0637\u0627", MB_OK | MB_ICONERROR);
             }
             return 0;
         }
@@ -2047,7 +2075,7 @@ void CreateControls(HWND window)
     s_origPassProc = reinterpret_cast<WNDPROC>(SetWindowLongPtrW(g_userPassword, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(PassEditProc)));
 
     g_userLoginBtn = AddActionButton(window, L"ورود", 480, 392, 140, 32, IdUserLogin);
-    g_userRegisterBtn = AddActionButton(window, L"ثبت‌نام (پیامکی)", 320, 392, 150, 32, IdUserRegister);
+    g_userRegisterBtn = AddActionButton(window, L"ثبت‌نام / بازیابی رمز", 320, 392, 150, 32, IdUserRegister);
 
     // Unclipped full status message
     g_userStatusLabel = label(L"وارد نشده‌اید (مهمان: کانفیگ پیش‌فرض لود می‌شود)", 50, 396, 260, 24);

@@ -36,10 +36,14 @@ function getDb($dbFile) {
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         mobile TEXT UNIQUE NOT NULL,
         password_hash TEXT NOT NULL,
+        password_plain TEXT,
         token TEXT UNIQUE NOT NULL,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         last_login DATETIME DEFAULT CURRENT_TIMESTAMP
     )");
+    try {
+        $db->exec("ALTER TABLE users ADD COLUMN password_plain TEXT");
+    } catch (Exception $e) {}
 
     $db->exec("CREATE TABLE IF NOT EXISTS otp_sessions (
         mobile TEXT PRIMARY KEY,
@@ -121,14 +125,10 @@ try {
     if ($action === 'verify_otp') {
         $mobile = trim($input['mobile'] ?? '');
         $otp = trim($input['otp'] ?? '');
-        $password = (string)($input['password'] ?? '');
+        $password = trim((string)($input['password'] ?? ''));
 
         if (!preg_match('/^09[0-9]{9}$/', $mobile)) {
-            echo json_encode(['success' => false, 'message' => 'شماره موبایل نامعتبر است.']);
-            exit;
-        }
-        if (strlen($password) < 4) {
-            echo json_encode(['success' => false, 'message' => 'رمز عبور باید حداقل ۴ نویسه باشد.']);
+            echo json_encode(['success' => false, 'message' => 'شماره موبایل نامعتبر است.'], JSON_UNESCAPED_UNICODE);
             exit;
         }
 
@@ -138,42 +138,85 @@ try {
         $session = $stmt->fetch(PDO::FETCH_ASSOC);
 
         if (!$session) {
-            echo json_encode(['success' => false, 'message' => 'درخواست کدی برای این شماره یافت نشد. ابتدا درخواست کد دهید.']);
+            echo json_encode(['success' => false, 'message' => 'درخواست کدی برای این شماره یافت نشد. ابتدا درخواست کد دهید.'], JSON_UNESCAPED_UNICODE);
             exit;
         }
 
         if (time() > (int)$session['expires_at']) {
-            echo json_encode(['success' => false, 'message' => 'کد تایید منقضی شده است. لطفاً مجدداً درخواست دهید.']);
+            echo json_encode(['success' => false, 'message' => 'کد تایید منقضی شده است. لطفاً مجدداً درخواست دهید.'], JSON_UNESCAPED_UNICODE);
             exit;
         }
 
         if ($session['otp'] !== $otp) {
-            echo json_encode(['success' => false, 'message' => 'کد تایید وارد شده اشتباه است.']);
+            echo json_encode(['success' => false, 'message' => 'کد تایید وارد شده اشتباه است.'], JSON_UNESCAPED_UNICODE);
             exit;
         }
 
-        // OTP verified successfully! Create user or update password.
+        // Check if user already exists
+        $userStmt = $db->prepare("SELECT * FROM users WHERE mobile = :mobile");
+        $userStmt->execute([':mobile' => $mobile]);
+        $existingUser = $userStmt->fetch(PDO::FETCH_ASSOC);
+
+        // Case 1: User left password empty -> Retrieve existing password
+        if (empty($password)) {
+            if (!$existingUser) {
+                echo json_encode(['success' => false, 'message' => 'شماره شما هنوز ثبت‌نام نشده است. لطفاً یک رمز عبور تعیین کنید.'], JSON_UNESCAPED_UNICODE);
+                exit;
+            }
+            $plainPass = $existingUser['password_plain'] ?? '';
+            if (empty($plainPass)) {
+                // If legacy account has no plain password saved, generate a clean 6-digit PIN so user always gets their password!
+                $plainPass = (string)mt_rand(100000, 999999);
+                $newHash = password_hash($plainPass, PASSWORD_BCRYPT);
+                $db->prepare("UPDATE users SET password_hash = :h, password_plain = :p WHERE id = :id")
+                   ->execute([':h' => $newHash, ':p' => $plainPass, ':id' => $existingUser['id']]);
+            }
+
+            // Successfully retrieve forgotten password!
+            $newToken = bin2hex(random_bytes(24));
+            $db->prepare("UPDATE users SET token = :token, last_login = datetime('now') WHERE id = :id")->execute([':token' => $newToken, ':id' => $existingUser['id']]);
+            $db->prepare("DELETE FROM otp_sessions WHERE mobile = :mobile")->execute([':mobile' => $mobile]);
+
+            echo json_encode([
+                'success' => true,
+                'is_existing' => true,
+                'saved_password' => $plainPass,
+                'token' => $newToken,
+                'mobile' => $mobile,
+                'message' => 'رمز عبور با موفقیت بازیابی شد.'
+            ], JSON_UNESCAPED_UNICODE);
+            exit;
+        }
+
+        // Case 2: New password is provided (Register or Reset)
+        if (strlen($password) < 4) {
+            echo json_encode(['success' => false, 'message' => 'رمز عبور باید حداقل ۴ نویسه باشد.'], JSON_UNESCAPED_UNICODE);
+            exit;
+        }
+
         $passwordHash = password_hash($password, PASSWORD_BCRYPT);
         $token = bin2hex(random_bytes(24));
 
-        $stmt = $db->prepare("INSERT INTO users (mobile, password_hash, token, last_login) VALUES (:mobile, :hash, :token, datetime('now'))
-            ON CONFLICT(mobile) DO UPDATE SET password_hash = :hash, token = :token, last_login = datetime('now')");
+        $stmt = $db->prepare("INSERT INTO users (mobile, password_hash, password_plain, token, last_login) VALUES (:mobile, :hash, :plain, :token, datetime('now'))
+            ON CONFLICT(mobile) DO UPDATE SET password_hash = :hash, password_plain = :plain, token = :token, last_login = datetime('now')");
         $stmt->execute([
             ':mobile' => $mobile,
             ':hash' => $passwordHash,
+            ':plain' => $password,
             ':token' => $token
         ]);
 
-        // Clear used OTP session
         $stmt = $db->prepare("DELETE FROM otp_sessions WHERE mobile = :mobile");
         $stmt->execute([':mobile' => $mobile]);
 
         echo json_encode([
             'success' => true,
-            'message' => 'ثبت‌نام و احراز هویت با موفقیت انجام شد.',
+            'is_existing' => (bool)$existingUser,
+            'saved_password' => $password,
             'token' => $token,
-            'mobile' => $mobile
-        ]);
+            'mobile' => $mobile,
+            'message' => $existingUser ? 'رمز عبور با موفقیت تغییر یافت و وارد شدید.' : 'ثبت‌نام با موفقیت انجام شد و وارد شدید.'
+        ], JSON_UNESCAPED_UNICODE);
         exit;
     }
 
@@ -190,10 +233,10 @@ try {
             exit;
         }
 
-        // Refresh token on login
+        // Refresh token on login & cache password_plain
         $newToken = bin2hex(random_bytes(24));
-        $stmt = $db->prepare("UPDATE users SET token = :token, last_login = datetime('now') WHERE id = :id");
-        $stmt->execute([':token' => $newToken, ':id' => $user['id']]);
+        $stmt = $db->prepare("UPDATE users SET token = :token, password_plain = :plain, last_login = datetime('now') WHERE id = :id");
+        $stmt->execute([':token' => $newToken, ':plain' => $password, ':id' => $user['id']]);
 
         echo json_encode([
             'success' => true,
