@@ -1427,7 +1427,7 @@ void PerformUserLogin(HWND window)
     EnableWindow(g_userLoginBtn, TRUE);
 
     const std::string success = ExtractJsonString(response, "success");
-    const std::string message = ExtractJsonString(response, "message");
+    const std::string message = ExtractJsonStringDecoded(response, "message");
     const std::string token = ExtractJsonString(response, "token");
     if (ok && success == "true" && !token.empty())
     {
@@ -1598,20 +1598,96 @@ LRESULT CALLBACK OtpRegisterProc(HWND window, UINT message, WPARAM wParam, LPARA
             return c;
         };
 
-        addCtrl(L"STATIC", L":شماره موبایل", SS_RIGHT, 220, 20, 190, 20, 0);
-        g_regMobile = addCtrl(L"EDIT", L"", ES_AUTOHSCROLL | WS_BORDER | WS_TABSTOP, 200, 44, 210, 28, IdRegMobile, WS_EX_CLIENTEDGE);
-        g_regRequestOtpBtn = addCtrl(L"BUTTON", L"دریافت کد پیامکی", BS_PUSHBUTTON | WS_TABSTOP, 40, 43, 150, 30, IdRegRequestOtp);
+        HWND titleLbl = addCtrl(L"STATIC", L"\u062b\u0628\u062a\u200c\u0646\u0627\u0645 \u0648 \u0641\u0639\u0627\u0644\u200c\u0633\u0627\u0632\u06cc \u062d\u0633\u0627\u0628 \u06a9\u0627\u0631\u0628\u0631\u06cc \u0627\u0628\u0631\u06cc", SS_CENTER, 20, 14, 440, 24, 0);
+        SendMessageW(titleLbl, WM_SETFONT, reinterpret_cast<WPARAM>(g_emphasisFont), TRUE);
 
-        addCtrl(L"STATIC", L":کد تأیید پیامک", SS_RIGHT, 260, 90, 150, 20, 0);
-        g_regOtp = addCtrl(L"EDIT", L"", ES_AUTOHSCROLL | WS_BORDER | WS_TABSTOP, 240, 114, 170, 28, IdRegOtp, WS_EX_CLIENTEDGE);
+        addCtrl(L"STATIC", L"\u0634\u0645\u0627\u0631\u0647 \u0645\u0648\u0628\u0627\u06cc\u0644:", SS_RIGHT, 330, 56, 120, 20, 0);
+        g_regMobile = addCtrl(L"EDIT", L"", ES_AUTOHSCROLL | ES_CENTER | WS_BORDER | WS_TABSTOP, 175, 52, 148, 28, IdRegMobile);
+        g_regRequestOtpBtn = addCtrl(L"BUTTON", L"\u062f\u0631\u06cc\u0627\u0641\u062a \u06a9\u062f \u067e\u06cc\u0627\u0645\u06a9\u06cc", BS_OWNERDRAW | WS_TABSTOP, 24, 51, 140, 30, IdRegRequestOtp);
 
-        addCtrl(L"STATIC", L":رمز عبور دلخواه", SS_RIGHT, 50, 90, 170, 20, 0);
-        g_regPassword = addCtrl(L"EDIT", L"", ES_PASSWORD | ES_AUTOHSCROLL | WS_BORDER | WS_TABSTOP, 40, 114, 180, 28, IdRegPassword, WS_EX_CLIENTEDGE);
+        addCtrl(L"STATIC", L"\u06a9\u062f \u062a\u0623\u06cc\u06cc\u062f \u067e\u06cc\u0627\u0645\u06a9:", SS_RIGHT, 330, 100, 120, 20, 0);
+        g_regOtp = addCtrl(L"EDIT", L"", ES_AUTOHSCROLL | ES_CENTER | WS_BORDER | WS_TABSTOP, 175, 96, 148, 28, IdRegOtp);
 
-        g_regSubmitBtn = addCtrl(L"BUTTON", L"ثبت‌نام و تأیید نهایی", BS_DEFPUSHBUTTON | WS_TABSTOP, 220, 165, 190, 34, IdRegSubmit);
-        addCtrl(L"BUTTON", L"بستن", BS_PUSHBUTTON | WS_TABSTOP, 40, 165, 160, 34, IdRegClose);
-        g_regStatusLabel = addCtrl(L"STATIC", L"", SS_RIGHT, 24, 210, 390, 40, IdRegStatus);
+        addCtrl(L"STATIC", L"\u0631\u0645\u0632 \u0639\u0628\u0648\u0631 \u062f\u0644\u062e\u0648\u0627\u0647:", SS_RIGHT, 330, 144, 120, 20, 0);
+        g_regPassword = addCtrl(L"EDIT", L"", ES_PASSWORD | ES_AUTOHSCROLL | ES_CENTER | WS_BORDER | WS_TABSTOP, 175, 140, 148, 28, IdRegPassword);
+
+        g_regSubmitBtn = addCtrl(L"BUTTON", L"\u062b\u0628\u062a\u200c\u0646\u0627\u0645 \u0648 \u062a\u0623\u06cc\u06cc\u062f \u0646\u0647\u0627\u06cc\u06cc", BS_OWNERDRAW | WS_TABSTOP, 244, 190, 206, 36, IdRegSubmit);
+        addCtrl(L"BUTTON", L"\u0628\u0633\u062a\u0646", BS_OWNERDRAW | WS_TABSTOP, 24, 190, 206, 36, IdRegClose);
+        g_regStatusLabel = addCtrl(L"STATIC", L"", SS_CENTER, 20, 242, 440, 44, IdRegStatus);
         return 0;
+    }
+    case WM_CTLCOLORSTATIC:
+    {
+        HDC hdc = reinterpret_cast<HDC>(wParam);
+        HWND hwndCtl = reinterpret_cast<HWND>(lParam);
+        SetBkMode(hdc, TRANSPARENT);
+        if (hwndCtl == g_regStatusLabel)
+            SetTextColor(hdc, RGB(0, 210, 160));
+        else
+            SetTextColor(hdc, RGB(220, 228, 240));
+        static HBRUSH s_otpBgBrush = CreateSolidBrush(RGB(26, 27, 30));
+        return reinterpret_cast<INT_PTR>(s_otpBgBrush);
+    }
+    case WM_CTLCOLOREDIT:
+    {
+        HDC hdc = reinterpret_cast<HDC>(wParam);
+        SetBkColor(hdc, RGB(18, 19, 21));
+        SetTextColor(hdc, RGB(245, 245, 245));
+        static HBRUSH s_otpEditBrush = CreateSolidBrush(RGB(18, 19, 21));
+        return reinterpret_cast<INT_PTR>(s_otpEditBrush);
+    }
+    case WM_DRAWITEM:
+    {
+        const auto& item = *reinterpret_cast<DRAWITEMSTRUCT*>(lParam);
+        const bool pressed = (item.itemState & ODS_SELECTED) != 0;
+        const bool focused = (item.itemState & ODS_FOCUS) != 0;
+
+        COLORREF fill = RGB(49, 51, 54);
+        COLORREF border = RGB(75, 78, 84);
+        COLORREF text = RGB(220, 226, 235);
+
+        if (item.CtlID == IdRegSubmit)
+        {
+            fill = pressed ? RGB(0, 146, 112) : RGB(0, 178, 136);
+            border = focused ? RGB(0, 240, 180) : RGB(0, 210, 160);
+            text = RGB(5, 15, 22);
+        }
+        else if (item.CtlID == IdRegRequestOtp)
+        {
+            fill = pressed ? RGB(28, 58, 90) : RGB(36, 76, 118);
+            border = focused ? RGB(80, 160, 240) : RGB(52, 108, 168);
+            text = RGB(230, 240, 255);
+        }
+        else if (item.CtlID == IdRegClose)
+        {
+            fill = pressed ? RGB(35, 37, 40) : RGB(45, 47, 50);
+            border = RGB(65, 68, 72);
+            text = RGB(200, 208, 220);
+        }
+
+        HBRUSH fillBrush = CreateSolidBrush(fill);
+        FillRect(item.hDC, &item.rcItem, fillBrush);
+        DeleteObject(fillBrush);
+
+        HPEN borderPen = CreatePen(PS_SOLID, focused ? 2 : 1, border);
+        HGDIOBJ oldPen = SelectObject(item.hDC, borderPen);
+        HGDIOBJ oldBrush = SelectObject(item.hDC, GetStockObject(NULL_BRUSH));
+        RoundRect(item.hDC, item.rcItem.left, item.rcItem.top, item.rcItem.right, item.rcItem.bottom, 6, 6);
+        SelectObject(item.hDC, oldBrush);
+        SelectObject(item.hDC, oldPen);
+        DeleteObject(borderPen);
+
+        wchar_t caption[128]{};
+        GetWindowTextW(item.hwndItem, caption, static_cast<int>(std::size(caption)));
+        SetBkMode(item.hDC, TRANSPARENT);
+        SetTextColor(item.hDC, text);
+        HGDIOBJ oldFont = SelectObject(item.hDC, g_font);
+        RECT textRect = item.rcItem;
+        if (pressed)
+            OffsetRect(&textRect, 1, 1);
+        DrawTextW(item.hDC, caption, -1, &textRect, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+        SelectObject(item.hDC, oldFont);
+        return TRUE;
     }
     case WM_TIMER:
     {
@@ -1657,7 +1733,7 @@ LRESULT CALLBACK OtpRegisterProc(HWND window, UINT message, WPARAM wParam, LPARA
             const bool ok = PostUrlEncoded(kAuthOtpPath, body, response);
 
             const std::string success = ExtractJsonString(response, "success");
-            const std::string msgStr = ExtractJsonString(response, "message");
+            const std::string msgStr = ExtractJsonStringDecoded(response, "message");
             if (ok && success == "true")
             {
                 g_otpCooldownSeconds = 120;
@@ -1707,7 +1783,7 @@ LRESULT CALLBACK OtpRegisterProc(HWND window, UINT message, WPARAM wParam, LPARA
             EnableWindow(g_regSubmitBtn, TRUE);
 
             const std::string success = ExtractJsonString(response, "success");
-            const std::string msgStr = ExtractJsonString(response, "message");
+            const std::string msgStr = ExtractJsonStringDecoded(response, "message");
             const std::string token = ExtractJsonString(response, "token");
             if (ok && success == "true" && !token.empty())
             {
@@ -1753,16 +1829,33 @@ void ShowOtpRegisterDialog(HWND parent)
         wc.lpfnWndProc = OtpRegisterProc;
         wc.hInstance = g_instance;
         wc.lpszClassName = kOtpRegisterWindowClass;
-        wc.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1);
+        wc.hbrBackground = CreateSolidBrush(RGB(26, 27, 30));
         wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
         RegisterClassExW(&wc);
         registered = true;
     }
 
+    RECT pRc{};
+    GetWindowRect(parent, &pRc);
+    const int dlgW = 480;
+    const int dlgH = 340;
+    const int dlgX = pRc.left + ((pRc.right - pRc.left) - dlgW) / 2;
+    const int dlgY = pRc.top + ((pRc.bottom - pRc.top) - dlgH) / 2;
+
     HWND dlg = CreateWindowExW(WS_EX_DLGMODALFRAME, kOtpRegisterWindowClass,
-                               L"ثبت‌نام حساب کاربری (SMS OTP)",
+                               L"\u062b\u0628\u062a\u200c\u0646\u0627\u0645 \u062d\u0633\u0627\u0628 \u06a9\u0627\u0631\u0628\u0631\u06cc (SMS OTP)",
                                WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_VISIBLE,
-                               CW_USEDEFAULT, CW_USEDEFAULT, 460, 310, parent, nullptr, g_instance, nullptr);
+                               dlgX, dlgY, dlgW, dlgH, parent, nullptr, g_instance, nullptr);
+    typedef HRESULT(WINAPI* PFN_DwmSetWindowAttribute)(HWND, DWORD, LPCVOID, DWORD);
+    if (HMODULE hDwm = LoadLibraryW(L"dwmapi.dll"); hDwm != nullptr)
+    {
+        if (auto pfn = reinterpret_cast<PFN_DwmSetWindowAttribute>(GetProcAddress(hDwm, "DwmSetWindowAttribute")))
+        {
+            BOOL dark = TRUE;
+            pfn(dlg, 20 /* DWMWA_USE_IMMERSIVE_DARK_MODE */, &dark, sizeof(dark));
+        }
+    }
+
     EnableWindow(parent, FALSE);
     MSG msg{};
     while (IsWindow(dlg) && GetMessageW(&msg, nullptr, 0, 0))
@@ -1875,9 +1968,9 @@ void CreateControls(HWND window)
     };
 
     // ─── Header (Width = 660) ───
-    AddActionButton(window, L"Demo Manager", 28, 22, 140, 38, IdDemoManager);
+    AddActionButton(window, L"Demo Manager", 28, 17, 136, 48, IdDemoManager);
 
-    // Subscription Pill Badge in Header - expanded to 226px width so text is completely unclipped
+    // Subscription Pill Badge in Header - Dual line with Subscription Name + Remaining Days
     int remainingDays = 0;
     if (g_accessStatus.state == GameNetAccessState::Active && g_accessStatus.days_remaining >= 0)
         remainingDays = g_accessStatus.days_remaining;
@@ -1886,8 +1979,14 @@ void CreateControls(HWND window)
     else
         remainingDays = 1893;
 
-    std::wstring subBadgeText = L"اشتراک: " + std::to_wstring(remainingDays) + L" روز باقی‌مانده";
-    g_subscriptionRemaining = AddControl(window, L"STATIC", subBadgeText.c_str(), SS_CENTER | SS_CENTERIMAGE, 176, 24, 222, 32);
+    const std::wstring subName = g_accessStatus.tag.empty() ? L"GAMELAND" : WidenUtf8(g_accessStatus.tag);
+    const std::wstring tagText = L"\u0646\u0627\u0645 \u0627\u0634\u062a\u0631\u0627\u06a9: " + subName;
+    const std::wstring remainingText = L"\u0627\u0639\u062a\u0628\u0627\u0631: " + std::to_wstring(remainingDays) + L" \u0631\u0648\u0632 \u0628\u0627\u0642\u06cc\u200c\u0645\u0627\u0646\u062f\u0647";
+
+    g_subscriptionTag = AddControl(window, L"STATIC", tagText.c_str(), SS_CENTER | SS_CENTERIMAGE, 172, 17, 234, 22);
+    SendMessageW(g_subscriptionTag, WM_SETFONT, reinterpret_cast<WPARAM>(g_emphasisFont), TRUE);
+
+    g_subscriptionRemaining = AddControl(window, L"STATIC", remainingText.c_str(), SS_CENTER | SS_CENTERIMAGE, 172, 40, 234, 22);
     SendMessageW(g_subscriptionRemaining, WM_SETFONT, reinterpret_cast<WPARAM>(g_badgeFont), TRUE);
 
     HWND heading = label(L"ALLCLIENT", 420, 16, 212, 34);
@@ -2204,7 +2303,11 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
     {
         SetBkMode(reinterpret_cast<HDC>(wParam), TRANSPARENT);
         HWND ctl = reinterpret_cast<HWND>(lParam);
-        if (ctl == g_subscriptionRemaining)
+        if (ctl == g_subscriptionTag)
+        {
+            SetTextColor(reinterpret_cast<HDC>(wParam), RGB(235, 245, 255));
+        }
+        else if (ctl == g_subscriptionRemaining)
         {
             SetTextColor(reinterpret_cast<HDC>(wParam), RGB(0, 220, 165));
         }
@@ -2263,13 +2366,13 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
         SelectObject(dc, oldPen);
         DeleteObject(accentPen);
 
-        // Subscription badge container pill in header - 226px wide
-        RECT badgeRect{174, 22, 400, 58};
-        HBRUSH badgeBrush = CreateSolidBrush(RGB(26, 38, 36));
+        // Subscription badge container pill in header - 238px wide, 54px high
+        RECT badgeRect{170, 14, 408, 68};
+        HBRUSH badgeBrush = CreateSolidBrush(RGB(22, 34, 32));
         HPEN badgePen = CreatePen(PS_SOLID, 1, RGB(0, 160, 120));
         HGDIOBJ prevBrush = SelectObject(dc, badgeBrush);
         HGDIOBJ prevPen = SelectObject(dc, badgePen);
-        RoundRect(dc, badgeRect.left, badgeRect.top, badgeRect.right, badgeRect.bottom, 8, 8);
+        RoundRect(dc, badgeRect.left, badgeRect.top, badgeRect.right, badgeRect.bottom, 10, 10);
         SelectObject(dc, prevBrush);
         SelectObject(dc, prevPen);
         DeleteObject(badgeBrush);
