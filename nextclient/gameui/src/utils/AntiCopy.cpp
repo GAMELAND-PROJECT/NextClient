@@ -18,14 +18,25 @@ std::string AntiCopy::GetHardwareID() {
 std::string AntiCopy::GetRegistryHWID() {
     HKEY hKey;
     std::string hwid = "";
-    // Read the ID stored by the installer
+    // 1. Read the ID stored by the installer in HKCU
     if (RegOpenKeyExA(HKEY_CURRENT_USER, "Software\\NextClient", 0, KEY_READ, &hKey) == ERROR_SUCCESS) {
-        char buffer[256];
+        char buffer[256] = {0};
         DWORD bufferSize = sizeof(buffer);
         if (RegQueryValueExA(hKey, "InstallID", NULL, NULL, (LPBYTE)buffer, &bufferSize) == ERROR_SUCCESS) {
             hwid = buffer;
         }
         RegCloseKey(hKey);
+    }
+    // 2. Fallback: check HKLM in case installer was run with elevated administrative context
+    if (hwid.empty()) {
+        if (RegOpenKeyExA(HKEY_LOCAL_MACHINE, "Software\\NextClient", 0, KEY_READ, &hKey) == ERROR_SUCCESS) {
+            char buffer[256] = {0};
+            DWORD bufferSize = sizeof(buffer);
+            if (RegQueryValueExA(hKey, "InstallID", NULL, NULL, (LPBYTE)buffer, &bufferSize) == ERROR_SUCCESS) {
+                hwid = buffer;
+            }
+            RegCloseKey(hKey);
+        }
     }
     return hwid;
 }

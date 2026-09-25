@@ -9,7 +9,7 @@
 param(
     [string]$Version = "0.0.1",
     [string]$Tag = "GAMELAND",
-    [string]$BaseGameDir = "F:\CS 1.6 - AllClient",
+    [string]$BaseGameDir = "D:\Allclient",
     [switch]$PatchOnly,
     [switch]$InstallerOnly
 )
@@ -56,6 +56,20 @@ foreach ($dll in $clDllsToSync) {
     }
 }
 
+# Sync to D:\Allclient
+foreach ($bin in $binariesToSync) {
+    $src = Join-Path $outBin $bin
+    if (Test-Path -LiteralPath $src -PathType Leaf) {
+        Copy-Item -LiteralPath $src -Destination (Join-Path "D:\Allclient" $bin) -Force
+    }
+}
+foreach ($dll in $clDllsToSync) {
+    $src = Join-Path $outBin "cstrike\cl_dlls\$dll"
+    if (Test-Path -LiteralPath $src -PathType Leaf) {
+        Copy-Item -LiteralPath $src -Destination (Join-Path "D:\Allclient" "cstrike\cl_dlls\$dll") -Force
+    }
+}
+
 # Write metadata
 Set-Content -LiteralPath (Join-Path $installStage "version.txt") -Value $Version -Encoding ascii -NoNewline
 @(
@@ -75,7 +89,7 @@ if (-not $InstallerOnly) {
     New-Item -ItemType Directory -Force -Path (Join-Path $patchStage "cstrike\cl_dlls") | Out-Null
 
     $outBin = Join-Path $rootDir "out\bin\Release"
-    $allclientDir = "F:\Allclient"
+    $allclientDir = "D:\Allclient"
 
     $binaries = @(
         "Allclient.exe",
@@ -159,9 +173,14 @@ if (-not $PatchOnly) {
         & $iscc "/DSourceRoot=$sourceRoot" "/DBinaryRoot=$installStage" "/DAppVersion=$Version" "/DBuildTag=$Tag" $issScript
         if ($LASTEXITCODE -eq 0 -and (Test-Path -LiteralPath $compiledExe -PathType Leaf)) {
             Copy-Item -Path (Join-Path $rootDir "installer\output\Allclient-Setup*") -Destination $outDir -Force
-            $installerMb = [math]::Round((Get-Item -LiteralPath $finalExe).Length / 1MB, 1)
-            Write-OK "Smart Installer created successfully ($installerMb MB):"
+            $installerMb = [math]::Round((Get-Item -LiteralPath $finalExe).Length / 1MB, 2)
+            Write-OK "Smart 2-Piece Installer created successfully ($installerMb MB):"
             Write-Host "    -> $finalExe" -ForegroundColor Green
+            $binSlice = Join-Path $outDir "Allclient-Setup-1.bin"
+            if (Test-Path -LiteralPath $binSlice -PathType Leaf) {
+                $sliceMb = [math]::Round((Get-Item -LiteralPath $binSlice).Length / 1MB, 2)
+                Write-Host "    -> $binSlice ($sliceMb MB)" -ForegroundColor Green
+            }
         } else {
             throw "Inno Setup compilation failed."
         }

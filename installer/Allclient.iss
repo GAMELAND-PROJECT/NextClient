@@ -11,7 +11,7 @@
 #endif
 
 #ifndef SourceRoot
-  #define SourceRoot "F:\CS 1.6 - AllClient"
+  #define SourceRoot "D:\Allclient"
 #endif
 
 [Setup]
@@ -54,9 +54,14 @@ Source: "runtime\vc_redist.x86.exe"; Flags: dontcopy
 Source: "runtime\vc_redist.x64.exe"; Flags: dontcopy
 Source: "runtime\vcredist2010_x86.exe"; Flags: dontcopy
 Source: "runtime\vcredist2010_x64.exe"; Flags: dontcopy
-Source: "{#SourceRoot}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "crashes\*,htmlcache\*,*.log,*.mdmp,debug.log,install.bat,unins000.exe,unins000.dat,hitbox_vis.asi*,*.asi.disabled"
-; Overlay latest compiled binaries and configs on top of base game files:
-Source: "{#BinaryRoot}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "*.log,*.mdmp,debug.log,hitbox_vis.asi*,*.asi.disabled"
+; 1. Base files excluding maps and user config (so custom maps are never overwritten)
+Source: "{#SourceRoot}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "cstrike\maps\*,cstrike\userconfig.cfg,backups\*,cstrike_downloads\*,crashes\*,htmlcache\*,*.log,*.mdmp,debug.log,install.bat,unins000.exe,unins000.dat,*.bak*,hitbox_vis.asi*,*.asi.disabled"
+; 2. Game maps - NEVER overwrite existing maps! Custom and downloaded maps are 100% preserved
+Source: "{#SourceRoot}\cstrike\maps\*"; DestDir: "{app}\cstrike\maps"; Flags: onlyifdoesntexist recursesubdirs createallsubdirs; Excludes: "*.log,*.bak*"
+; 3. User config template - only install if not already existing
+Source: "{#SourceRoot}\cstrike\userconfig.cfg"; DestDir: "{app}\cstrike"; Flags: onlyifdoesntexist;
+; 4. Overlay latest compiled binaries and configs
+Source: "{#BinaryRoot}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "cstrike\maps\*,*.log,*.mdmp,debug.log,hitbox_vis.asi*,*.asi.disabled"
 
 [INI]
 Filename: "{app}\allclient-install.ini"; Section: "Allclient"; Key: "Schema"; String: "1"
@@ -65,6 +70,7 @@ Filename: "{app}\allclient-install.ini"; Section: "Allclient"; Key: "GameNetTag"
 [Registry]
 Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Uninstall\{{D9E46BD1-52F8-470F-8639-FF31FE7C5E48}_is1"; ValueType: string; ValueName: "GameNetTag"; ValueData: "{code:GetActiveGameNetTag}"; Flags: uninsdeletevalue
 Root: HKCU; Subkey: "Software\NextClient"; ValueType: string; ValueName: "InstallID"; ValueData: "{code:GetHardwareID}"; Flags: uninsdeletevalue
+Root: HKLM; Subkey: "Software\NextClient"; ValueType: string; ValueName: "InstallID"; ValueData: "{code:GetHardwareID}"; Flags: uninsdeletevalue noerror
 
 [Icons]
 Name: "{autodesktop}\Allclient"; Filename: "{app}\Allclient.exe"; WorkingDir: "{app}"; IconFilename: "{app}\Allclient.exe"
@@ -74,6 +80,33 @@ Name: "{group}\حذف Allclient"; Filename: "{uninstallexe}"
 Filename: "{app}\Allclient.exe"; WorkingDir: "{app}"; Description: "اجرای Allclient"; Flags: nowait postinstall skipifsilent unchecked
 
 [Code]
+function InitializeSetup(): Boolean;
+var
+  SetupDir, BinSlice: String;
+  BinSize: Integer;
+begin
+  Result := True;
+  SetupDir := ExtractFilePath(ExpandConstant('{srcexe}'));
+  BinSlice := SetupDir + 'Allclient-Setup-1.bin';
+
+  { Anti-tamper & Data integrity check for 2-piece setup }
+  if not FileExists(BinSlice) then
+  begin
+    MsgBox('خطای امنیتی: فایل داده‌های بازی (Allclient-Setup-1.bin) در کنار برنامه نصب یافت نشد.' + #13#10#13#10 +
+           'لطفاً هر دو فایل Allclient-Setup.exe و Allclient-Setup-1.bin را در یک پوشه قرار دهید.', mbCriticalError, MB_OK);
+    Result := False;
+    Exit;
+  end;
+
+  if not FileSize(BinSlice, BinSize) or (BinSize < 100000000) then
+  begin
+    MsgBox('خطای امنیتی: فایل داده‌های بازی (Allclient-Setup-1.bin) ناقص یا دستکاری شده است.' + #13#10#13#10 +
+           'حجم فایل معتبر نیست. لطفاً مجدداً فایل کامل را دریافت فرمایید.', mbCriticalError, MB_OK);
+    Result := False;
+    Exit;
+  end;
+end;
+
 function GetVolumeInformation(
   lpRootPathName: String;
   lpVolumeNameBuffer: String;
@@ -641,7 +674,10 @@ end;
 
 function FindPreviousAllclient(var InstallDirectory,
   InstalledVersion: String): Boolean;
+var
+  SteamPath, NextClientPath: String;
 begin
+  { 1. Check registered uninstall records }
   Result := ReadPreviousInstallFromRoot(HKCU, InstallDirectory,
     InstalledVersion);
   if not Result and IsWin64 then
@@ -650,6 +686,12 @@ begin
   if not Result then
     Result := ReadPreviousInstallFromRoot(HKLM32, InstallDirectory,
       InstalledVersion);
+
+  { 2. Check NextClient registry }
+  if not Result and RegQueryStringValue(HKCU, 'Software\NextClient', 'GamePath', NextClientPath) then
+    Result := ReadPreviousInstallFromDirectory(NextClientPath, InstallDirectory, InstalledVersion);
+
+  { 3. Check AppData locations }
   if not Result then
     Result := ReadPreviousInstallFromDirectory(
       ExpandConstant('{localappdata}\Allclient'), InstallDirectory,
@@ -658,6 +700,28 @@ begin
     Result := ReadPreviousInstallFromDirectory(
       ExpandConstant('{userappdata}\Allclient'), InstallDirectory,
       InstalledVersion);
+
+  { 4. Deep scan common drives and custom installation paths }
+  if not Result then
+    Result := ReadPreviousInstallFromDirectory('D:\Allclient', InstallDirectory, InstalledVersion);
+  if not Result then
+    Result := ReadPreviousInstallFromDirectory('C:\Allclient', InstallDirectory, InstalledVersion);
+  if not Result then
+    Result := ReadPreviousInstallFromDirectory('E:\Allclient', InstallDirectory, InstalledVersion);
+  if not Result then
+    Result := ReadPreviousInstallFromDirectory('F:\Allclient', InstallDirectory, InstalledVersion);
+  if not Result then
+    Result := ReadPreviousInstallFromDirectory('D:\Games\Allclient', InstallDirectory, InstalledVersion);
+  if not Result then
+    Result := ReadPreviousInstallFromDirectory('C:\Games\Allclient', InstallDirectory, InstalledVersion);
+  if not Result then
+    Result := ReadPreviousInstallFromDirectory(ExpandConstant('{commonpf32}\Allclient'), InstallDirectory, InstalledVersion);
+  if not Result then
+    Result := ReadPreviousInstallFromDirectory(ExpandConstant('{commonpf32}\Counter-Strike'), InstallDirectory, InstalledVersion);
+
+  { 5. Check Steam Half-Life / CS path if applicable }
+  if not Result and RegQueryStringValue(HKCU, 'Software\Valve\Steam', 'SteamPath', SteamPath) then
+    Result := ReadPreviousInstallFromDirectory(SteamPath + '\steamapps\common\Half-Life', InstallDirectory, InstalledVersion);
 end;
 
 function PreviousInstallPathIsSafe(const InstallDirectory: String): Boolean;
@@ -753,16 +817,8 @@ begin
   end;
 
   { If user explicitly picked a completely DIFFERENT folder, clean up the old one so no orphan remains. }
-  SetAccessStatus('در حال پاک‌سازی نسخه قبلی Allclient…', clGray);
-  PreviousInstallDirectoryPendingCleanup := InstallDirectory;
-  if DirExists(InstallDirectory) and
-     not DelTree(InstallDirectory, True, True, True) then
-  begin
-    ErrorMessage :=
-      'بعضی فایل‌های نسخه قبلی در حال استفاده‌اند. بازی و لانچر را ببندید و دوباره تلاش کنید.';
-    Exit;
-  end;
-
+  { Do NOT wipe external folders (e.g. D:\Allclient) even if user selected a different folder.
+    Simply clean up old shortcuts and registry associations to protect user maps and data. }
   RemovePreviousRegistrationAndShortcuts;
   PreviousInstallDirectoryPendingCleanup := '';
   Result := True;
@@ -846,14 +902,12 @@ end;
 
 function CleanSelectedInstallDirectory(var ErrorMessage: String): Boolean;
 var
-  InstallDirectory, BuildSourceDirectory: String;
+  InstallDirectory: String;
 begin
   Result := False;
   ErrorMessage := '';
   InstallDirectory := RemoveBackslashUnlessRoot(
     ExpandFileName(ExpandConstant('{app}')));
-  BuildSourceDirectory := RemoveBackslashUnlessRoot(
-    ExpandFileName('{#SourceRoot}'));
 
   if not PreviousInstallPathIsSafe(InstallDirectory) then
   begin
@@ -862,25 +916,9 @@ begin
     Exit;
   end;
 
-  { Protect the developer/source payload if Setup is tested on the build PC. }
-  if CompareText(InstallDirectory, BuildSourceDirectory) = 0 then
-  begin
-    ErrorMessage :=
-      'پوشه انتخاب‌شده منبع ساخت نصب‌کننده است و نمی‌توان آن را پاک کرد.';
-    Exit;
-  end;
-
   if not DirExists(InstallDirectory) then
   begin
     Result := True;
-    Exit;
-  end;
-
-  if DirectoryHasEntries(InstallDirectory) and
-     not DirectoryLooksLikeAllclient(InstallDirectory) then
-  begin
-    ErrorMessage :=
-      'پوشه شامل فایل‌های نامرتبط است و حذف نشد. پوشه خالی یا پوشه نسخه قبلی Allclient را انتخاب کنید.';
     Exit;
   end;
 
@@ -892,6 +930,14 @@ begin
     SetAccessStatus('در حال آماده‌سازی و به‌روزرسانی هوشمند فایل‌های کلاینت…', clGray);
     SmartPatchTargetDirectory(InstallDirectory);
     Result := True;
+    Exit;
+  end;
+
+  if DirectoryHasEntries(InstallDirectory) and
+     not DirectoryLooksLikeAllclient(InstallDirectory) then
+  begin
+    ErrorMessage :=
+      'پوشه شامل فایل‌های نامرتبط است و حذف نشد. پوشه خالی یا پوشه نسخه قبلی Allclient را انتخاب کنید.';
     Exit;
   end;
 
@@ -1151,6 +1197,13 @@ procedure CurStepChanged(CurStep: TSetupStep);
 begin
   if CurStep = ssPostInstall then
   begin
+    { AntiCopy Hardware Lock: Always ensure InstallID is registered on the target machine }
+    RegWriteStringValue(HKCU, 'Software\NextClient', 'InstallID', GetHardwareID(''));
+    if IsWin64 then
+      RegWriteStringValue(HKLM64, 'Software\NextClient', 'InstallID', GetHardwareID(''))
+    else
+      RegWriteStringValue(HKLM32, 'Software\NextClient', 'InstallID', GetHardwareID(''));
+
     if PayloadDownloadUrl <> '' then
     begin
       if FileExists(ExpandConstant('{tmp}\gameland_license.dat')) then
