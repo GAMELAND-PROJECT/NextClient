@@ -1436,6 +1436,8 @@ void PerformUserLogin(HWND window)
         const std::wstring status = L"وارد شده: \u200e" + phone;
         SetWindowTextW(g_userStatusLabel, status.c_str());
         InvalidateRect(g_userStatusLabel, nullptr, TRUE);
+        SetWindowTextW(g_userRegisterBtn, L"ریست کردن کانفیگ");
+        InvalidateRect(g_userRegisterBtn, nullptr, TRUE);
         PullUserConfigFromCloud(token);
         MessageBoxW(window, L"ورود موفقیت‌آمیز بود و کانفیگ شما همگام‌سازی شد.", L"موفقیت", MB_OK | MB_ICONINFORMATION);
     }
@@ -1445,6 +1447,62 @@ void PerformUserLogin(HWND window)
         SetWindowTextW(g_userStatusLabel, err.c_str());
         InvalidateRect(g_userStatusLabel, nullptr, TRUE);
         MessageBoxW(window, err.c_str(), L"خطا در ورود", MB_OK | MB_ICONERROR);
+    }
+}
+
+void ResetUserConfigToDefault(HWND window)
+{
+    if (g_activeUserToken.empty())
+        return;
+
+    if (MessageBoxW(window,
+        L"آیا مطمئن هستید که می‌خواهید کانفیگ شما به حالت پیش‌فرض بازنشانی شده و روی هاست ذخیره شود؟",
+        L"تأیید بازنشانی کانفیگ",
+        MB_YESNO | MB_ICONQUESTION) != IDYES)
+    {
+        return;
+    }
+
+    const auto defaultCfg = ExecutableRoot() / L"default" / L"config.cfg";
+    std::error_code ec;
+    if (!std::filesystem::exists(defaultCfg, ec))
+    {
+        MessageBoxW(window, L"فایل کانفیگ پیش‌فرض (default/config.cfg) یافت نشد.", L"خطا", MB_OK | MB_ICONERROR);
+        return;
+    }
+
+    std::ifstream in(defaultCfg, std::ios::binary);
+    if (!in)
+    {
+        MessageBoxW(window, L"امکان خواندن فایل کانفیگ پیش‌فرض وجود ندارد.", L"خطا", MB_OK | MB_ICONERROR);
+        return;
+    }
+    const std::string defaultContent((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    in.close();
+
+    const std::filesystem::path targetDir = L"D:\\Allclient\\cstrike";
+    std::filesystem::create_directories(targetDir, ec);
+    const std::filesystem::path targetCfg = targetDir / L"config.cfg";
+    const auto gameCfg = ExecutableRoot() / L"cstrike" / L"config.cfg";
+
+    std::ofstream out1(targetCfg, std::ios::binary | std::ios::trunc);
+    if (out1) out1.write(defaultContent.data(), defaultContent.size());
+    out1.close();
+
+    std::ofstream out2(gameCfg, std::ios::binary | std::ios::trunc);
+    if (out2) out2.write(defaultContent.data(), defaultContent.size());
+    out2.close();
+
+    const bool pushed = PushUserConfigToCloud(g_activeUserToken);
+    if (pushed)
+    {
+        SetWindowTextW(g_userStatusLabel, L"کانفیگ پیش‌فرض روی هاست و سیستم ذخیره شد.");
+        InvalidateRect(g_userStatusLabel, nullptr, TRUE);
+        MessageBoxW(window, L"کانفیگ شما با موفقیت به حالت پیش‌فرض بازنشانی و در هاست ذخیره شد.", L"موفقیت", MB_OK | MB_ICONINFORMATION);
+    }
+    else
+    {
+        MessageBoxW(window, L"کانفیگ به صورت محلی ریست شد اما در ذخیره روی هاست خطایی رخ داد.", L"هشدار", MB_OK | MB_ICONWARNING);
     }
 }
 
@@ -1751,9 +1809,18 @@ void DrawActionButton(const DRAWITEMSTRUCT& item)
     }
     else if (item.CtlID == IdUserRegister)
     {
-        fill = pressed ? RGB(28, 58, 90) : RGB(36, 76, 118);
-        border = focused ? RGB(80, 160, 240) : RGB(52, 108, 168);
-        text = RGB(230, 240, 255);
+        if (!g_activeUserToken.empty())
+        {
+            fill = pressed ? RGB(160, 80, 20) : RGB(190, 95, 25);
+            border = focused ? RGB(255, 170, 70) : RGB(210, 120, 40);
+            text = RGB(255, 255, 255);
+        }
+        else
+        {
+            fill = pressed ? RGB(28, 58, 90) : RGB(36, 76, 118);
+            border = focused ? RGB(80, 160, 240) : RGB(52, 108, 168);
+            text = RGB(230, 240, 255);
+        }
     }
     else if (item.CtlID == IdCancel)
     {
@@ -2083,7 +2150,14 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
             PerformUserLogin(window);
             return 0;
         case IdUserRegister:
-            ShowOtpRegisterDialog(window);
+            if (!g_activeUserToken.empty())
+            {
+                ResetUserConfigToDefault(window);
+            }
+            else
+            {
+                ShowOtpRegisterDialog(window);
+            }
             return 0;
         case IdRestore:
         {
