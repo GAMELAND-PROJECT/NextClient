@@ -22,7 +22,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 $MROTP_API_KEY = "e8b8180a-d6c5-4065-94dc-e902e3151789"; // Set your MrOTP API Key here
 $DATA_DIR = __DIR__ . DIRECTORY_SEPARATOR . 'storage' . DIRECTORY_SEPARATOR . 'cloud_auth';
 $DB_FILE = $DATA_DIR . DIRECTORY_SEPARATOR . 'gameland_users.sqlite';
-
++
 if (!is_dir($DATA_DIR)) {
     @mkdir($DATA_DIR, 0755, true);
 }

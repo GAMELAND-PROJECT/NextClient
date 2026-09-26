@@ -495,6 +495,10 @@ void ClientLauncher::PrepareEngineCommandLine()
     if (!cmd_line_->CheckParm("-game"))
         cmd_line_->AppendParm("-game", "cstrike");
 
+    // GAMELAND AllClient Exclusive Identity Injection
+    cmd_line_->AppendParm("+setinfo", "*allclient GAMELAND_ALLCLIENT_PRO_2026");
+    cmd_line_->AppendParm("+_allclient_build", "GAMELAND_PRO_2026");
+
     // disable glBlitFramebuffer feature, because this makes blackscreen on some Nvidia GPU when enables MSSA technology
     if (!cmd_line_->CheckParm("-nodirectblit") && !cmd_line_->CheckParm("-directblit"))
         cmd_line_->AppendParm("-nodirectblit", nullptr);
