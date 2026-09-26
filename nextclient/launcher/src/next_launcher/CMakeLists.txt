@@ -15,6 +15,8 @@ file(GLOB_RECURSE LAUNCHER_SOURCES
 
 list(APPEND LAUNCHER_SOURCES
         "../video_settings_launcher/main.cpp"
+        "GamelandGuard.cpp"
+        "GamelandGuard.h"
 )
 
 # The clean client has no backend consumers (updater, telemetry, or crash upload),

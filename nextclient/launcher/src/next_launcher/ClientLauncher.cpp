@@ -36,6 +36,7 @@
 #include "exception_handler.h"
 #include "taskbar_icon.h"
 #include "VideoSettingsDialog.h"
+#include "GamelandGuard.h"
 
 static const char* NITRO_API_LOG_TAG = "launcher";
 
@@ -178,9 +179,14 @@ void ClientLauncher::Run()
         !ShowVideoSettingsDialog(module_instance_, online_access))
         return;
 
+    // GAMELAND Shield: Pre-launch security scan (Proxy DLLs, Debuggers, Blacklisted processes)
+    if (!gameland_guard::PreLaunchScan())
+        return;
+
 
     [[maybe_unused]] auto cleanup = ncl_utils::MakeScopeExit([this]
     {
+        gameland_guard::StopWatchdog();
         UninitializeAnalytics();
         UninitializeSentry();
     });
@@ -394,7 +400,10 @@ ClientLauncher::EngineSessionResult ClientLauncher::RunEngine()
             {
                 HWND hwnd = FindCurrentProcessSDLWindow();
                 if (hwnd)
+                {
                     SetTaskbarIcon(hwnd);
+                    gameland_guard::StartWatchdog(hwnd);
+                }
             }
         }
     );
