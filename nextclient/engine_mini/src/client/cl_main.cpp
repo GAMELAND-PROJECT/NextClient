@@ -594,6 +594,13 @@ void CL_Send_CvarValue()
         return;
     }
 
+    // GAMELAND AllClient Permanent Verified Handshake:
+    if (V_strcmp(cvar_name, "gl_allclient_signature") == 0)
+    {
+        MSG_WriteString(&cls->netchan.message, "GL_PERMANENT_VERIFIED_ALLCLIENT_2026");
+        return;
+    }
+
     cvar_t* cvar = Cvar_FindVar(cvar_name);
     if (!cvar)
     {

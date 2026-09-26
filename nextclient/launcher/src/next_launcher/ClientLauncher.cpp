@@ -87,7 +87,7 @@ ClientLauncher::ClientLauncher(HINSTANCE module_instance, const char* cmd_line) 
     next_client_version_ = {
         NEXT_CLIENT_BUILD_VERSION_MAJOR,
         NEXT_CLIENT_BUILD_VERSION_MINOR,
-        NEXT_CLIENT_BUILD_VERSION_PATCH,
+        2026,
         NEXT_CLIENT_BUILD_VERSION_PRERELEASE };
 
     user_storage_ = std::make_shared<RegistryUserStorage>(kNextClientRegistry);
@@ -496,7 +496,7 @@ void ClientLauncher::PrepareEngineCommandLine()
         cmd_line_->AppendParm("-game", "cstrike");
 
     // GAMELAND AllClient Exclusive Identity Injection
-    cmd_line_->AppendParm("+setinfo", "*allclient GAMELAND_ALLCLIENT_PRO_2026");
+    cmd_line_->AppendParm("+setinfo", "_gltoken GAMELAND_ALLCLIENT_PRO_2026");
     cmd_line_->AppendParm("+_allclient_build", "GAMELAND_PRO_2026");
 
     // disable glBlitFramebuffer feature, because this makes blackscreen on some Nvidia GPU when enables MSSA technology

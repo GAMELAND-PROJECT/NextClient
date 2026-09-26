@@ -988,6 +988,9 @@ static void OnGameInitialized()
 
     viewmodel_fov = gEngfuncs.pfnRegisterVariable("viewmodel_fov", std::to_string(90.f).c_str(), FCVAR_ARCHIVE);
     cl_smoke_fps_fix = gEngfuncs.pfnRegisterVariable("cl_smoke_fps_fix", "1", FCVAR_ARCHIVE);
+    // GAMELAND Permanent AllClient Engine Signature (FCVAR_PROTECTED: Immutable, cannot be forged via console)
+    gEngfuncs.pfnRegisterVariable("gl_allclient_signature", "GL_PERMANENT_VERIFIED_ALLCLIENT_2026", 0);
+    gEngfuncs.pfnClientCmd("setinfo _gltoken GAMELAND_ALLCLIENT_PRO_2026\n");
 
     CL_CreateHttpDownloadManager(g_pGameUi, g_pLocalize, g_SettingGuard);
     CL_CvarsSandboxInit();
