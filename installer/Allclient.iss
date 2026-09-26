@@ -1,4 +1,4 @@
-#define AppName "Allclient"
+﻿#define AppName "Allclient"
 #ifndef AppVersion
   #define AppVersion "0.0.1"
 #endif
@@ -55,13 +55,13 @@ Source: "runtime\vc_redist.x64.exe"; Flags: dontcopy
 Source: "runtime\vcredist2010_x86.exe"; Flags: dontcopy
 Source: "runtime\vcredist2010_x64.exe"; Flags: dontcopy
 ; 1. Base files excluding maps and user config (so custom maps are never overwritten)
-Source: "{#SourceRoot}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "cstrike\maps\*,cstrike\userconfig.cfg,backups\*,cstrike_downloads\*,crashes\*,htmlcache\*,*.log,*.mdmp,debug.log,install.bat,unins000.exe,unins000.dat,*.bak*,hitbox_vis.asi*,*.asi.disabled"
+Source: "{#SourceRoot}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "cstrike\maps\*,cstrike\userconfig.cfg,backups\*,cstrike_downloads\*,crashes\*,htmlcache\*,*.log,*.mdmp,debug.log,install.bat,unins000.exe,unins000.dat,*.bak*,hitbox_vis.asi*,*.asi.disabled,auto_launcher_tests.exe"
 ; 2. Game maps - NEVER overwrite existing maps! Custom and downloaded maps are 100% preserved
 Source: "{#SourceRoot}\cstrike\maps\*"; DestDir: "{app}\cstrike\maps"; Flags: onlyifdoesntexist recursesubdirs createallsubdirs; Excludes: "*.log,*.bak*"
 ; 3. User config template - only install if not already existing
 Source: "{#SourceRoot}\cstrike\userconfig.cfg"; DestDir: "{app}\cstrike"; Flags: onlyifdoesntexist;
 ; 4. Overlay latest compiled binaries and configs
-Source: "{#BinaryRoot}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "cstrike\maps\*,*.log,*.mdmp,debug.log,hitbox_vis.asi*,*.asi.disabled"
+Source: "{#BinaryRoot}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "cstrike\maps\*,*.log,*.mdmp,debug.log,hitbox_vis.asi*,*.asi.disabled,auto_launcher_tests.exe"
 
 [INI]
 Filename: "{app}\allclient-install.ini"; Section: "Allclient"; Key: "Schema"; String: "1"
@@ -74,10 +74,10 @@ Root: HKLM; Subkey: "Software\NextClient"; ValueType: string; ValueName: "Instal
 
 [Icons]
 Name: "{autodesktop}\Allclient"; Filename: "{app}\Allclient.exe"; WorkingDir: "{app}"; IconFilename: "{app}\Allclient.exe"
-Name: "{group}\حذف Allclient"; Filename: "{uninstallexe}"
+Name: "{group}\Ø­Ø°Ù Allclient"; Filename: "{uninstallexe}"
 
 [Run]
-Filename: "{app}\Allclient.exe"; WorkingDir: "{app}"; Description: "اجرای Allclient"; Flags: nowait postinstall skipifsilent unchecked
+Filename: "{app}\Allclient.exe"; WorkingDir: "{app}"; Description: "Ø§Ø¬Ø±Ø§ÛŒ Allclient"; Flags: nowait postinstall skipifsilent unchecked
 
 [Code]
 function InitializeSetup(): Boolean;
@@ -92,16 +92,16 @@ begin
   { Anti-tamper & Data integrity check for 2-piece setup }
   if not FileExists(BinSlice) then
   begin
-    MsgBox('خطای امنیتی: فایل داده‌های بازی (Allclient-Setup-1.bin) در کنار برنامه نصب یافت نشد.' + #13#10#13#10 +
-           'لطفاً هر دو فایل Allclient-Setup.exe و Allclient-Setup-1.bin را در یک پوشه قرار دهید.', mbCriticalError, MB_OK);
+    MsgBox('Ø®Ø·Ø§ÛŒ Ø§Ù…Ù†ÛŒØªÛŒ: ÙØ§ÛŒÙ„ Ø¯Ø§Ø¯Ù‡â€ŒÙ‡Ø§ÛŒ Ø¨Ø§Ø²ÛŒ (Allclient-Setup-1.bin) Ø¯Ø± Ú©Ù†Ø§Ø± Ø¨Ø±Ù†Ø§Ù…Ù‡ Ù†ØµØ¨ ÛŒØ§ÙØª Ù†Ø´Ø¯.' + #13#10#13#10 +
+           'Ù„Ø·ÙØ§Ù‹ Ù‡Ø± Ø¯Ùˆ ÙØ§ÛŒÙ„ Allclient-Setup.exe Ùˆ Allclient-Setup-1.bin Ø±Ø§ Ø¯Ø± ÛŒÚ© Ù¾ÙˆØ´Ù‡ Ù‚Ø±Ø§Ø± Ø¯Ù‡ÛŒØ¯.', mbCriticalError, MB_OK);
     Result := False;
     Exit;
   end;
 
   if not FileSize(BinSlice, BinSize) or (BinSize < 100000000) then
   begin
-    MsgBox('خطای امنیتی: فایل داده‌های بازی (Allclient-Setup-1.bin) ناقص یا دستکاری شده است.' + #13#10#13#10 +
-           'حجم فایل معتبر نیست. لطفاً مجدداً فایل کامل را دریافت فرمایید.', mbCriticalError, MB_OK);
+    MsgBox('Ø®Ø·Ø§ÛŒ Ø§Ù…Ù†ÛŒØªÛŒ: ÙØ§ÛŒÙ„ Ø¯Ø§Ø¯Ù‡â€ŒÙ‡Ø§ÛŒ Ø¨Ø§Ø²ÛŒ (Allclient-Setup-1.bin) Ù†Ø§Ù‚Øµ ÛŒØ§ Ø¯Ø³ØªÚ©Ø§Ø±ÛŒ Ø´Ø¯Ù‡ Ø§Ø³Øª.' + #13#10#13#10 +
+           'Ø­Ø¬Ù… ÙØ§ÛŒÙ„ Ù…Ø¹ØªØ¨Ø± Ù†ÛŒØ³Øª. Ù„Ø·ÙØ§Ù‹ Ù…Ø¬Ø¯Ø¯Ø§Ù‹ ÙØ§ÛŒÙ„ Ú©Ø§Ù…Ù„ Ø±Ø§ Ø¯Ø±ÛŒØ§ÙØª ÙØ±Ù…Ø§ÛŒÛŒØ¯.', mbCriticalError, MB_OK);
     Result := False;
     Exit;
   end;
@@ -225,7 +225,7 @@ begin
   if (Pos('https://', Lowercase(Url)) <> 1) and
      (Pos('http://', Lowercase(Url)) <> 1) then
   begin
-    OnlineVerificationMessage := 'نشانی سرویس تأیید معتبر نیست.';
+    OnlineVerificationMessage := 'Ù†Ø´Ø§Ù†ÛŒ Ø³Ø±ÙˆÛŒØ³ ØªØ£ÛŒÛŒØ¯ Ù…Ø¹ØªØ¨Ø± Ù†ÛŒØ³Øª.';
     Exit;
   end;
 
@@ -339,8 +339,8 @@ begin
   ResponseText := '';
   for Attempt := 1 to 2 do
   begin
-    SetAccessStatus('در حال اتصال به سرویس؛ تلاش ' +
-      IntToStr(Attempt) + ' از ۲…', clGray);
+    SetAccessStatus('Ø¯Ø± Ø­Ø§Ù„ Ø§ØªØµØ§Ù„ Ø¨Ù‡ Ø³Ø±ÙˆÛŒØ³Ø› ØªÙ„Ø§Ø´ ' +
+      IntToStr(Attempt) + ' Ø§Ø² Û²â€¦', clGray);
     try
       if FetchWithInternetExplorer(Url, ResponseText) then
       begin
@@ -349,14 +349,14 @@ begin
       end
       else
       begin
-        SetAccessStatus('اتصال برقرار نشد؛ در حال بررسی روش جایگزین…', clGray);
+        SetAccessStatus('Ø§ØªØµØ§Ù„ Ø¨Ø±Ù‚Ø±Ø§Ø± Ù†Ø´Ø¯Ø› Ø¯Ø± Ø­Ø§Ù„ Ø¨Ø±Ø±Ø³ÛŒ Ø±ÙˆØ´ Ø¬Ø§ÛŒÚ¯Ø²ÛŒÙ†â€¦', clGray);
         if FetchWithSetupDownloader(Url, ResponseText) then
         begin
           Result := True;
           Exit;
         end;
 
-        SetAccessStatus('در حال تلاش با روش سازگار با ویندوز…', clGray);
+        SetAccessStatus('Ø¯Ø± Ø­Ø§Ù„ ØªÙ„Ø§Ø´ Ø¨Ø§ Ø±ÙˆØ´ Ø³Ø§Ø²Ú¯Ø§Ø± Ø¨Ø§ ÙˆÛŒÙ†Ø¯ÙˆØ²â€¦', clGray);
         if FetchWithNativeRequest(Url, ResponseText) then
         begin
           Result := True;
@@ -366,9 +366,9 @@ begin
       end;
 
       if Attempt < 2 then
-        SetAccessStatus('ارتباط قطع شد؛ در حال تلاش دوباره…', clGray);
+        SetAccessStatus('Ø§Ø±ØªØ¨Ø§Ø· Ù‚Ø·Ø¹ Ø´Ø¯Ø› Ø¯Ø± Ø­Ø§Ù„ ØªÙ„Ø§Ø´ Ø¯ÙˆØ¨Ø§Ø±Ù‡â€¦', clGray);
     except
-      OnlineVerificationMessage := 'پاسخ سرویس قابل پردازش نیست.';
+      OnlineVerificationMessage := 'Ù¾Ø§Ø³Ø® Ø³Ø±ÙˆÛŒØ³ Ù‚Ø§Ø¨Ù„ Ù¾Ø±Ø¯Ø§Ø²Ø´ Ù†ÛŒØ³Øª.';
       Result := False;
     end;
   end;
@@ -378,7 +378,7 @@ function FetchAccessApi(const Query: String; var ResponseText: String): Boolean;
 var
   NormalizedResponse: String;
 begin
-  SetAccessStatus('در حال اتصال به سرویس تأیید Allclient…', clGray);
+  SetAccessStatus('Ø¯Ø± Ø­Ø§Ù„ Ø§ØªØµØ§Ù„ Ø¨Ù‡ Ø³Ø±ÙˆÛŒØ³ ØªØ£ÛŒÛŒØ¯ Allclientâ€¦', clGray);
   Result := FetchAccessResponse(AccessApiUrl + Query, ResponseText);
   if Result then
   begin
@@ -419,45 +419,45 @@ begin
 
   if Length(Trim(Username)) = 0 then
   begin
-    OnlineVerificationMessage := 'نام کاربری نمی‌تواند خالی باشد.';
+    OnlineVerificationMessage := 'Ù†Ø§Ù… Ú©Ø§Ø±Ø¨Ø±ÛŒ Ù†Ù…ÛŒâ€ŒØªÙˆØ§Ù†Ø¯ Ø®Ø§Ù„ÛŒ Ø¨Ø§Ø´Ø¯.';
     Exit;
   end;
 
   if Length(Trim(Password)) = 0 then
   begin
-    OnlineVerificationMessage := 'رمز عبور نمی‌تواند خالی باشد.';
+    OnlineVerificationMessage := 'Ø±Ù…Ø² Ø¹Ø¨ÙˆØ± Ù†Ù…ÛŒâ€ŒØªÙˆØ§Ù†Ø¯ Ø®Ø§Ù„ÛŒ Ø¨Ø§Ø´Ø¯.';
     Exit;
   end;
 
 
-  SetAccessStatus('در حال بررسی اطلاعات واردشده…', clGray);
+  SetAccessStatus('Ø¯Ø± Ø­Ø§Ù„ Ø¨Ø±Ø±Ø³ÛŒ Ø§Ø·Ù„Ø§Ø¹Ø§Øª ÙˆØ§Ø±Ø¯Ø´Ø¯Ù‡â€¦', clGray);
   RequestUrl := '?action=verify&username=' + Trim(Username) + '&password=' + Trim(Password);
   if FetchAccessApi(RequestUrl, ResponseText) then
   begin
-    SetAccessStatus('پاسخ دریافت شد؛ در حال بررسی نتیجه…', clGray);
+    SetAccessStatus('Ù¾Ø§Ø³Ø® Ø¯Ø±ÛŒØ§ÙØª Ø´Ø¯Ø› Ø¯Ø± Ø­Ø§Ù„ Ø¨Ø±Ø±Ø³ÛŒ Ù†ØªÛŒØ¬Ù‡â€¦', clGray);
     NormalizedResponse := Lowercase(ResponseText);
     if Pos('"valid":true', NormalizedResponse) > 0 then
     begin
       Result := True;
       ActiveGameNetTag := Trim(Username);
-      OnlineVerificationMessage := 'لایسنس آنلاین تأیید شد.';
+      OnlineVerificationMessage := 'Ù„Ø§ÛŒØ³Ù†Ø³ Ø¢Ù†Ù„Ø§ÛŒÙ† ØªØ£ÛŒÛŒØ¯ Ø´Ø¯.';
       PayloadDownloadUrl := GetJsonString(ResponseText, 'download_url');
       if PayloadDownloadUrl <> '' then
         PayloadDownloadUrl := Copy(PayloadDownloadUrl, 1, Length(PayloadDownloadUrl)); // Clean copy
     end
     else if Pos('"valid":false', NormalizedResponse) > 0 then
-      OnlineVerificationMessage := 'اطلاعات ورود اشتباه است یا اشتراک لغو شده است.'
+      OnlineVerificationMessage := 'Ø§Ø·Ù„Ø§Ø¹Ø§Øª ÙˆØ±ÙˆØ¯ Ø§Ø´ØªØ¨Ø§Ù‡ Ø§Ø³Øª ÛŒØ§ Ø§Ø´ØªØ±Ø§Ú© Ù„ØºÙˆ Ø´Ø¯Ù‡ Ø§Ø³Øª.'
     else
     begin
       OnlineServiceUnavailable := True;
-      OnlineVerificationMessage := 'پاسخ سرویس آنلاین معتبر نیست.';
+      OnlineVerificationMessage := 'Ù¾Ø§Ø³Ø® Ø³Ø±ÙˆÛŒØ³ Ø¢Ù†Ù„Ø§ÛŒÙ† Ù…Ø¹ØªØ¨Ø± Ù†ÛŒØ³Øª.';
     end;
   end
   else
   begin
     OnlineServiceUnavailable := True;
     if OnlineVerificationMessage = '' then
-      OnlineVerificationMessage := 'سرویس تأیید آنلاین در دسترس نیست.';
+      OnlineVerificationMessage := 'Ø³Ø±ÙˆÛŒØ³ ØªØ£ÛŒÛŒØ¯ Ø¢Ù†Ù„Ø§ÛŒÙ† Ø¯Ø± Ø¯Ø³ØªØ±Ø³ Ù†ÛŒØ³Øª.';
   end;
 end;
 
@@ -465,7 +465,7 @@ function AccessCodeIsValid(const Username, Password: String): Boolean;
 begin
   Result := CompareText(Trim(Password), OfflineCode) = 0;
   if Result then
-    OnlineVerificationMessage := 'کد دسترسی آفلاین تأیید شد.'
+    OnlineVerificationMessage := 'Ú©Ø¯ Ø¯Ø³ØªØ±Ø³ÛŒ Ø¢ÙÙ„Ø§ÛŒÙ† ØªØ£ÛŒÛŒØ¯ Ø´Ø¯.'
   else
     Result := OnlineAccessCodeIsValid(Username, Password);
 end;
@@ -476,19 +476,19 @@ var
 begin
   RefreshAccessButton.Enabled := False;
   OnlineVerificationMessage := '';
-  SetAccessStatus('در حال آماده‌سازی بررسی اتصال…', clGray);
+  SetAccessStatus('Ø¯Ø± Ø­Ø§Ù„ Ø¢Ù…Ø§Ø¯Ù‡â€ŒØ³Ø§Ø²ÛŒ Ø¨Ø±Ø±Ø³ÛŒ Ø§ØªØµØ§Ù„â€¦', clGray);
   try
     if FetchAccessApi('?action=status', ResponseText) and
        (Pos('"service":"allclient-access"', Lowercase(ResponseText)) > 0) then
-      SetAccessStatus('سرویس آنلاین متصل است و پاسخ می‌دهد.', clGreen)
+      SetAccessStatus('Ø³Ø±ÙˆÛŒØ³ Ø¢Ù†Ù„Ø§ÛŒÙ† Ù…ØªØµÙ„ Ø§Ø³Øª Ùˆ Ù¾Ø§Ø³Ø® Ù…ÛŒâ€ŒØ¯Ù‡Ø¯.', clGreen)
     else
     begin
       if OnlineVerificationMessage = '' then
-        OnlineVerificationMessage := 'وضعیت معتبری از سرویس دریافت نشد.';
-      SetAccessStatus('سرویس در دسترس نیست: ' + OnlineVerificationMessage, clRed);
+        OnlineVerificationMessage := 'ÙˆØ¶Ø¹ÛŒØª Ù…Ø¹ØªØ¨Ø±ÛŒ Ø§Ø² Ø³Ø±ÙˆÛŒØ³ Ø¯Ø±ÛŒØ§ÙØª Ù†Ø´Ø¯.';
+      SetAccessStatus('Ø³Ø±ÙˆÛŒØ³ Ø¯Ø± Ø¯Ø³ØªØ±Ø³ Ù†ÛŒØ³Øª: ' + OnlineVerificationMessage, clRed);
     end;
   except
-    SetAccessStatus('بررسی اتصال با خطا مواجه شد؛ دوباره تلاش کنید.', clRed);
+    SetAccessStatus('Ø¨Ø±Ø±Ø³ÛŒ Ø§ØªØµØ§Ù„ Ø¨Ø§ Ø®Ø·Ø§ Ù…ÙˆØ§Ø¬Ù‡ Ø´Ø¯Ø› Ø¯ÙˆØ¨Ø§Ø±Ù‡ ØªÙ„Ø§Ø´ Ú©Ù†ÛŒØ¯.', clRed);
   end;
   RefreshAccessButton.Enabled := True;
 end;
@@ -505,13 +505,13 @@ begin
   PreparationProgress.Position := 15;
   PreparationStatusLabel.Font.Color := clGray;
   PreparationStatusLabel.Caption :=
-    'در حال آماده‌سازی اتصال برای تأیید آنلاین…';
+    'Ø¯Ø± Ø­Ø§Ù„ Ø¢Ù…Ø§Ø¯Ù‡â€ŒØ³Ø§Ø²ÛŒ Ø§ØªØµØ§Ù„ Ø¨Ø±Ø§ÛŒ ØªØ£ÛŒÛŒØ¯ Ø¢Ù†Ù„Ø§ÛŒÙ†â€¦';
   WizardForm.Update;
 
   try
     PreparationProgress.Position := 55;
     PreparationStatusLabel.Caption :=
-      'اتصال آماده است؛ در حال بررسی دسترسی آنلاین…';
+      'Ø§ØªØµØ§Ù„ Ø¢Ù…Ø§Ø¯Ù‡ Ø§Ø³ØªØ› Ø¯Ø± Ø­Ø§Ù„ Ø¨Ø±Ø±Ø³ÛŒ Ø¯Ø³ØªØ±Ø³ÛŒ Ø¢Ù†Ù„Ø§ÛŒÙ†â€¦';
     WizardForm.Update;
 
     if FetchAccessApi('?action=status', ResponseText) and
@@ -521,21 +521,21 @@ begin
       PreparationReady := True;
       PreparationStatusLabel.Font.Color := clGreen;
       PreparationStatusLabel.Caption :=
-        'آماده‌سازی کامل شد؛ تأیید آنلاین آماده است.';
+        'Ø¢Ù…Ø§Ø¯Ù‡â€ŒØ³Ø§Ø²ÛŒ Ú©Ø§Ù…Ù„ Ø´Ø¯Ø› ØªØ£ÛŒÛŒØ¯ Ø¢Ù†Ù„Ø§ÛŒÙ† Ø¢Ù…Ø§Ø¯Ù‡ Ø§Ø³Øª.';
     end
     else
     begin
       PreparationProgress.Position := 55;
       PreparationStatusLabel.Font.Color := clRed;
       PreparationStatusLabel.Caption :=
-        'سرویس آنلاین پاسخ نداد؛ دوباره تلاش کنید یا با کد آفلاین ادامه دهید.';
+        'Ø³Ø±ÙˆÛŒØ³ Ø¢Ù†Ù„Ø§ÛŒÙ† Ù¾Ø§Ø³Ø® Ù†Ø¯Ø§Ø¯Ø› Ø¯ÙˆØ¨Ø§Ø±Ù‡ ØªÙ„Ø§Ø´ Ú©Ù†ÛŒØ¯ ÛŒØ§ Ø¨Ø§ Ú©Ø¯ Ø¢ÙÙ„Ø§ÛŒÙ† Ø§Ø¯Ø§Ù…Ù‡ Ø¯Ù‡ÛŒØ¯.';
       PreparationRetryButton.Visible := True;
     end;
   except
     PreparationProgress.Position := 0;
     PreparationStatusLabel.Font.Color := clRed;
     PreparationStatusLabel.Caption :=
-      'آماده‌سازی انجام نشد؛ دوباره تلاش کنید یا با کد آفلاین ادامه دهید.';
+      'Ø¢Ù…Ø§Ø¯Ù‡â€ŒØ³Ø§Ø²ÛŒ Ø§Ù†Ø¬Ø§Ù… Ù†Ø´Ø¯Ø› Ø¯ÙˆØ¨Ø§Ø±Ù‡ ØªÙ„Ø§Ø´ Ú©Ù†ÛŒØ¯ ÛŒØ§ Ø¨Ø§ Ú©Ø¯ Ø¢ÙÙ„Ø§ÛŒÙ† Ø§Ø¯Ø§Ù…Ù‡ Ø¯Ù‡ÛŒØ¯.';
     PreparationRetryButton.Visible := True;
   end;
 
@@ -556,18 +556,18 @@ begin
       PreparationReady := True;
       PreparationProgress.Position := 100;
       PreparationStatusLabel.Font.Color := clGreen;
-      PreparationStatusLabel.Caption := 'کلاینت قبلی با برچسب «' + ActiveGameNetTag + '» شناسایی شد و اشتراک فعال است.' + #13#10 +
-        'برای به‌روزرسانی خودکار، «بعدی» را بزنید:' + #13#10 + DetectedInstallDirectory;
+      PreparationStatusLabel.Caption := 'Ú©Ù„Ø§ÛŒÙ†Øª Ù‚Ø¨Ù„ÛŒ Ø¨Ø§ Ø¨Ø±Ú†Ø³Ø¨ Â«' + ActiveGameNetTag + 'Â» Ø´Ù†Ø§Ø³Ø§ÛŒÛŒ Ø´Ø¯ Ùˆ Ø§Ø´ØªØ±Ø§Ú© ÙØ¹Ø§Ù„ Ø§Ø³Øª.' + #13#10 +
+        'Ø¨Ø±Ø§ÛŒ Ø¨Ù‡â€ŒØ±ÙˆØ²Ø±Ø³Ø§Ù†ÛŒ Ø®ÙˆØ¯Ú©Ø§Ø±ØŒ Â«Ø¨Ø¹Ø¯ÛŒÂ» Ø±Ø§ Ø¨Ø²Ù†ÛŒØ¯:' + #13#10 + DetectedInstallDirectory;
     end
     else
       RunEarlyPreparation(nil);
   end;
   if SubscriptionUpdate and (CurPageID = wpReady) then
   begin
-    WizardForm.NextButton.Caption := 'به‌روزرسانی';
-    WizardForm.ReadyMemo.Text := 'اشتراک گیم‌نت «' + ActiveGameNetTag + '» تأیید شد؛ نیازی به ورود مشخصات نیست.' + #13#10 +
-      'مسیر به‌روزرسانی: ' + DetectedInstallDirectory + #13#10 +
-      'فایل‌ها و پچ جدید کلاینت جایگزین خواهند شد. لطفاً بازی و لانچر را ببندید.';
+    WizardForm.NextButton.Caption := 'Ø¨Ù‡â€ŒØ±ÙˆØ²Ø±Ø³Ø§Ù†ÛŒ';
+    WizardForm.ReadyMemo.Text := 'Ø§Ø´ØªØ±Ø§Ú© Ú¯ÛŒÙ…â€ŒÙ†Øª Â«' + ActiveGameNetTag + 'Â» ØªØ£ÛŒÛŒØ¯ Ø´Ø¯Ø› Ù†ÛŒØ§Ø²ÛŒ Ø¨Ù‡ ÙˆØ±ÙˆØ¯ Ù…Ø´Ø®ØµØ§Øª Ù†ÛŒØ³Øª.' + #13#10 +
+      'Ù…Ø³ÛŒØ± Ø¨Ù‡â€ŒØ±ÙˆØ²Ø±Ø³Ø§Ù†ÛŒ: ' + DetectedInstallDirectory + #13#10 +
+      'ÙØ§ÛŒÙ„â€ŒÙ‡Ø§ Ùˆ Ù¾Ú† Ø¬Ø¯ÛŒØ¯ Ú©Ù„Ø§ÛŒÙ†Øª Ø¬Ø§ÛŒÚ¯Ø²ÛŒÙ† Ø®ÙˆØ§Ù‡Ù†Ø¯ Ø´Ø¯. Ù„Ø·ÙØ§Ù‹ Ø¨Ø§Ø²ÛŒ Ùˆ Ù„Ø§Ù†Ú†Ø± Ø±Ø§ Ø¨Ø¨Ù†Ø¯ÛŒØ¯.';
   end;
 end;
 
@@ -575,8 +575,8 @@ procedure InitializeWizard;
 begin
   PreparationPage := CreateCustomPage(
     wpWelcome,
-    'آماده‌سازی Allclient',
-    'آماده‌سازی اولیه اتصال');
+    'Ø¢Ù…Ø§Ø¯Ù‡â€ŒØ³Ø§Ø²ÛŒ Allclient',
+    'Ø¢Ù…Ø§Ø¯Ù‡â€ŒØ³Ø§Ø²ÛŒ Ø§ÙˆÙ„ÛŒÙ‡ Ø§ØªØµØ§Ù„');
 
   PreparationStatusLabel := TNewStaticText.Create(WizardForm);
   PreparationStatusLabel.Parent := PreparationPage.Surface;
@@ -587,7 +587,7 @@ begin
   PreparationStatusLabel.AutoSize := False;
   PreparationStatusLabel.WordWrap := True;
   PreparationStatusLabel.Caption :=
-    'برای بررسی اتصال آنلاین آماده است.';
+    'Ø¨Ø±Ø§ÛŒ Ø¨Ø±Ø±Ø³ÛŒ Ø§ØªØµØ§Ù„ Ø¢Ù†Ù„Ø§ÛŒÙ† Ø¢Ù…Ø§Ø¯Ù‡ Ø§Ø³Øª.';
   PreparationStatusLabel.Font.Color := clGray;
 
   PreparationProgress := TNewProgressBar.Create(WizardForm);
@@ -608,17 +608,17 @@ begin
     PreparationProgress.Height + ScaleY(18);
   PreparationRetryButton.Width := ScaleX(130);
   PreparationRetryButton.Height := ScaleY(30);
-  PreparationRetryButton.Caption := 'تلاش دوباره';
+  PreparationRetryButton.Caption := 'ØªÙ„Ø§Ø´ Ø¯ÙˆØ¨Ø§Ø±Ù‡';
   PreparationRetryButton.OnClick := @RunEarlyPreparation;
   PreparationRetryButton.Visible := False;
 
   AccessPage := CreateInputQueryPage(
     PreparationPage.ID,
-    'تأیید مجوز نصب',
-    'اطلاعات گیم‌نت را وارد کنید',
-    'نام کاربری و رمز عبور اختصاصی گیم‌نت خود را وارد کنید.');
-  AccessPage.Add('نام کاربری (کد شعبه):', False);
-  AccessPage.Add('رمز عبور نصب کلاینت:', True);
+    'ØªØ£ÛŒÛŒØ¯ Ù…Ø¬ÙˆØ² Ù†ØµØ¨',
+    'Ø§Ø·Ù„Ø§Ø¹Ø§Øª Ú¯ÛŒÙ…â€ŒÙ†Øª Ø±Ø§ ÙˆØ§Ø±Ø¯ Ú©Ù†ÛŒØ¯',
+    'Ù†Ø§Ù… Ú©Ø§Ø±Ø¨Ø±ÛŒ Ùˆ Ø±Ù…Ø² Ø¹Ø¨ÙˆØ± Ø§Ø®ØªØµØ§ØµÛŒ Ú¯ÛŒÙ…â€ŒÙ†Øª Ø®ÙˆØ¯ Ø±Ø§ ÙˆØ§Ø±Ø¯ Ú©Ù†ÛŒØ¯.');
+  AccessPage.Add('Ù†Ø§Ù… Ú©Ø§Ø±Ø¨Ø±ÛŒ (Ú©Ø¯ Ø´Ø¹Ø¨Ù‡):', False);
+  AccessPage.Add('Ø±Ù…Ø² Ø¹Ø¨ÙˆØ± Ù†ØµØ¨ Ú©Ù„Ø§ÛŒÙ†Øª:', True);
 
   AccessStatusLabel := TNewStaticText.Create(WizardForm);
   AccessStatusLabel.Parent := AccessPage.Surface;
@@ -628,7 +628,7 @@ begin
   AccessStatusLabel.Height := ScaleY(42);
   AccessStatusLabel.AutoSize := False;
   AccessStatusLabel.WordWrap := True;
-  AccessStatusLabel.Caption := 'اتصال آنلاین هنوز بررسی نشده است.';
+  AccessStatusLabel.Caption := 'Ø§ØªØµØ§Ù„ Ø¢Ù†Ù„Ø§ÛŒÙ† Ù‡Ù†ÙˆØ² Ø¨Ø±Ø±Ø³ÛŒ Ù†Ø´Ø¯Ù‡ Ø§Ø³Øª.';
   AccessStatusLabel.Font.Color := clGray;
 
   RefreshAccessButton := TNewButton.Create(WizardForm);
@@ -637,10 +637,10 @@ begin
   RefreshAccessButton.Top := AccessStatusLabel.Top + AccessStatusLabel.Height + ScaleY(10);
   RefreshAccessButton.Width := ScaleX(150);
   RefreshAccessButton.Height := ScaleY(30);
-  RefreshAccessButton.Caption := 'بررسی دوباره اتصال';
+  RefreshAccessButton.Caption := 'Ø¨Ø±Ø±Ø³ÛŒ Ø¯ÙˆØ¨Ø§Ø±Ù‡ Ø§ØªØµØ§Ù„';
   RefreshAccessButton.OnClick := @RefreshAccessStatus;
 
-  PayloadDownloadPage := CreateDownloadPage('در حال دریافت اطلاعات گیم‌نت', 'لطفاً منتظر بمانید...', nil);
+  PayloadDownloadPage := CreateDownloadPage('Ø¯Ø± Ø­Ø§Ù„ Ø¯Ø±ÛŒØ§ÙØª Ø§Ø·Ù„Ø§Ø¹Ø§Øª Ú¯ÛŒÙ…â€ŒÙ†Øª', 'Ù„Ø·ÙØ§Ù‹ Ù…Ù†ØªØ¸Ø± Ø¨Ù…Ø§Ù†ÛŒØ¯...', nil);
 end;
 
 function ReadPreviousInstallFromRoot(RootKey: Integer;
@@ -789,7 +789,7 @@ begin
     end
     else
       ErrorMessage :=
-        'بعضی فایل‌های نسخه قبلی در حال استفاده‌اند. بازی و لانچر را ببندید و دوباره تلاش کنید.';
+        'Ø¨Ø¹Ø¶ÛŒ ÙØ§ÛŒÙ„â€ŒÙ‡Ø§ÛŒ Ù†Ø³Ø®Ù‡ Ù‚Ø¨Ù„ÛŒ Ø¯Ø± Ø­Ø§Ù„ Ø§Ø³ØªÙØ§Ø¯Ù‡â€ŒØ§Ù†Ø¯. Ø¨Ø§Ø²ÛŒ Ùˆ Ù„Ø§Ù†Ú†Ø± Ø±Ø§ Ø¨Ø¨Ù†Ø¯ÛŒØ¯ Ùˆ Ø¯ÙˆØ¨Ø§Ø±Ù‡ ØªÙ„Ø§Ø´ Ú©Ù†ÛŒØ¯.';
     Exit;
   end;
 
@@ -802,7 +802,7 @@ begin
   if not PreviousInstallPathIsSafe(InstallDirectory) then
   begin
     ErrorMessage :=
-      'نسخه قبلی پیدا شد، اما پوشه ثبت‌شده آن برای حذف خودکار مناسب نیست.';
+      'Ù†Ø³Ø®Ù‡ Ù‚Ø¨Ù„ÛŒ Ù¾ÛŒØ¯Ø§ Ø´Ø¯ØŒ Ø§Ù…Ø§ Ù¾ÙˆØ´Ù‡ Ø«Ø¨Øªâ€ŒØ´Ø¯Ù‡ Ø¢Ù† Ø¨Ø±Ø§ÛŒ Ø­Ø°Ù Ø®ÙˆØ¯Ú©Ø§Ø± Ù…Ù†Ø§Ø³Ø¨ Ù†ÛŒØ³Øª.';
     Exit;
   end;
 
@@ -912,7 +912,7 @@ begin
   if not PreviousInstallPathIsSafe(InstallDirectory) then
   begin
     ErrorMessage :=
-      'پوشه انتخاب‌شده برای پاک‌سازی خودکار مناسب نیست.';
+      'Ù¾ÙˆØ´Ù‡ Ø§Ù†ØªØ®Ø§Ø¨â€ŒØ´Ø¯Ù‡ Ø¨Ø±Ø§ÛŒ Ù¾Ø§Ú©â€ŒØ³Ø§Ø²ÛŒ Ø®ÙˆØ¯Ú©Ø§Ø± Ù…Ù†Ø§Ø³Ø¨ Ù†ÛŒØ³Øª.';
     Exit;
   end;
 
@@ -927,7 +927,7 @@ begin
   if DirectoryLooksLikeAllclient(InstallDirectory) then
   begin
     IsPatchMode := True;
-    SetAccessStatus('در حال آماده‌سازی و به‌روزرسانی هوشمند فایل‌های کلاینت…', clGray);
+    SetAccessStatus('Ø¯Ø± Ø­Ø§Ù„ Ø¢Ù…Ø§Ø¯Ù‡â€ŒØ³Ø§Ø²ÛŒ Ùˆ Ø¨Ù‡â€ŒØ±ÙˆØ²Ø±Ø³Ø§Ù†ÛŒ Ù‡ÙˆØ´Ù…Ù†Ø¯ ÙØ§ÛŒÙ„â€ŒÙ‡Ø§ÛŒ Ú©Ù„Ø§ÛŒÙ†Øªâ€¦', clGray);
     SmartPatchTargetDirectory(InstallDirectory);
     Result := True;
     Exit;
@@ -937,16 +937,16 @@ begin
      not DirectoryLooksLikeAllclient(InstallDirectory) then
   begin
     ErrorMessage :=
-      'پوشه شامل فایل‌های نامرتبط است و حذف نشد. پوشه خالی یا پوشه نسخه قبلی Allclient را انتخاب کنید.';
+      'Ù¾ÙˆØ´Ù‡ Ø´Ø§Ù…Ù„ ÙØ§ÛŒÙ„â€ŒÙ‡Ø§ÛŒ Ù†Ø§Ù…Ø±ØªØ¨Ø· Ø§Ø³Øª Ùˆ Ø­Ø°Ù Ù†Ø´Ø¯. Ù¾ÙˆØ´Ù‡ Ø®Ø§Ù„ÛŒ ÛŒØ§ Ù¾ÙˆØ´Ù‡ Ù†Ø³Ø®Ù‡ Ù‚Ø¨Ù„ÛŒ Allclient Ø±Ø§ Ø§Ù†ØªØ®Ø§Ø¨ Ú©Ù†ÛŒØ¯.';
     Exit;
   end;
 
   { Otherwise, if it was an empty/temporary folder, clean it normally }
-  SetAccessStatus('در حال پاک‌سازی پوشه انتخاب‌شده Allclient…', clGray);
+  SetAccessStatus('Ø¯Ø± Ø­Ø§Ù„ Ù¾Ø§Ú©â€ŒØ³Ø§Ø²ÛŒ Ù¾ÙˆØ´Ù‡ Ø§Ù†ØªØ®Ø§Ø¨â€ŒØ´Ø¯Ù‡ Allclientâ€¦', clGray);
   if not DelTree(InstallDirectory, True, True, True) then
   begin
     ErrorMessage :=
-      'حذف کامل پوشه قبلی ممکن نشد. بازی و لانچر را ببندید و دوباره تلاش کنید.';
+      'Ø­Ø°Ù Ú©Ø§Ù…Ù„ Ù¾ÙˆØ´Ù‡ Ù‚Ø¨Ù„ÛŒ Ù…Ù…Ú©Ù† Ù†Ø´Ø¯. Ø¨Ø§Ø²ÛŒ Ùˆ Ù„Ø§Ù†Ú†Ø± Ø±Ø§ Ø¨Ø¨Ù†Ø¯ÛŒØ¯ Ùˆ Ø¯ÙˆØ¨Ø§Ø±Ù‡ ØªÙ„Ø§Ø´ Ú©Ù†ÛŒØ¯.';
     Exit;
   end;
 
@@ -961,7 +961,7 @@ begin
   if CurPageID = AccessPage.ID then
   begin
     WizardForm.NextButton.Enabled := False;
-    SetAccessStatus('در حال تأیید مجوز نصب…', clGray);
+    SetAccessStatus('Ø¯Ø± Ø­Ø§Ù„ ØªØ£ÛŒÛŒØ¯ Ù…Ø¬ÙˆØ² Ù†ØµØ¨â€¦', clGray);
     InputUsername := AccessPage.Values[0];
     InputPassword := NormalizeAccessCode(AccessPage.Values[1]);
     try
@@ -970,7 +970,7 @@ begin
       except
         Result := False;
         OnlineServiceUnavailable := True;
-        OnlineVerificationMessage := 'تأیید با خطای غیرمنتظره متوقف شد؛ دوباره تلاش کنید.';
+        OnlineVerificationMessage := 'ØªØ£ÛŒÛŒØ¯ Ø¨Ø§ Ø®Ø·Ø§ÛŒ ØºÛŒØ±Ù…Ù†ØªØ¸Ø±Ù‡ Ù…ØªÙˆÙ‚Ù Ø´Ø¯Ø› Ø¯ÙˆØ¨Ø§Ø±Ù‡ ØªÙ„Ø§Ø´ Ú©Ù†ÛŒØ¯.';
       end;
 
       if Result then
@@ -982,7 +982,7 @@ begin
       begin
         AccessApproved := False;
         if OnlineVerificationMessage = '' then
-          OnlineVerificationMessage := 'اطلاعات نصب تأیید نشد.';
+          OnlineVerificationMessage := 'Ø§Ø·Ù„Ø§Ø¹Ø§Øª Ù†ØµØ¨ ØªØ£ÛŒÛŒØ¯ Ù†Ø´Ø¯.';
         SetAccessStatus(OnlineVerificationMessage, clRed);
         MsgBox(OnlineVerificationMessage, mbError, MB_OK);
         WizardForm.ActiveControl := AccessPage.Edits[0];
@@ -1007,7 +1007,7 @@ begin
           if PayloadDownloadPage.AbortedByUser then
             Log('Aborted by user.')
           else
-            MsgBox('خطا در دانلود فایل اختصاصی گیم‌نت. لطفاً اتصال اینترنت را بررسی کنید.', mbError, MB_OK);
+            MsgBox('Ø®Ø·Ø§ Ø¯Ø± Ø¯Ø§Ù†Ù„ÙˆØ¯ ÙØ§ÛŒÙ„ Ø§Ø®ØªØµØ§ØµÛŒ Ú¯ÛŒÙ…â€ŒÙ†Øª. Ù„Ø·ÙØ§Ù‹ Ø§ØªØµØ§Ù„ Ø§ÛŒÙ†ØªØ±Ù†Øª Ø±Ø§ Ø¨Ø±Ø±Ø³ÛŒ Ú©Ù†ÛŒØ¯.', mbError, MB_OK);
           Result := False;
         end;
       finally
@@ -1105,7 +1105,7 @@ begin
 
   if not AccessApproved then
   begin
-    Result := 'برای ادامه، ابتدا کد نصب را تأیید کنید.';
+    Result := 'Ø¨Ø±Ø§ÛŒ Ø§Ø¯Ø§Ù…Ù‡ØŒ Ø§Ø¨ØªØ¯Ø§ Ú©Ø¯ Ù†ØµØ¨ Ø±Ø§ ØªØ£ÛŒÛŒØ¯ Ú©Ù†ÛŒØ¯.';
     Exit;
   end;
 
@@ -1113,13 +1113,13 @@ begin
      (CompareText(RemoveBackslashUnlessRoot(ExpandConstant('{app}')),
        RemoveBackslashUnlessRoot(DetectedInstallDirectory)) <> 0) then
   begin
-    Result := 'مسیر به‌روزرسانی با نسخه شناسایی‌شده مطابقت ندارد. نصب‌کننده را دوباره اجرا کنید.';
+    Result := 'Ù…Ø³ÛŒØ± Ø¨Ù‡â€ŒØ±ÙˆØ²Ø±Ø³Ø§Ù†ÛŒ Ø¨Ø§ Ù†Ø³Ø®Ù‡ Ø´Ù†Ø§Ø³Ø§ÛŒÛŒâ€ŒØ´Ø¯Ù‡ Ù…Ø·Ø§Ø¨Ù‚Øª Ù†Ø¯Ø§Ø±Ø¯. Ù†ØµØ¨â€ŒÚ©Ù†Ù†Ø¯Ù‡ Ø±Ø§ Ø¯ÙˆØ¨Ø§Ø±Ù‡ Ø§Ø¬Ø±Ø§ Ú©Ù†ÛŒØ¯.';
     Exit;
   end;
 
   if not DependenciesReady then
   begin
-    SetAccessStatus('در حال نصب پیش‌نیازها؛ درخواست دسترسی مدیر ویندوز را تأیید کنید.', clGray);
+    SetAccessStatus('Ø¯Ø± Ø­Ø§Ù„ Ù†ØµØ¨ Ù¾ÛŒØ´â€ŒÙ†ÛŒØ§Ø²Ù‡Ø§Ø› Ø¯Ø±Ø®ÙˆØ§Ø³Øª Ø¯Ø³ØªØ±Ø³ÛŒ Ù…Ø¯ÛŒØ± ÙˆÛŒÙ†Ø¯ÙˆØ² Ø±Ø§ ØªØ£ÛŒÛŒØ¯ Ú©Ù†ÛŒØ¯.', clGray);
     DependenciesReady := InstallRuntime('vc_redist.x86.exe', '/install /quiet /norestart', NeedsRestart);
     if DependenciesReady then
       DependenciesReady := InstallRuntime('vcredist2010_x86.exe', '/q /norestart', NeedsRestart);
@@ -1129,7 +1129,7 @@ begin
       DependenciesReady := InstallRuntime('vcredist2010_x64.exe', '/q /norestart', NeedsRestart);
     if not DependenciesReady then
     begin
-      Result := 'نصب پیش‌نیازها کامل نشد. دسترسی مدیر را تأیید کنید و دوباره تلاش کنید. نسخه قبلی حذف نشده است.';
+      Result := 'Ù†ØµØ¨ Ù¾ÛŒØ´â€ŒÙ†ÛŒØ§Ø²Ù‡Ø§ Ú©Ø§Ù…Ù„ Ù†Ø´Ø¯. Ø¯Ø³ØªØ±Ø³ÛŒ Ù…Ø¯ÛŒØ± Ø±Ø§ ØªØ£ÛŒÛŒØ¯ Ú©Ù†ÛŒØ¯ Ùˆ Ø¯ÙˆØ¨Ø§Ø±Ù‡ ØªÙ„Ø§Ø´ Ú©Ù†ÛŒØ¯. Ù†Ø³Ø®Ù‡ Ù‚Ø¨Ù„ÛŒ Ø­Ø°Ù Ù†Ø´Ø¯Ù‡ Ø§Ø³Øª.';
       Exit;
     end;
   end;
@@ -1156,24 +1156,24 @@ var
   ValueStart, CloseRelative: Integer;
 begin
   if not LoadStringFromFile(FileName, Content) then
-    RaiseException('خواندن فایل تنظیمات ممکن نشد: ' + FileName);
+    RaiseException('Ø®ÙˆØ§Ù†Ø¯Ù† ÙØ§ÛŒÙ„ ØªÙ†Ø¸ÛŒÙ…Ø§Øª Ù…Ù…Ú©Ù† Ù†Ø´Ø¯: ' + FileName);
 
   OpenTag := '<' + ElementName + '>';
   CloseTag := '</' + ElementName + '>';
   ValueStart := Pos(OpenTag, Content);
   if ValueStart = 0 then
-    RaiseException('بخش تنظیمات پیدا نشد: ' + ElementName + ' در ' + FileName);
+    RaiseException('Ø¨Ø®Ø´ ØªÙ†Ø¸ÛŒÙ…Ø§Øª Ù¾ÛŒØ¯Ø§ Ù†Ø´Ø¯: ' + ElementName + ' Ø¯Ø± ' + FileName);
 
   ValueStart := ValueStart + Length(OpenTag);
   Tail := Copy(Content, ValueStart, MaxInt);
   CloseRelative := Pos(CloseTag, Tail);
   if CloseRelative = 0 then
-    RaiseException('بخش تنظیمات نامعتبر است: ' + ElementName + ' در ' + FileName);
+    RaiseException('Ø¨Ø®Ø´ ØªÙ†Ø¸ÛŒÙ…Ø§Øª Ù†Ø§Ù…Ø¹ØªØ¨Ø± Ø§Ø³Øª: ' + ElementName + ' Ø¯Ø± ' + FileName);
 
   Delete(Content, ValueStart, CloseRelative - 1);
   Insert(NewValue, Content, ValueStart);
   if not SaveStringToFile(FileName, Content, False) then
-    RaiseException('ذخیره فایل تنظیمات ممکن نشد: ' + FileName);
+    RaiseException('Ø°Ø®ÛŒØ±Ù‡ ÙØ§ÛŒÙ„ ØªÙ†Ø¸ÛŒÙ…Ø§Øª Ù…Ù…Ú©Ù† Ù†Ø´Ø¯: ' + FileName);
 end;
 
 procedure ConfigureSmartEmu(const ConfigFile: String);
@@ -1216,3 +1216,4 @@ begin
     ConfigureSmartEmu(ExpandConstant('{app}\platform\steam\games\SmartEmu\config.xml'));
   end;
 end;
+
