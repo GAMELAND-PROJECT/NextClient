@@ -262,14 +262,11 @@ CGameConsoleDialog::CGameConsoleDialog() : BaseClass(NULL, "GameConsole", false)
     m_pHistory = new CNoKeyboardInputRichText(this, "ConsoleHistory", m_pEntry);
     m_pLanHostGuide = new CLanHostGuidePanel(this);
     m_pLanHostGuide->SetVisible(false);
-    // Keep command input available, but do not paint or lay out the live engine
-    // log over the 3D scene. RichText repainting is disproportionately costly.
-    m_pHistory->SetVisible(false);
-    m_pHistory->SetVerticalScrollbar(false);
-    // An unlimited RichText history becomes progressively expensive to lay
-    // out and repaint over the live 3D scene. Keep enough text for debugging
-    // while bounding console-open CPU/GPU work during long sessions.
-    m_pHistory->SetMaximumCharCount(1);
+
+    // Keep console history active and lightweight in LAN (4096 chars buffer eliminates lag)
+    m_pHistory->SetVisible(true);
+    m_pHistory->SetVerticalScrollbar(true);
+    m_pHistory->SetMaximumCharCount(4096);
 
     m_bAutoCompleteMode = false;
     m_szPartialText[0] = 0;
@@ -305,29 +302,19 @@ void CGameConsoleDialog::Clear()
 
 void CGameConsoleDialog::ShowLanHostGuide(bool show)
 {
-    if (engine->pfnGetCvarFloat("developer") > 0.0f)
+    // Keep history visible in LAN without the blocking bitmap
+    m_pLanHostGuide->SetVisible(false);
+    m_pHistory->SetVisible(true);
+    m_pHistory->SetVerticalScrollbar(true);
+
+    if (engine && engine->pfnGetCvarFloat("developer") > 0.0f)
     {
-        m_pLanHostGuide->SetVisible(false);
         m_pHistory->SetMaximumCharCount(32768);
-        m_pHistory->SetVerticalScrollbar(true);
-        m_pHistory->SetVisible(true);
-        return;
     }
-    m_pHistory->SetVisible(false);
-    m_pLanHostGuide->SetVisible(show);
-    m_pHistory->SetVerticalScrollbar(false);
-
-    if (!show)
+    else
     {
-        SetMinimumSize(100, 100);
-        m_pHistory->SetMaximumCharCount(1);
-        m_pHistory->SetText("");
-        return;
+        m_pHistory->SetMaximumCharCount(4096);
     }
-
-    // Keep the command and explanation columns readable, including on 640x480.
-    SetMinimumSize(620, 440);
-    SetSize(std::max(GetWide(), 620), std::max(GetTall(), 440));
 }
 
 //-----------------------------------------------------------------------------
@@ -348,34 +335,185 @@ void CGameConsoleDialog::Print(const wchar_t *begin, const wchar_t *end)
     ColorPrint(m_PrintColor, begin, end);
 }
 
+bool CGameConsoleDialog::IsAllowedLanConsoleMessage(const char *msg)
+{
+    if (!msg || !*msg)
+        return false;
+
+    // Skip leading whitespace / newlines
+    while (*msg == ' ' || *msg == '\t' || *msg == '\r' || *msg == '\n')
+        msg++;
+    if (!*msg)
+        return false;
+
+    // Echo of user typed commands (e.g., "] status", "] ping")
+    if (msg[0] == ']' && (msg[1] == ' ' || msg[1] == '\t' || msg[1] == '\0'))
+        return true;
+
+    // Player chat messages (say / say_team)
+    if (strstr(msg, ": ") != nullptr ||
+        strncmp(msg, "*SPEC*", 6) == 0 ||
+        strncmp(msg, "*DEAD*", 6) == 0 ||
+        strncmp(msg, "(Counter-Terrorist)", 19) == 0 ||
+        strncmp(msg, "(Terrorist)", 11) == 0)
+    {
+        return true;
+    }
+
+    // Player join, leave, connect, disconnect events
+    if (strstr(msg, " connected") != nullptr ||
+        strstr(msg, " entered the game") != nullptr ||
+        strstr(msg, " has left the game") != nullptr ||
+        strstr(msg, " dropped") != nullptr ||
+        strstr(msg, " disconnected") != nullptr ||
+        strstr(msg, " joined the game") != nullptr)
+    {
+        return true;
+    }
+
+    // Game & round status notices
+    if (strstr(msg, "Counter-Terrorists Win") != nullptr ||
+        strstr(msg, "Terrorists Win") != nullptr ||
+        strstr(msg, "Bomb has been defused") != nullptr ||
+        strstr(msg, "Bomb has been planted") != nullptr ||
+        strstr(msg, "Round Draw") != nullptr ||
+        strstr(msg, "Target Saved") != nullptr ||
+        strstr(msg, "Target Bomber") != nullptr ||
+        strstr(msg, "VIP ") != nullptr ||
+        strstr(msg, "Server cvar '") != nullptr)
+    {
+        return true;
+    }
+
+    // Server notices & Admin messages
+    if (strstr(msg, "[GAMELAND]") != nullptr ||
+        strstr(msg, "[AMXX]") != nullptr ||
+        strstr(msg, "Server:") != nullptr ||
+        strstr(msg, "[SERVER]") != nullptr)
+    {
+        return true;
+    }
+
+    // Information query output (status, ping, version, name)
+    if (strstr(msg, "# userid ") != nullptr ||
+        strstr(msg, "hostname:") != nullptr ||
+        strstr(msg, "version :") != nullptr ||
+        strstr(msg, "tcp/ip ") != nullptr ||
+        strstr(msg, "map     :") != nullptr ||
+        strstr(msg, "players :") != nullptr ||
+        strstr(msg, "Current ping:") != nullptr ||
+        strncmp(msg, "Client ", 7) == 0)
+    {
+        return true;
+    }
+
+    // Discard any engine debug noise, texture/sound warnings, packet flood
+    return false;
+}
+
+bool CGameConsoleDialog::IsAllowedLanConsoleMessageWide(const wchar_t *msg)
+{
+    if (!msg || !*msg)
+        return false;
+
+    while (*msg == L' ' || *msg == L'\t' || *msg == L'\r' || *msg == L'\n')
+        msg++;
+    if (!*msg)
+        return false;
+
+    if (msg[0] == L']' && (msg[1] == L' ' || msg[1] == L'\t' || msg[1] == L'\0'))
+        return true;
+
+    if (wcsstr(msg, L": ") != nullptr ||
+        wcsncmp(msg, L"*SPEC*", 6) == 0 ||
+        wcsncmp(msg, L"*DEAD*", 6) == 0 ||
+        wcsncmp(msg, L"(Counter-Terrorist)", 19) == 0 ||
+        wcsncmp(msg, L"(Terrorist)", 11) == 0)
+    {
+        return true;
+    }
+
+    if (wcsstr(msg, L" connected") != nullptr ||
+        wcsstr(msg, L" entered the game") != nullptr ||
+        wcsstr(msg, L" has left the game") != nullptr ||
+        wcsstr(msg, L" dropped") != nullptr ||
+        wcsstr(msg, L" disconnected") != nullptr ||
+        wcsstr(msg, L" joined the game") != nullptr)
+    {
+        return true;
+    }
+
+    if (wcsstr(msg, L"Counter-Terrorists Win") != nullptr ||
+        wcsstr(msg, L"Terrorists Win") != nullptr ||
+        wcsstr(msg, L"Bomb has been defused") != nullptr ||
+        wcsstr(msg, L"Bomb has been planted") != nullptr ||
+        wcsstr(msg, L"Round Draw") != nullptr ||
+        wcsstr(msg, L"Target Saved") != nullptr ||
+        wcsstr(msg, L"Target Bomber") != nullptr ||
+        wcsstr(msg, L"VIP ") != nullptr ||
+        wcsstr(msg, L"Server cvar '") != nullptr)
+    {
+        return true;
+    }
+
+    if (wcsstr(msg, L"[GAMELAND]") != nullptr ||
+        wcsstr(msg, L"[AMXX]") != nullptr ||
+        wcsstr(msg, L"Server:") != nullptr ||
+        wcsstr(msg, L"[SERVER]") != nullptr)
+    {
+        return true;
+    }
+
+    if (wcsstr(msg, L"# userid ") != nullptr ||
+        wcsstr(msg, L"hostname:") != nullptr ||
+        wcsstr(msg, L"version :") != nullptr ||
+        wcsstr(msg, L"tcp/ip ") != nullptr ||
+        wcsstr(msg, L"map     :") != nullptr ||
+        wcsstr(msg, L"players :") != nullptr ||
+        wcsstr(msg, L"Current ping:") != nullptr ||
+        wcsncmp(msg, L"Client ", 7) == 0)
+    {
+        return true;
+    }
+
+    return false;
+}
+
 void CGameConsoleDialog::ColorPrint(Color color, const char *text)
 {
-    if (engine->pfnGetCvarFloat("developer") <= 0.0f)
+    if (!text || !*text)
         return;
+
+    const bool bDev = engine && (engine->pfnGetCvarFloat("developer") > 0.0f);
+    if (!bDev && !IsAllowedLanConsoleMessage(text))
+        return;
+
     if (!m_pHistory->IsVisible())
-        ShowLanHostGuide(false);
+    {
+        m_pHistory->SetVisible(true);
+        m_pHistory->SetVerticalScrollbar(true);
+        m_pHistory->SetMaximumCharCount(bDev ? 32768 : 4096);
+    }
     m_pHistory->InsertColorChange(color);
     m_pHistory->InsertString(text);
 }
 
 void CGameConsoleDialog::ColorPrint(Color color, const char *begin, const char *end)
 {
-    if (engine->pfnGetCvarFloat("developer") <= 0.0f)
+    if (!begin || begin == end)
         return;
-    if (!m_pHistory->IsVisible())
-        ShowLanHostGuide(false);
-    m_pHistory->InsertColorChange(color);
-    m_pHistory->InsertString(begin, end);
+
+    std::string text(begin, end ? end : (begin + strlen(begin)));
+    ColorPrint(color, text.c_str());
 }
 
 void CGameConsoleDialog::ColorPrint(Color color, const wchar_t *begin, const wchar_t *end)
 {
-    if (engine->pfnGetCvarFloat("developer") <= 0.0f)
+    if (!begin || begin == end)
         return;
-    if (!m_pHistory->IsVisible())
-        ShowLanHostGuide(false);
-    m_pHistory->InsertColorChange(color);
-    m_pHistory->InsertString(begin, end);
+
+    std::wstring text(begin, end ? end : (begin + wcslen(begin)));
+    ColorPrintWithoutJsEvent(color, text.c_str());
 }
 
 void CGameConsoleDialog::ColorPrintWithoutJsEvent(Color color, const char* text)
@@ -385,10 +523,19 @@ void CGameConsoleDialog::ColorPrintWithoutJsEvent(Color color, const char* text)
 
 void CGameConsoleDialog::ColorPrintWithoutJsEvent(Color color, const wchar_t* text)
 {
-    if (engine->pfnGetCvarFloat("developer") <= 0.0f)
+    if (!text || !*text)
         return;
+
+    const bool bDev = engine && (engine->pfnGetCvarFloat("developer") > 0.0f);
+    if (!bDev && !IsAllowedLanConsoleMessageWide(text))
+        return;
+
     if (!m_pHistory->IsVisible())
-        ShowLanHostGuide(false);
+    {
+        m_pHistory->SetVisible(true);
+        m_pHistory->SetVerticalScrollbar(true);
+        m_pHistory->SetMaximumCharCount(bDev ? 32768 : 4096);
+    }
     m_pHistory->InsertColorChange(color);
     m_pHistory->InsertString(text);
 }
@@ -404,17 +551,12 @@ void CGameConsoleDialog::DPrint(const char *text)
 void CGameConsoleDialog::OnThink()
 {
     BaseClass::OnThink();
-    const bool debugging = engine->pfnGetCvarFloat("developer") > 0.0f;
-    if (m_pHistory->IsVisible() != debugging)
+    if (!m_pHistory->IsVisible())
     {
-        ShowLanHostGuide(GameUI().IsInLevel() &&
-            engine->pfnGetCvarFloat("sv_lan") != 0.0f &&
-            EngineMini() && EngineMini()->IsListenServerActive());
-        if (!debugging)
-        {
-            m_pHistory->SetText("");
-            m_pHistory->SetMaximumCharCount(1);
-        }
+        m_pHistory->SetVisible(true);
+        m_pHistory->SetVerticalScrollbar(true);
+        const bool debugging = engine && (engine->pfnGetCvarFloat("developer") > 0.0f);
+        m_pHistory->SetMaximumCharCount(debugging ? 32768 : 4096);
     }
 }
 

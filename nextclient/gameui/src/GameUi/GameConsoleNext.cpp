@@ -33,7 +33,7 @@ void CGameConsoleNext::Initialize(CGameConsoleDialog *console_dialog)
 
 void CGameConsoleNext::ColorPrintf(uint8_t r, uint8_t g, uint8_t b, const char *format, ...)
 {
-    if (!initialized_ || !engine || engine->pfnGetCvarFloat("developer") <= 0.0f)
+    if (!initialized_ || !engine || !format)
         return;
     char text[4096]{};
     va_list args;
@@ -46,7 +46,7 @@ void CGameConsoleNext::ColorPrintf(uint8_t r, uint8_t g, uint8_t b, const char *
 
 void CGameConsoleNext::ColorPrintfWide(uint8_t r, uint8_t g, uint8_t b, const wchar_t *format, ...)
 {
-    if (!initialized_ || !engine || engine->pfnGetCvarFloat("developer") <= 0.0f)
+    if (!initialized_ || !engine || !format)
         return;
     wchar_t text[4096]{};
     va_list args;
@@ -59,7 +59,7 @@ void CGameConsoleNext::ColorPrintfWide(uint8_t r, uint8_t g, uint8_t b, const wc
 
 void CGameConsoleNext::PrintfEx(const char *format, ...)
 {
-    if (!initialized_ || !engine || engine->pfnGetCvarFloat("developer") <= 0.0f)
+    if (!initialized_ || !engine || !format)
         return;
     char text[4096]{};
     va_list args;
@@ -72,7 +72,7 @@ void CGameConsoleNext::PrintfEx(const char *format, ...)
 
 void CGameConsoleNext::PrintfExWide(const wchar_t *format, ...)
 {
-    if (!initialized_ || !engine || engine->pfnGetCvarFloat("developer") <= 0.0f)
+    if (!initialized_ || !engine || !format)
         return;
     wchar_t text[4096]{};
     va_list args;

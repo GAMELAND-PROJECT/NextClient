@@ -80,6 +80,10 @@ public:
     void Hide();
     void DumpConsoleTextToFile();
 
+    // Smart LAN filtering to prevent console spam and RichText lag
+    static bool IsAllowedLanConsoleMessage(const char *msg);
+    static bool IsAllowedLanConsoleMessageWide(const wchar_t *msg);
+
 private:
     enum
     {

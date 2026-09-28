@@ -96,12 +96,7 @@ void CGameConsole::Activate()
     if (GameUI().IsInLevel())
         m_pConsole->SetFadeEffectDisableOverride(true);
 
-    const bool show_lan_host_guide =
-        GameUI().IsInLevel() &&
-        engine->pfnGetCvarFloat("sv_lan") != 0.0f &&
-        EngineMini() &&
-        EngineMini()->IsListenServerActive();
-    m_pConsole->ShowLanHostGuide(show_lan_host_guide);
+    m_pConsole->ShowLanHostGuide(false);
 
     m_pConsole->Activate();
 
@@ -142,13 +137,14 @@ void CGameConsole::Clear()
 //-----------------------------------------------------------------------------
 void CGameConsole::Printf(const char *format, ...)
 {
-    if (!m_bInitialized || !engine || engine->pfnGetCvarFloat("developer") <= 0.0f)
+    if (!m_bInitialized || !engine || !format)
         return;
     char text[4096];
     va_list args;
     va_start(args, format);
     vsnprintf(text, sizeof(text), format, args);
     va_end(args);
+    text[sizeof(text) - 1] = 0;
     m_pConsole->Print(text);
 }
 
