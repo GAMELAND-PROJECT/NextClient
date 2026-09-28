@@ -23,9 +23,7 @@ OptionsSubMiscellaneous::OptionsSubMiscellaneous(vgui2::Panel *parent) :
 
     server_browser_init_tab_ = new vgui2::ComboBox(this, "ServerBrowserInitTab", 5, false);
     server_browser_init_tab_->AddItem("Online", KeyValues::AutoDelete(new KeyValues("", "tab", (int)ServerBrowserTab::Favorites)));
-#if !defined(GAMELAND_HOME_CLIENT) || !GAMELAND_HOME_CLIENT
     server_browser_init_tab_->AddItem("#ServerBrowser_LanTab", KeyValues::AutoDelete(new KeyValues("", "tab", (int)ServerBrowserTab::LAN)));
-#endif
 
     int saved_tab = miscellaneous_settings_->GetInt(OptionsSubMiscellaneous::kServerBrowserInitialTabKey, (int)ServerBrowserTab::Favorites);
     ActivateServerBrowserTab((ServerBrowserTab)saved_tab);
@@ -55,11 +53,7 @@ void OptionsSubMiscellaneous::OnApplyChanges()
     miscellaneous_settings_->SetBool(kDisableAutoOpenServerBrowserKey, disable_auto_open_server_browser_->IsSelected());
 
     KeyValues* tab_data = server_browser_init_tab_->GetActiveItemUserData();
-    #if defined(GAMELAND_HOME_CLIENT) && GAMELAND_HOME_CLIENT
-    miscellaneous_settings_->SetInt(kServerBrowserInitialTabKey, (int)ServerBrowserTab::Favorites);
-#else
     miscellaneous_settings_->SetInt(kServerBrowserInitialTabKey, tab_data ? tab_data->GetInt("tab") : (int)ServerBrowserTab::Favorites);
-#endif
 
     bool color_scheme_apllied = ApplyColorScheme();
 

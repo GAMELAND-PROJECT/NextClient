@@ -11,7 +11,7 @@
 #endif
 
 #ifndef SourceRoot
-  #define SourceRoot "D:\Allclient"
+  #define SourceRoot "F:\Allclient"
 #endif
 
 [Setup]

@@ -9,7 +9,7 @@
 param(
     [string]$Version = "0.0.1",
     [string]$Tag = "GAMELAND",
-    [string]$BaseGameDir = "D:\Allclient",
+    [string]$BaseGameDir = "F:\Allclient",
     [switch]$PatchOnly,
     [switch]$InstallerOnly
 )
@@ -60,13 +60,13 @@ foreach ($dll in $clDllsToSync) {
 foreach ($bin in $binariesToSync) {
     $src = Join-Path $outBin $bin
     if (Test-Path -LiteralPath $src -PathType Leaf) {
-        Copy-Item -LiteralPath $src -Destination (Join-Path "D:\Allclient" $bin) -Force
+        Copy-Item -LiteralPath $src -Destination (Join-Path "F:\Allclient" $bin) -Force
     }
 }
 foreach ($dll in $clDllsToSync) {
     $src = Join-Path $outBin "cstrike\cl_dlls\$dll"
     if (Test-Path -LiteralPath $src -PathType Leaf) {
-        Copy-Item -LiteralPath $src -Destination (Join-Path "D:\Allclient" "cstrike\cl_dlls\$dll") -Force
+        Copy-Item -LiteralPath $src -Destination (Join-Path "F:\Allclient" "cstrike\cl_dlls\$dll") -Force
     }
 }
 
@@ -89,7 +89,7 @@ if (-not $InstallerOnly) {
     New-Item -ItemType Directory -Force -Path (Join-Path $patchStage "cstrike\cl_dlls") | Out-Null
 
     $outBin = Join-Path $rootDir "out\bin\Release"
-    $allclientDir = "D:\Allclient"
+    $allclientDir = "F:\Allclient"
 
     $binaries = @(
         "Allclient.exe",

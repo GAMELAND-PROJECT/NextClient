@@ -471,12 +471,8 @@ void CGameUI::ActivateServerBrowser(void)
 
             auto misc_settings = KeyValues::AutoDelete(OptionsSubMiscellaneous::GetSettings());
 
-#if defined(GAMELAND_HOME_CLIENT) && GAMELAND_HOME_CLIENT
-            int tab = (int)ServerBrowserTab::Favorites;
-#else
             int tab = misc_settings->GetInt(OptionsSubMiscellaneous::kServerBrowserInitialTabKey, (int)ServerBrowserTab::Favorites);
             tab = tab == (int)ServerBrowserTab::LAN ? tab : (int)ServerBrowserTab::Favorites;
-#endif
 
             g_pServerBrowser->Activate((ServerBrowserTab)tab);
         }
@@ -513,12 +509,8 @@ void CGameUI::OpenServerBrowserIfNeeded()
     auto misc_settings = KeyValues::AutoDelete(OptionsSubMiscellaneous::GetSettings());
     if (!misc_settings->GetBool(OptionsSubMiscellaneous::kDisableAutoOpenServerBrowserKey, true))
     {
-#if defined(GAMELAND_HOME_CLIENT) && GAMELAND_HOME_CLIENT
-        int tab = (int)ServerBrowserTab::Favorites;
-#else
         int tab = misc_settings->GetInt(OptionsSubMiscellaneous::kServerBrowserInitialTabKey, (int)ServerBrowserTab::Favorites);
         tab = tab == (int)ServerBrowserTab::LAN ? tab : (int)ServerBrowserTab::Favorites;
-#endif
 
         g_pServerBrowser->Activate((ServerBrowserTab)tab);
     }

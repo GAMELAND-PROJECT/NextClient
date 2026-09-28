@@ -1,6 +1,11 @@
 cmake_minimum_required(VERSION 3.21)
 project(NextClient VERSION 0.0.1)
 
+option(GAMELAND_HOME_CLIENT "Build GameLand Home Client edition (removes LAN / listen server)" ON)
+if (GAMELAND_HOME_CLIENT)
+    add_compile_definitions(GAMELAND_HOME_CLIENT=1)
+endif ()
+
 # VS 2022 is the newest Microsoft toolchain that supports producing native
 # Windows 7 binaries. VS 2026 raises the target floor to Windows 10, so reject
 # it instead of silently publishing an installer that cannot start on Win7.
