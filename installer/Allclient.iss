@@ -231,8 +231,35 @@ end;
 function FetchAccessApi(const Query: String; var ResponseText: String): Boolean; forward;
 function GetJsonString(const Json, Key: String): String; forward;
 
+function NormalizeDigitsAndPhone(const S: String): String;
+var
+  I: Integer;
+  C: Char;
+  Res: String;
+begin
+  Res := '';
+  for I := 1 to Length(S) do
+  begin
+    C := S[I];
+    case C of
+      #$06F0..#$06F9: Res := Res + Chr(Ord(C) - $06F0 + Ord('0'));
+      #$0660..#$0669: Res := Res + Chr(Ord(C) - $0660 + Ord('0'));
+      '0'..'9': Res := Res + C;
+      '+': if Res = '' then Res := '+';
+    end;
+  end;
+  if (Length(Res) >= 3) and (Copy(Res, 1, 3) = '+98') then
+    Res := '0' + Copy(Res, 4, Length(Res) - 3)
+  else if (Length(Res) >= 2) and (Copy(Res, 1, 2) = '98') and (Length(Res) = 12) then
+    Res := '0' + Copy(Res, 3, Length(Res) - 2);
+
+  Result := Trim(Res);
+end;
+
 function HomeAccessVerify(const Hash, Phone: String): Boolean;
 var
+  CleanHash: String;
+  CleanPhone: String;
   RequestUrl: String;
   ResponseText: String;
   NormalizedResponse: String;
@@ -244,30 +271,34 @@ begin
   OnlineServiceUnavailable := False;
   OnlineVerificationMessage := '';
 
-  if Length(Trim(Hash)) <> 24 then
+  CleanHash := Uppercase(Trim(Hash));
+  CleanPhone := NormalizeDigitsAndPhone(Phone);
+
+  if Length(CleanHash) <> 24 then
   begin
     OnlineVerificationMessage := 'کد سخت‌افزاری دستگاه باید دقیقاً ۲۴ کاراکتر باشد.';
     Exit;
   end;
 
-  if Length(Trim(Phone)) = 0 then
+  if Length(CleanPhone) = 0 then
   begin
     OnlineVerificationMessage := 'لطفاً شماره تلفن همراه ثبت‌شده در پنل را وارد نمایید.';
     Exit;
   end;
 
+  HomePhoneEdit.Text := CleanPhone;
   HomeStatusLabel.Caption := 'در حال بررسی اتصال و وضعیت اشتراک…';
   HomeStatusLabel.Font.Color := clGray;
   WizardForm.Update;
 
-  RequestUrl := '?action=verify_home&hash=' + Trim(Hash) + '&phone=' + Trim(Phone);
+  RequestUrl := '?action=verify_home&hash=' + CleanHash + '&phone=' + CleanPhone;
   if FetchAccessApi(RequestUrl, ResponseText) then
   begin
     NormalizedResponse := Lowercase(ResponseText);
     if Pos('"valid":true', NormalizedResponse) > 0 then
     begin
       Result := True;
-      UserPhoneNumber := Trim(Phone);
+      UserPhoneNumber := CleanPhone;
       DaysRemainingStr := GetJsonString(ResponseText, 'days_remaining');
       ExpiryStr := GetJsonString(ResponseText, 'expiry');
       OnlineVerificationMessage := '✓ اشتراک کلاینت خانگی با موفقیت تأیید شد. اعتبار: ' + DaysRemainingStr + ' روز باقی‌مانده (تا تاریخ ' + ExpiryStr + ')';
