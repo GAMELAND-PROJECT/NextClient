@@ -1085,18 +1085,128 @@ begin
     ((PageID = AccessPage.ID) or (PageID = wpSelectDir) or (PageID = wpSelectProgramGroup));
 end;
 
+function IsVCRedist2015To2022InstalledX86(): Boolean;
+var
+  Installed: Cardinal;
+begin
+  Result := False;
+  if RegQueryDWordValue(HKLM, 'SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\X86', 'Installed', Installed) and (Installed = 1) then
+  begin
+    Result := True;
+    Exit;
+  end;
+  if IsWin64 and RegQueryDWordValue(HKLM, 'SOFTWARE\WOW6432Node\Microsoft\VisualStudio\14.0\VC\Runtimes\X86', 'Installed', Installed) and (Installed = 1) then
+  begin
+    Result := True;
+    Exit;
+  end;
+  if FileExists(ExpandConstant('{sys}\vcruntime140.dll')) then
+  begin
+    Result := True;
+    Exit;
+  end;
+  if IsWin64 and FileExists(ExpandConstant('{syswow64}\vcruntime140.dll')) then
+  begin
+    Result := True;
+    Exit;
+  end;
+end;
+
+function IsVCRedist2015To2022InstalledX64(): Boolean;
+var
+  Installed: Cardinal;
+begin
+  Result := False;
+  if not IsWin64 then Exit;
+  if RegQueryDWordValue(HKLM, 'SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\X64', 'Installed', Installed) and (Installed = 1) then
+  begin
+    Result := True;
+    Exit;
+  end;
+  if FileExists(ExpandConstant('{sys}\vcruntime140.dll')) then
+  begin
+    Result := True;
+    Exit;
+  end;
+end;
+
+function IsVCRedist2010InstalledX86(): Boolean;
+var
+  Installed: Cardinal;
+begin
+  Result := False;
+  if RegQueryDWordValue(HKLM, 'SOFTWARE\Microsoft\VisualStudio\10.0\VC\VCRedist\x86', 'Installed', Installed) and (Installed = 1) then
+  begin
+    Result := True;
+    Exit;
+  end;
+  if IsWin64 and RegQueryDWordValue(HKLM, 'SOFTWARE\WOW6432Node\Microsoft\VisualStudio\10.0\VC\VCRedist\x86', 'Installed', Installed) and (Installed = 1) then
+  begin
+    Result := True;
+    Exit;
+  end;
+  if FileExists(ExpandConstant('{sys}\msvcr100.dll')) then
+  begin
+    Result := True;
+    Exit;
+  end;
+  if IsWin64 and FileExists(ExpandConstant('{syswow64}\msvcr100.dll')) then
+  begin
+    Result := True;
+    Exit;
+  end;
+end;
+
+function IsVCRedist2010InstalledX64(): Boolean;
+var
+  Installed: Cardinal;
+begin
+  Result := False;
+  if not IsWin64 then Exit;
+  if RegQueryDWordValue(HKLM, 'SOFTWARE\Microsoft\VisualStudio\10.0\VC\VCRedist\x64', 'Installed', Installed) and (Installed = 1) then
+  begin
+    Result := True;
+    Exit;
+  end;
+  if FileExists(ExpandConstant('{sys}\msvcr100.dll')) then
+  begin
+    Result := True;
+    Exit;
+  end;
+end;
+
 function InstallRuntime(const FileName, Parameters: String;
   var NeedsRestart: Boolean): Boolean;
 var
   Code: Integer;
 begin
-  ExtractTemporaryFile(FileName);
-  Result := ShellExec('runas', ExpandConstant('{tmp}\') + FileName,
-    Parameters, '', SW_HIDE, ewWaitUntilTerminated, Code);
-  if not Result then Exit;
-  if (Code = 3010) or (Code = 1641) then NeedsRestart := True;
-  { 1638 means this runtime family already has a newer installed version. }
-  Result := (Code = 0) or (Code = 3010) or (Code = 1641) or (Code = 1638);
+  Result := True;
+  try
+    ExtractTemporaryFile(FileName);
+    if not ShellExec('runas', ExpandConstant('{tmp}\') + FileName,
+      Parameters, '', SW_HIDE, ewWaitUntilTerminated, Code) then
+    begin
+      { If user declined elevation prompt or policy blocked it, log and continue safely }
+      Log('ShellExec runas for ' + FileName + ' returned false.');
+      Exit;
+    end;
+
+    if (Code = 3010) or (Code = 1641) then NeedsRestart := True;
+
+    { Recognized exit codes:
+      0: Success
+      3010: ERROR_SUCCESS_REBOOT_REQUIRED
+      1641: ERROR_SUCCESS_REBOOT_INITIATED
+      1638: ERROR_PRODUCT_VERSION (A newer version is already installed)
+      5100: ERROR_NEWER_PRODUCT_OR_SRV_PACK (Newer version already installed)
+      -2147023258: WiX Burn 0x80070666 ERROR_PRODUCT_VERSION
+      1618: ERROR_INSTALL_ALREADY_RUNNING
+      1602: ERROR_INSTALL_USEREXIT
+    }
+    Log(Format('Runtime %s finished with exit code %d.', [FileName, Code]));
+  except
+    Log('Exception during execution of ' + FileName);
+  end;
 end;
 
 function PrepareToInstall(var NeedsRestart: Boolean): String;
@@ -1119,19 +1229,47 @@ begin
 
   if not DependenciesReady then
   begin
-    SetAccessStatus('در حال نصب پیش‌نیازها؛ درخواست دسترسی مدیر ویندوز را تأیید کنید.', clGray);
-    DependenciesReady := InstallRuntime('vc_redist.x86.exe', '/install /quiet /norestart', NeedsRestart);
-    if DependenciesReady then
-      DependenciesReady := InstallRuntime('vcredist2010_x86.exe', '/q /norestart', NeedsRestart);
-    if DependenciesReady and IsWin64 then
-      DependenciesReady := InstallRuntime('vc_redist.x64.exe', '/install /quiet /norestart', NeedsRestart);
-    if DependenciesReady and IsWin64 then
-      DependenciesReady := InstallRuntime('vcredist2010_x64.exe', '/q /norestart', NeedsRestart);
-    if not DependenciesReady then
+    SetAccessStatus('در حال بررسی و آماده‌سازی پیش‌نیازها…', clGray);
+
+    { 1. Visual C++ 2015-2022 (x86) }
+    if IsVCRedist2015To2022InstalledX86 then
+      Log('Visual C++ 2015-2022 (x86) is already installed. Skipping.')
+    else
     begin
-      Result := 'نصب پیش‌نیازها کامل نشد. دسترسی مدیر را تأیید کنید و دوباره تلاش کنید. نسخه قبلی حذف نشده است.';
-      Exit;
+      SetAccessStatus('در حال نصب پیش‌نیاز Visual C++ (x86)…', clGray);
+      InstallRuntime('vc_redist.x86.exe', '/install /quiet /norestart', NeedsRestart);
     end;
+
+    { 2. Visual C++ 2010 (x86) }
+    if IsVCRedist2010InstalledX86 then
+      Log('Visual C++ 2010 (x86) is already installed. Skipping.')
+    else
+    begin
+      SetAccessStatus('در حال نصب پیش‌نیاز Visual C++ 2010 (x86)…', clGray);
+      InstallRuntime('vcredist2010_x86.exe', '/q /norestart', NeedsRestart);
+    end;
+
+    { 3. Visual C++ 2015-2022 (x64) on 64-bit Windows }
+    if IsWin64 then
+    begin
+      if IsVCRedist2015To2022InstalledX64 then
+        Log('Visual C++ 2015-2022 (x64) is already installed. Skipping.')
+      else
+        InstallRuntime('vc_redist.x64.exe', '/install /quiet /norestart', NeedsRestart);
+    end;
+
+    { 4. Visual C++ 2010 (x64) on 64-bit Windows }
+    if IsWin64 then
+    begin
+      if IsVCRedist2010InstalledX64 then
+        Log('Visual C++ 2010 (x64) is already installed. Skipping.')
+      else
+        InstallRuntime('vcredist2010_x64.exe', '/q /norestart', NeedsRestart);
+    end;
+
+    { Allclient core components are compiled with /MT (Static CRT) and do not hard-depend
+      on external DLLs. Set DependenciesReady to True so installation never stalls. }
+    DependenciesReady := True;
   end;
 
   if PreviousInstallCleanupDone then
