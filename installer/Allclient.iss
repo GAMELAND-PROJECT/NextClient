@@ -65,7 +65,10 @@ Source: "{#BinaryRoot}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs
 
 [INI]
 Filename: "{app}\allclient-install.ini"; Section: "Allclient"; Key: "Schema"; String: "1"
-Filename: "{app}\allclient-install.ini"; Section: "Allclient"; Key: "GameNetTag"; String: "{code:GetActiveGameNetTag}"
+Filename: "{app}\allclient-install.ini"; Section: "Allclient"; Key: "ClientType"; String: "Home"
+Filename: "{app}\allclient-install.ini"; Section: "Allclient"; Key: "GameNetTag"; String: ""
+Filename: "{app}\allclient-install.ini"; Section: "Allclient"; Key: "DeviceHash"; String: "{code:GetDeviceHash}"
+Filename: "{app}\allclient-install.ini"; Section: "Allclient"; Key: "PhoneNumber"; String: "{code:GetUserPhoneNumber}"
 
 [Registry]
 Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Uninstall\{{D9E46BD1-52F8-470F-8639-FF31FE7C5E48}_is1"; ValueType: string; ValueName: "GameNetTag"; ValueData: "{code:GetActiveGameNetTag}"; Flags: uninsdeletevalue
@@ -137,6 +140,17 @@ const
   AllclientUninstallKey = 'Software\Microsoft\Windows\CurrentVersion\Uninstall\{D9E46BD1-52F8-470F-8639-FF31FE7C5E48}_is1';
 
 var
+  HomeActivationPage: TWizardPage;
+  HomeDescLabel: TNewStaticText;
+  HomeHashLabel: TNewStaticText;
+  HomeHashEdit: TNewEdit;
+  HomeCopyButton: TNewButton;
+  HomePhoneLabel: TNewStaticText;
+  HomePhoneEdit: TNewEdit;
+  HomeStatusLabel: TNewStaticText;
+  HomeVerifyButton: TNewButton;
+  DeviceHash24: String;
+  UserPhoneNumber: String;
   PreparationPage: TWizardPage;
   PreparationStatusLabel: TNewStaticText;
   PreparationProgress: TNewProgressBar;
@@ -161,6 +175,142 @@ var
   PayloadDownloadPage: TDownloadWizardPage;
   ActiveGameNetTag: String;
   IsPatchMode: Boolean;
+
+function GetDeviceHash(Param: String): String;
+begin
+  Result := DeviceHash24;
+end;
+
+function GetUserPhoneNumber(Param: String): String;
+begin
+  Result := Trim(UserPhoneNumber);
+end;
+
+function Compute24CharDeviceHash(): String;
+var
+  MachineGuid: String;
+  VolSerial, MaxLen, Flags: DWORD;
+  ComputerName: String;
+  CpuName: String;
+  RawSeed: String;
+  Sha256Hex: String;
+begin
+  MachineGuid := '';
+  if IsWin64 then
+    RegQueryStringValue(HKLM64, 'SOFTWARE\Microsoft\Cryptography', 'MachineGuid', MachineGuid);
+  if MachineGuid = '' then
+    RegQueryStringValue(HKLM, 'SOFTWARE\Microsoft\Cryptography', 'MachineGuid', MachineGuid);
+  if MachineGuid = '' then
+    RegQueryStringValue(HKLM32, 'SOFTWARE\Microsoft\Cryptography', 'MachineGuid', MachineGuid);
+
+  VolSerial := 0;
+  MaxLen := 0;
+  Flags := 0;
+  GetVolumeInformation('C:\', '', 0, VolSerial, MaxLen, Flags, '', 0);
+
+  ComputerName := ExpandConstant('{computername}');
+
+  CpuName := '';
+  RegQueryStringValue(HKLM, 'HARDWARE\DESCRIPTION\System\CentralProcessor\0', 'ProcessorNameString', CpuName);
+
+  RawSeed := MachineGuid + '|' + Format('%.8X', [VolSerial]) + '|' + ComputerName + '|' + CpuName;
+  if Trim(RawSeed) = '|||' then
+    RawSeed := Format('FALLBACK_%.8X', [VolSerial]);
+
+  Sha256Hex := Uppercase(GetSHA256OfString(RawSeed));
+  Result := Copy(Sha256Hex, 1, 24);
+end;
+
+procedure CopyDeviceHashClick(Sender: TObject);
+begin
+  HomeHashEdit.SelectAll;
+  SendMessage(HomeHashEdit.Handle, 769 {WM_COPY}, 0, 0);
+  HomeCopyButton.Caption := '✓ کپی شد!';
+end;
+
+function FetchAccessApi(const Query: String; var ResponseText: String): Boolean; forward;
+function GetJsonString(const Json, Key: String): String; forward;
+
+function HomeAccessVerify(const Hash, Phone: String): Boolean;
+var
+  RequestUrl: String;
+  ResponseText: String;
+  NormalizedResponse: String;
+  DaysRemainingStr: String;
+  ExpiryStr: String;
+  ServerErr: String;
+begin
+  Result := False;
+  OnlineServiceUnavailable := False;
+  OnlineVerificationMessage := '';
+
+  if Length(Trim(Hash)) <> 24 then
+  begin
+    OnlineVerificationMessage := 'کد سخت‌افزاری دستگاه باید دقیقاً ۲۴ کاراکتر باشد.';
+    Exit;
+  end;
+
+  if Length(Trim(Phone)) = 0 then
+  begin
+    OnlineVerificationMessage := 'لطفاً شماره تلفن همراه ثبت‌شده در پنل را وارد نمایید.';
+    Exit;
+  end;
+
+  HomeStatusLabel.Caption := 'در حال بررسی اتصال و وضعیت اشتراک…';
+  HomeStatusLabel.Font.Color := clGray;
+  WizardForm.Update;
+
+  RequestUrl := '?action=verify_home&hash=' + Trim(Hash) + '&phone=' + Trim(Phone);
+  if FetchAccessApi(RequestUrl, ResponseText) then
+  begin
+    NormalizedResponse := Lowercase(ResponseText);
+    if Pos('"valid":true', NormalizedResponse) > 0 then
+    begin
+      Result := True;
+      UserPhoneNumber := Trim(Phone);
+      DaysRemainingStr := GetJsonString(ResponseText, 'days_remaining');
+      ExpiryStr := GetJsonString(ResponseText, 'expiry');
+      OnlineVerificationMessage := '✓ اشتراک کلاینت خانگی با موفقیت تأیید شد. اعتبار: ' + DaysRemainingStr + ' روز باقی‌مانده (تا تاریخ ' + ExpiryStr + ')';
+    end
+    else
+    begin
+      Result := False;
+      ServerErr := GetJsonString(ResponseText, 'error');
+      if ServerErr <> '' then
+        OnlineVerificationMessage := ServerErr
+      else
+        OnlineVerificationMessage := 'این کد دستگاه هنوز با این شماره تلفن در پنل مدیریت تأیید نشده است.';
+    end;
+  end
+  else
+  begin
+    OnlineServiceUnavailable := True;
+    OnlineVerificationMessage := 'خطا در برقراری ارتباط با سرور تأیید آنلاین. اتصال اینترنت را بررسی کنید.';
+  end;
+end;
+
+procedure VerifyHomeClientClick(Sender: TObject);
+begin
+  HomeVerifyButton.Enabled := False;
+  try
+    if HomeAccessVerify(HomeHashEdit.Text, HomePhoneEdit.Text) then
+    begin
+      AccessApproved := True;
+      HomeStatusLabel.Caption := OnlineVerificationMessage;
+      HomeStatusLabel.Font.Color := clGreen;
+      MsgBox(OnlineVerificationMessage, mbInformation, MB_OK);
+    end
+    else
+    begin
+      AccessApproved := False;
+      HomeStatusLabel.Caption := OnlineVerificationMessage;
+      HomeStatusLabel.Font.Color := clRed;
+      MsgBox(OnlineVerificationMessage, mbError, MB_OK);
+    end;
+  finally
+    HomeVerifyButton.Enabled := True;
+  end;
+end;
 
 function GetActiveGameNetTag(Param: String): String;
 begin
@@ -612,6 +762,93 @@ begin
   PreparationRetryButton.OnClick := @RunEarlyPreparation;
   PreparationRetryButton.Visible := False;
 
+  DeviceHash24 := Compute24CharDeviceHash();
+
+  HomeActivationPage := CreateCustomPage(
+    wpWelcome,
+    'فعال‌سازی اشتراک کلاینت خانگی گیم‌لند',
+    'شناسه سخت‌افزاری اختصاصی دستگاه و تأیید شماره موبایل');
+
+  HomeDescLabel := TNewStaticText.Create(WizardForm);
+  HomeDescLabel.Parent := HomeActivationPage.Surface;
+  HomeDescLabel.Left := ScaleX(4);
+  HomeDescLabel.Top := ScaleY(4);
+  HomeDescLabel.Width := HomeActivationPage.SurfaceWidth - ScaleX(8);
+  HomeDescLabel.Height := ScaleY(46);
+  HomeDescLabel.AutoSize := False;
+  HomeDescLabel.WordWrap := True;
+  HomeDescLabel.Caption :=
+    'این نسخه مخصوص کلاینت خانگی است. کد دستگاه زیر به صورت هوشمند از قطعات سخت‌افزاری رایانه شما تولید شده است. لطفاً آن را کپی کرده و برای مدیریت ارسال کنید تا با شماره همراه شما فعال شود:';
+
+  HomeHashLabel := TNewStaticText.Create(WizardForm);
+  HomeHashLabel.Parent := HomeActivationPage.Surface;
+  HomeHashLabel.Left := ScaleX(4);
+  HomeHashLabel.Top := ScaleY(54);
+  HomeHashLabel.Width := HomeActivationPage.SurfaceWidth - ScaleX(8);
+  HomeHashLabel.Height := ScaleY(18);
+  HomeHashLabel.Caption := 'کد اختصاصی دستگاه شما (۲۴ کاراکتر - غیرقابل ویرایش):';
+  HomeHashLabel.Font.Style := [fsBold];
+
+  HomeHashEdit := TNewEdit.Create(WizardForm);
+  HomeHashEdit.Parent := HomeActivationPage.Surface;
+  HomeHashEdit.Left := ScaleX(4);
+  HomeHashEdit.Top := ScaleY(74);
+  HomeHashEdit.Width := HomeActivationPage.SurfaceWidth - ScaleX(140);
+  HomeHashEdit.Height := ScaleY(30);
+  HomeHashEdit.Text := DeviceHash24;
+  HomeHashEdit.ReadOnly := True;
+  HomeHashEdit.Color := clBtnFace;
+  HomeHashEdit.Font.Name := 'Consolas';
+  HomeHashEdit.Font.Size := 11;
+  HomeHashEdit.Font.Style := [fsBold];
+
+  HomeCopyButton := TNewButton.Create(WizardForm);
+  HomeCopyButton.Parent := HomeActivationPage.Surface;
+  HomeCopyButton.Left := HomeActivationPage.SurfaceWidth - ScaleX(130);
+  HomeCopyButton.Top := ScaleY(73);
+  HomeCopyButton.Width := ScaleX(130);
+  HomeCopyButton.Height := ScaleY(32);
+  HomeCopyButton.Caption := 'کپی کد دستگاه (Copy)';
+  HomeCopyButton.OnClick := @CopyDeviceHashClick;
+
+  HomePhoneLabel := TNewStaticText.Create(WizardForm);
+  HomePhoneLabel.Parent := HomeActivationPage.Surface;
+  HomePhoneLabel.Left := ScaleX(4);
+  HomePhoneLabel.Top := ScaleY(118);
+  HomePhoneLabel.Width := HomeActivationPage.SurfaceWidth - ScaleX(8);
+  HomePhoneLabel.Height := ScaleY(18);
+  HomePhoneLabel.Caption := 'شماره تلفن همراه شما (ثبت‌شده در پنل مدیریت):';
+  HomePhoneLabel.Font.Style := [fsBold];
+
+  HomePhoneEdit := TNewEdit.Create(WizardForm);
+  HomePhoneEdit.Parent := HomeActivationPage.Surface;
+  HomePhoneEdit.Left := ScaleX(4);
+  HomePhoneEdit.Top := ScaleY(138);
+  HomePhoneEdit.Width := ScaleX(200);
+  HomePhoneEdit.Height := ScaleY(26);
+  HomePhoneEdit.MaxLength := 15;
+  HomePhoneEdit.Text := '';
+
+  HomeVerifyButton := TNewButton.Create(WizardForm);
+  HomeVerifyButton.Parent := HomeActivationPage.Surface;
+  HomeVerifyButton.Left := ScaleX(215);
+  HomeVerifyButton.Top := ScaleY(137);
+  HomeVerifyButton.Width := ScaleX(160);
+  HomeVerifyButton.Height := ScaleY(28);
+  HomeVerifyButton.Caption := 'بررسی و تأیید فعال‌سازی';
+  HomeVerifyButton.OnClick := @VerifyHomeClientClick;
+
+  HomeStatusLabel := TNewStaticText.Create(WizardForm);
+  HomeStatusLabel.Parent := HomeActivationPage.Surface;
+  HomeStatusLabel.Left := ScaleX(4);
+  HomeStatusLabel.Top := ScaleY(178);
+  HomeStatusLabel.Width := HomeActivationPage.SurfaceWidth - ScaleX(8);
+  HomeStatusLabel.Height := ScaleY(52);
+  HomeStatusLabel.AutoSize := False;
+  HomeStatusLabel.WordWrap := True;
+  HomeStatusLabel.Caption := 'پس از ارسال کد بالا به مدیریت، شماره موبایل خود را وارد کرده و روی «بررسی و تأیید فعال‌سازی» کلیک کنید.';
+  HomeStatusLabel.Font.Color := clGray;
+
   AccessPage := CreateInputQueryPage(
     PreparationPage.ID,
     'تأیید مجوز نصب',
@@ -958,6 +1195,30 @@ var
   InputUsername, InputPassword: String;
 begin
   Result := True;
+  if CurPageID = HomeActivationPage.ID then
+  begin
+    WizardForm.NextButton.Enabled := False;
+    try
+      Result := HomeAccessVerify(HomeHashEdit.Text, HomePhoneEdit.Text);
+      if Result then
+      begin
+        AccessApproved := True;
+        HomeStatusLabel.Caption := OnlineVerificationMessage;
+        HomeStatusLabel.Font.Color := clGreen;
+      end
+      else
+      begin
+        AccessApproved := False;
+        HomeStatusLabel.Caption := OnlineVerificationMessage;
+        HomeStatusLabel.Font.Color := clRed;
+        MsgBox(OnlineVerificationMessage, mbError, MB_OK);
+      end;
+    finally
+      WizardForm.NextButton.Enabled := True;
+    end;
+    Exit;
+  end;
+
   if CurPageID = AccessPage.ID then
   begin
     WizardForm.NextButton.Enabled := False;
@@ -1351,6 +1612,10 @@ begin
         SetFileAttributes(ExpandConstant('{app}\gameland_license.dat'), 7);
       end;
     end;
+    SetIniString('Allclient', 'ClientType', 'Home', ExpandConstant('{app}\allclient-install.ini'));
+    SetIniString('Allclient', 'GameNetTag', '', ExpandConstant('{app}\allclient-install.ini'));
+    SetIniString('Allclient', 'DeviceHash', DeviceHash24, ExpandConstant('{app}\allclient-install.ini'));
+    SetIniString('Allclient', 'PhoneNumber', UserPhoneNumber, ExpandConstant('{app}\allclient-install.ini'));
     ConfigureSmartEmu(ExpandConstant('{app}\platform\steam\games\SmartEmu\config.xml'));
   end;
 end;

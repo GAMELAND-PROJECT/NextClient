@@ -151,23 +151,57 @@ void ClientLauncher::Run()
     // Resolve the package entitlement once per launcher start. GameUI reads
     // only this result and never performs network work during gameplay.
     const GameNetAccessStatus online_access = QueryGameNetOnlineAccess();
-    if (!online_access.lan_allowed)
+
+    if (online_access.is_home_client)
     {
-        MessageBoxW(nullptr,
-            L"\u0645\u0647\u0644\u062a \u062f\u0633\u062a\u0631\u0633\u06cc \u0644\u0646 \u062a\u0645\u0627\u0645 \u0634\u062f\u0647 \u06cc\u0627 \u0647\u0646\u0648\u0632 \u0641\u0639\u0627\u0644 \u0646\u0634\u062f\u0647 \u0627\u0633\u062a.\n"
-            L"\u0628\u0647 \u0627\u06cc\u0646\u062a\u0631\u0646\u062a \u0645\u062a\u0635\u0644 \u0634\u0648\u06cc\u062f \u0648 \u0628\u0627 \u0627\u0634\u062a\u0631\u0627\u06a9 \u0641\u0639\u0627\u0644 \u062f\u0648\u0628\u0627\u0631\u0647 \u0644\u0627\u0646\u0686\u0631 \u0631\u0627 \u0627\u062c\u0631\u0627 \u06a9\u0646\u06cc\u062f.\n"
-            L"\u0627\u06af\u0631 \u0627\u06cc\u0646\u062a\u0631\u0646\u062a \u0645\u062a\u0635\u0644 \u0627\u0633\u062a\u060c \u062a\u0627\u0631\u06cc\u062e \u0648 \u0633\u0627\u0639\u062a \u0648\u06cc\u0646\u062f\u0648\u0632 \u0631\u0627 \u0628\u0631\u0631\u0633\u06cc \u06a9\u0646\u06cc\u062f.",
-            L"\u0631\u0627\u0647\u200c\u0627\u0646\u062f\u0627\u0632 Allclient", MB_OK | MB_ICONWARNING | MB_DEFAULT_DESKTOP_ONLY | MB_RIGHT | MB_RTLREADING);
-        return;
+        if (online_access.state == GameNetAccessState::InvalidEntry)
+        {
+            MessageBoxW(nullptr,
+                L"\u06a9\u062f \u0633\u062e\u062a\u200c\u0627\u0641\u0632\u0627\u0631\u06cc \u0627\u06cc\u0646 \u0633\u06cc\u0633\u062a\u0645 \u0628\u0627 \u0644\u0627\u06cc\u0633\u0646\u0633 \u0646\u0635\u0628\u200c\u0634\u062f\u0647 \u0645\u0637\u0627\u0628\u0642\u062a \u0646\u062f\u0627\u0631\u062f.\n"
+                L"\u06a9\u067e\u06cc \u06a9\u0631\u062f\u0646 \u06cc\u0627 \u0627\u0646\u062a\u0642\u0627\u0644 \u067e\u0648\u0634\u0647 \u0628\u0627\u0632\u06cc \u0645\u062c\u0627\u0632 \u0646\u0645\u06cc\u200c\u0628\u0627\u0634\u062f.\n\n"
+                L"\u0644\u0637\u0641\u0627\u064b \u0628\u0627\u0632\u06cc \u0631\u0627 \u0627\u0632 \u0637\u0631\u06cc\u0642 \u0627\u06cc\u0646\u0633\u062a\u0627\u0644\u0631 \u0631\u0633\u0645\u06cc \u0646\u0635\u0628 \u0648 \u0641\u0639\u0627\u0644\u200c\u0633\u0627\u0632\u06cc \u0646\u0645\u0627\u06cc\u06cc\u062f.",
+                L"\u062e\u0637\u0627\u06cc \u0627\u0645\u0646\u06cc\u062a\u06cc Allclient (\u0646\u0633\u062e\u0647 \u062e\u0627\u0646\u06af\u06cc)", MB_OK | MB_ICONERROR | MB_DEFAULT_DESKTOP_ONLY | MB_RIGHT | MB_RTLREADING);
+            return;
+        }
+
+        if (!online_access.allowed())
+        {
+            std::wstring subPhone(online_access.phone_number.begin(), online_access.phone_number.end());
+            if (subPhone.empty()) subPhone = L"-";
+            std::wstring devHash(online_access.device_hash.begin(), online_access.device_hash.end());
+            if (devHash.empty()) devHash = L"-";
+            std::wstring msg = L"\u0645\u062f\u062a \u0632\u0645\u0627\u0646 \u0627\u0634\u062a\u0631\u0627\u06a9 \u06a9\u0644\u0627\u06cc\u0646\u062a \u062e\u0627\u0646\u06af\u06cc \u0634\u0645\u0627 \u0628\u0647 \u067e\u0627\u06cc\u0627\u0646 \u0631\u0633\u06cc\u062f\u0647 \u0627\u0633\u062a.\n\n"
+                               L"\u0634\u0645\u0627\u0631\u0647 \u0627\u0634\u062a\u0631\u0627\u06a9: " + subPhone + L"\n"
+                               L"\u06a9\u062f \u062f\u0633\u062a\u06af\u0627\u0647: " + devHash + L"\n\n"
+                               L"\u062c\u0647\u062a \u062a\u0645\u062f\u06cc\u062f \u0627\u0634\u062a\u0631\u0627\u06a9 \u0628\u0627 \u067e\u0634\u062a\u06cc\u0628\u0627\u0646\u06cc \u06af\u06cc\u0645\u200c\u0644\u0646\u062f \u062a\u0645\u0627\u0633 \u0628\u06af\u06cc\u0631\u06cc\u062f.\nhttps://gameland.cam";
+            MessageBoxW(nullptr, msg.c_str(),
+                L"\u0631\u0627\u0647\u200c\u0627\u0646\u062f\u0627\u0632 Allclient (\u0646\u0633\u062e\u0647 \u062e\u0627\u0646\u06af\u06cc)", MB_OK | MB_ICONERROR | MB_DEFAULT_DESKTOP_ONLY | MB_RIGHT | MB_RTLREADING);
+            return; // STRICT LOCKOUT: Do NOT launch the game!
+        }
+
+        SetEnvironmentVariableA("NEXTCLIENT_ONLINE_ACCESS", "1");
+        SetEnvironmentVariableA("NEXTCLIENT_PLAYER_NAME_TAG", "");
     }
-    SetEnvironmentVariableA("NEXTCLIENT_ONLINE_ACCESS", online_access.allowed() ? "1" : "0");
-    SetEnvironmentVariableA("NEXTCLIENT_PLAYER_NAME_TAG",
-        online_access.player_name_tag.c_str());
-    if (!online_access.allowed())
+    else
     {
-        MessageBoxW(nullptr,
-            L"\u062f\u0633\u062a\u0631\u0633\u06cc \u0622\u0646\u0644\u0627\u06cc\u0646 \u0627\u06cc\u0646 \u0646\u0633\u062e\u0647 \u0641\u0639\u0627\u0644 \u0646\u06cc\u0633\u062a. \u0628\u0627\u0632\u06cc \u062f\u0631 \u0634\u0628\u06a9\u0647 \u0645\u062d\u0644\u06cc \u062a\u0627 \u067e\u0627\u06cc\u0627\u0646 \u0645\u0647\u0644\u062a \u0644\u0646 \u062f\u0631 \u062f\u0633\u062a\u0631\u0633 \u0627\u0633\u062a.",
-            L"\u0631\u0627\u0647\u200c\u0627\u0646\u062f\u0627\u0632 Allclient", MB_OK | MB_ICONWARNING | MB_DEFAULT_DESKTOP_ONLY | MB_RIGHT | MB_RTLREADING);
+        if (!online_access.lan_allowed)
+        {
+            MessageBoxW(nullptr,
+                L"\u0645\u0647\u0644\u062a \u062f\u0633\u062a\u0631\u0633\u06cc \u0644\u0646 \u062a\u0645\u0627\u0645 \u0634\u062f\u0647 \u06cc\u0627 \u0647\u0646\u0648\u0632 \u0641\u0639\u0627\u0644 \u0646\u0634\u062f\u0647 \u0627\u0633\u062a.\n"
+                L"\u0628\u0647 \u0627\u06cc\u0646\u062a\u0631\u0646\u062a \u0645\u062a\u0635\u0644 \u0634\u0648\u06cc\u062f \u0648 \u0628\u0627 \u0627\u0634\u062a\u0631\u0627\u06a9 \u0641\u0639\u0627\u0644 \u062f\u0648\u0628\u0627\u0631\u0647 \u0644\u0627\u0646\u0686\u0631 \u0631\u0627 \u0627\u062c\u0631\u0627 \u06a9\u0646\u06cc\u062f.\n"
+                L"\u0627\u06af\u0631 \u0627\u06cc\u0646\u062a\u0631\u0646\u062a \u0645\u062a\u0635\u0644 \u0627\u0633\u062a\u060c \u062a\u0627\u0631\u06cc\u062e \u0648 \u0633\u0627\u0639\u062a \u0648\u06cc\u0646\u062f\u0648\u0632 \u0631\u0627 \u0628\u0631\u0631\u0633\u06cc \u06a9\u0646\u06cc\u062f.",
+                L"\u0631\u0627\u0647\u200c\u0627\u0646\u062f\u0627\u0632 Allclient", MB_OK | MB_ICONWARNING | MB_DEFAULT_DESKTOP_ONLY | MB_RIGHT | MB_RTLREADING);
+            return;
+        }
+        SetEnvironmentVariableA("NEXTCLIENT_ONLINE_ACCESS", online_access.allowed() ? "1" : "0");
+        SetEnvironmentVariableA("NEXTCLIENT_PLAYER_NAME_TAG",
+            online_access.player_name_tag.c_str());
+        if (!online_access.allowed())
+        {
+            MessageBoxW(nullptr,
+                L"\u062f\u0633\u062a\u0631\u0633\u06cc \u0622\u0646\u0644\u0627\u06cc\u0646 \u0627\u06cc\u0646 \u0646\u0633\u062e\u0647 \u0641\u0639\u0627\u0644 \u0646\u06cc\u0633\u062a. \u0628\u0627\u0632\u06cc \u062f\u0631 \u0634\u0628\u06a9\u0647 \u0645\u062d\u0644\u06cc \u062a\u0627 \u067e\u0627\u06cc\u0627\u0646 \u0645\u0647\u0644\u062a \u0644\u0646 \u062f\u0631 \u062f\u0633\u062a\u0631\u0633 \u0627\u0633\u062a.",
+                L"\u0631\u0627\u0647\u200c\u0627\u0646\u062f\u0627\u0632 Allclient", MB_OK | MB_ICONWARNING | MB_DEFAULT_DESKTOP_ONLY | MB_RIGHT | MB_RTLREADING);
+        }
     }
 
     if (config_provider_->get_value_int("create_console_window", 0))

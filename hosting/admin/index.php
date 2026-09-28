@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 const FILE_SERVERS = 'pinned_servers.txt';
 const FILE_MIX_SERVERS = 'mix_servers.txt';
+const FILE_HOME_CLIENTS = 'home_clients.json';
 const FILE_TAGS = 'client_tags.txt';
 const FILE_PASSWORD = 'server_password.txt';
 const FILE_FTP_CONFIG = 'ftp_config.txt';
@@ -482,6 +483,72 @@ function readSuspendedSubscriptionRows(): array
     return $rows;
 }
 
+function normalizeDeviceHash(string $hash): string
+{
+    $hash = strtoupper(trim($hash));
+    $hash = (string)preg_replace('/[^A-F0-9]/', '', $hash);
+    return substr($hash, 0, 24);
+}
+
+function normalizePhoneNumber(string $phone): string
+{
+    $phone = normalizeAdminPassword($phone);
+    return (string)preg_replace('/[^0-9]/', '', $phone);
+}
+
+function readHomeClients(): array
+{
+    $path = dataPath(FILE_HOME_CLIENTS);
+    if (!is_file($path)) {
+        return [];
+    }
+    $raw = file_get_contents($path);
+    if (!is_string($raw) || trim($raw) === '') {
+        return [];
+    }
+    $data = json_decode($raw, true);
+    return is_array($data) ? $data : [];
+}
+
+function writeHomeClients(array $clients): void
+{
+    backupAndAtomicWrite(FILE_HOME_CLIENTS, json_encode($clients, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) . "\n");
+}
+
+function decorateHomeClientRows(array $clients): array
+{
+    $rows = [];
+    $today = iranToday();
+    foreach ($clients as $hash => $data) {
+        if (!is_array($data)) continue;
+        $row = $data;
+        $row['hash'] = (string)$hash;
+        $expiry = (string)($data['expiry'] ?? '');
+        $row['days_remaining'] = -9999;
+        if (validJalaliDate($expiry)) {
+            $row['days_remaining'] = (int)$today->diff(jalaliDateToDateTime($expiry))->format('%r%a');
+        }
+        if (!empty($data['suspended'])) {
+            $row['state'] = 'suspended';
+            $row['state_label'] = 'معلق';
+        } elseif ($row['days_remaining'] < 0) {
+            $row['state'] = 'expired';
+            $row['state_label'] = 'منقضی';
+        } elseif ($row['days_remaining'] <= 3) {
+            $row['state'] = 'expiring';
+            $row['state_label'] = 'رو به اتمام';
+        } else {
+            $row['state'] = 'active';
+            $row['state_label'] = 'فعال';
+        }
+        $rows[] = $row;
+    }
+    usort($rows, function ($a, $b) {
+        return $a['days_remaining'] <=> $b['days_remaining'];
+    });
+    return $rows;
+}
+
 function subscriptionRowsByKey(): array
 {
     $rows = [];
@@ -709,7 +776,68 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } elseif ($action === 'restore_backup') {
             restorePanelBackup((array)($_FILES['panel_backup'] ?? []));
             flash('success', 'Panel backup restored successfully.');
-        } elseif ($action === 'save_tags') {
+        } elseif ($action === 'add_home_client' || $action === 'save_home_client') {
+            $hash = normalizeDeviceHash((string)($_POST['hash'] ?? ''));
+            $phone = normalizePhoneNumber((string)($_POST['phone'] ?? ''));
+            $expiry = trim((string)($_POST['expiry'] ?? ''));
+            $notes = trim((string)($_POST['notes'] ?? ''));
+            if (strlen($hash) !== 24) {
+                throw new RuntimeException('کد هش دستگاه باید دقیقاً ۲۴ کاراکتر باشد.');
+            }
+            if ($phone === '') {
+                throw new RuntimeException('شماره تلفن معتبر الزامی است.');
+            }
+            if (!validJalaliDate($expiry)) {
+                throw new RuntimeException('تاریخ انقضای شمسی معتبر نیست. مثال: 1405/08/15');
+            }
+            $clients = readHomeClients();
+            $clients[$hash] = [
+                'hash' => $hash,
+                'phone' => $phone,
+                'expiry' => $expiry,
+                'notes' => $notes,
+                'created_at' => $clients[$hash]['created_at'] ?? (dateTimeToJalali(iranToday())),
+                'suspended' => false,
+            ];
+            writeHomeClients($clients);
+            flash('success', 'کلاینت خانگی با موفقیت ثبت شد و با شماره ' . $phone . ' فعال گردید.');
+        } elseif ($action === 'adjust_home_client') {
+            $hash = normalizeDeviceHash((string)($_POST['hash'] ?? ''));
+            $op = (string)($_POST['operation'] ?? '');
+            $clients = readHomeClients();
+            if (!isset($clients[$hash])) {
+                throw new RuntimeException('کلاینت خانگی مورد نظر یافت نشد.');
+            }
+            if ($op === 'suspend') {
+                $clients[$hash]['suspended'] = true;
+                $msg = 'اشتراک کلاینت خانگی به حالت تعلیق درآمد.';
+            } elseif ($op === 'resume') {
+                $clients[$hash]['suspended'] = false;
+                $msg = 'اشتراک کلاینت خانگی دوباره فعال شد.';
+            } elseif ($op === 'extend_days') {
+                $days = (int)($_POST['days'] ?? 0);
+                if ($days < 1 || $days > 3650) throw new RuntimeException('تعداد روز نامعتبر است.');
+                $clients[$hash]['expiry'] = extendSubscriptionExpiry($clients[$hash]['expiry'], 0, $days);
+                $msg = "اشتراک کلاینت خانگی {$days} روز تمدید شد.";
+            } elseif ($op === 'extend_months') {
+                $months = (int)($_POST['months'] ?? 0);
+                if ($months < 1 || $months > 12) throw new RuntimeException('تعداد ماه نامعتبر است.');
+                $clients[$hash]['expiry'] = extendSubscriptionExpiry($clients[$hash]['expiry'], $months, 0);
+                $msg = "اشتراک کلاینت خانگی {$months} ماه تمدید شد.";
+            } else {
+                throw new RuntimeException('عملیات نامعتبر است.');
+            }
+            writeHomeClients($clients);
+            flash('success', $msg);
+        } elseif ($action === 'delete_home_client') {
+            $hash = normalizeDeviceHash((string)($_POST['hash'] ?? ''));
+            $clients = readHomeClients();
+            if (isset($clients[$hash])) {
+                unset($clients[$hash]);
+                writeHomeClients($clients);
+                flash('success', 'کلاینت خانگی با موفقیت حذف شد.');
+            }
+} elseif ($action === 'save_tags') {
             $tags = validateTags((array)($_POST['build_tag'] ?? []),
                 (array)($_POST['player_tag'] ?? []), (array)($_POST['expiry'] ?? []),
                 (array)($_POST['upload_password'] ?? []));
@@ -1019,6 +1147,13 @@ if ($authenticated) {
         }
         $passwordConfigured = trim(readTextFile(FILE_PASSWORD, 256)) !== '';
         $updatesData = readUpdatesData();
+$homeClientsRaw = readHomeClients();
+$homeClientRows = decorateHomeClientRows($homeClientsRaw);
+$activeHomeClients = 0;
+foreach ($homeClientRows as $hcr) {
+    if ($hcr['state'] === 'active' || $hcr['state'] === 'expiring') $activeHomeClients++;
+}
+$defaultHomeExpiry = addJalaliMonths(dateTimeToJalali(iranToday()), 1);
     } catch (Throwable $error) {
         $flash = ['type' => 'error', 'message' => $error->getMessage()];
     }
@@ -1086,6 +1221,7 @@ if ($authenticated) {
     <nav class="panel-tabs" aria-label="بخش‌های پنل">
       <button class="panel-tab active" type="button" data-panel="dashboard" aria-selected="true"><span class="tab-icon">⌂</span><span>داشبورد</span></button>
       <button class="panel-tab" type="button" data-panel="subscriptions" aria-selected="false"><span class="tab-icon">◫</span><span>اشتراک‌ها</span><b><?= count($tagRows) ?></b></button>
+      <button class="panel-tab" type="button" data-panel="home_clients" aria-selected="false"><span class="tab-icon">🏠</span><span>کلاینت‌های خانگی</span><b><?= count($homeClientRows) ?></b></button>
       <button class="panel-tab" type="button" data-panel="updates" aria-selected="false"><span class="tab-icon">↑</span><span>آپدیت‌ها</span><b><?= count($updatesData ?? []) ?></b></button>
       <button class="panel-tab" type="button" data-panel="settings" aria-selected="false"><span class="tab-icon">⚙</span><span>تنظیمات</span></button>
     </nav>
@@ -1182,6 +1318,165 @@ if ($authenticated) {
           </article>
         <?php endforeach; ?>
         <?php if (!$tagRows): ?><div class="card empty-state"><strong>هنوز اشتراکی ثبت نشده است</strong><span>با دکمه «اشتراک جدید» اولین گیمنت را اضافه کنید.</span></div><?php endif; ?>
+      </div>
+    </section>
+
+    <section class="home-clients panel-view" data-panel-view="home_clients">
+      <div class="section-heading">
+        <div>
+          <span class="eyebrow">HOME CLIENTS</span>
+          <h2>مدیریت اشتراک کلاینت‌های خانگی</h2>
+          <p>فعال‌سازی با شناسه سخت‌افزاری ۲۴ کاراکتری، اتصال به شماره موبایل و قفل کامل در صورت اتمام اعتبار</p>
+        </div>
+      </div>
+
+      <div class="grid dashboard-grid" style="margin-bottom: 24px;">
+        <article class="card">
+          <div class="card-title">
+            <div>
+              <h2>ثبت و فعال‌سازی کلاینت جدید</h2>
+              <p>هش ۲۴ کاراکتری تولیدشده در اینستالر کاربر را همراه شماره موبایل وارد کنید.</p>
+            </div>
+            <span class="pill">ثبت آنی</span>
+          </div>
+          <form method="post" autocomplete="off">
+            <input type="hidden" name="csrf" value="<?= escape(csrfToken()) ?>">
+            <input type="hidden" name="action" value="add_home_client">
+            <label>کد سخت‌افزاری دستگاه (هش ۲۴ کاراکتری)
+              <input class="ltr" type="text" name="hash" maxlength="24" placeholder="مثال: C4F89A12B3D5E70198ABCEFD" required style="font-family: monospace; font-size: 1.15em; letter-spacing: 2px;">
+            </label>
+            <label>شماره تلفن همراه (سابلینک)
+              <input class="ltr" type="text" name="phone" maxlength="15" placeholder="مثال: 09123456789" required style="font-size: 1.1em;">
+            </label>
+            <label>تاریخ انقضای شمسی
+              <input class="ltr" type="text" name="expiry" maxlength="10" pattern="\d{4}/\d{2}/\d{2}" value="<?= escape($defaultHomeExpiry) ?>" required style="font-size: 1.1em;">
+            </label>
+            <div style="display: flex; gap: 6px; margin-bottom: 12px;">
+              <button type="button" class="button secondary" style="font-size: 12px; padding: 4px 8px;" onclick="this.form.expiry.value='<?= escape(addJalaliMonths(dateTimeToJalali(iranToday()), 1)) ?>'">+۱ ماه (۳۰ روز)</button>
+              <button type="button" class="button secondary" style="font-size: 12px; padding: 4px 8px;" onclick="this.form.expiry.value='<?= escape(addJalaliMonths(dateTimeToJalali(iranToday()), 3)) ?>'">+۳ ماه (۹۰ روز)</button>
+              <button type="button" class="button secondary" style="font-size: 12px; padding: 4px 8px;" onclick="this.form.expiry.value='<?= escape(addJalaliMonths(dateTimeToJalali(iranToday()), 6)) ?>'">+۶ ماه</button>
+              <button type="button" class="button secondary" style="font-size: 12px; padding: 4px 8px;" onclick="this.form.expiry.value='<?= escape(addJalaliMonths(dateTimeToJalali(iranToday()), 12)) ?>'">+۱ سال</button>
+            </div>
+            <label>نام کاربر / توضیحات (اختیاری)
+              <input type="text" name="notes" placeholder="نام یا یادداشت شخصی">
+            </label>
+            <button class="button primary wide" type="submit" style="margin-top: 8px;">ثبت و فعال‌سازی اشتراک</button>
+          </form>
+        </article>
+
+        <article class="card">
+          <div class="card-title">
+            <div>
+              <h2>وضعیت کلی کلاینت‌های خانگی</h2>
+              <p>اطلاعات اشتراک‌های فعال و منقضی‌شده</p>
+            </div>
+            <span class="pill"><?= count($homeClientRows) ?> کلاینت</span>
+          </div>
+          <div class="stats" style="grid-template-columns: 1fr 1fr; margin-bottom: 16px;">
+            <div class="stat"><strong class="ok"><?= $activeHomeClients ?></strong><span>اشتراک‌های فعال</span></div>
+            <div class="stat"><strong class="<?= (count($homeClientRows) - $activeHomeClients > 0) ? 'bad' : 'ok' ?>"><?= count($homeClientRows) - $activeHomeClients ?></strong><span>منقضی یا معلق</span></div>
+          </div>
+          <div style="background: rgba(255,255,255,0.03); border: 1px solid var(--border); border-radius: 8px; padding: 12px; font-size: 13px; line-height: 1.6; color: var(--muted);">
+            <strong style="color: var(--text);">نحوه کارکرد کلاینت خانگی:</strong>
+            <p style="margin: 4px 0 0 0;">کلاینت خانگی فاقد بازی شبکه محلی (LAN) است. در صورت اتمام مدت اعتبار یا عدم تطابق کد دستگاه، لانچر اجازه باز شدن بازی را نخواهد داد. تمدید اشتراک بلافاصله از طریق همین بخش امکان‌پذیر است.</p>
+          </div>
+        </article>
+      </div>
+
+      <div class="card">
+        <div class="card-title">
+          <div>
+            <h2>فهرست دستگاه‌ها و اشتراک‌های خانگی</h2>
+            <p>دستگاه‌های متصل و وضعیت اشتراک هر شماره</p>
+          </div>
+          <span class="pill"><?= count($homeClientRows) ?> مورد</span>
+        </div>
+
+        <?php if (!empty($homeClientRows)): ?>
+          <div style="overflow-x: auto;">
+            <table style="width: 100%; border-collapse: collapse; text-align: right; font-size: 13px;">
+              <thead>
+                <tr style="border-bottom: 1px solid var(--border); color: var(--muted);">
+                  <th style="padding: 10px;">کد دستگاه (هش ۲۴ تایی)</th>
+                  <th style="padding: 10px;">شماره موبایل</th>
+                  <th style="padding: 10px;">انقضا</th>
+                  <th style="padding: 10px;">باقی‌مانده</th>
+                  <th style="padding: 10px;">وضعیت</th>
+                  <th style="padding: 10px;">یادداشت</th>
+                  <th style="padding: 10px; text-align: center;">عملیات تمدید و مدیریت</th>
+                </tr>
+              </thead>
+              <tbody>
+                <?php foreach ($homeClientRows as $hc): ?>
+                  <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
+                    <td style="padding: 12px 10px;">
+                      <div class="ltr" style="font-family: monospace; font-size: 13px; font-weight: bold; color: #45cfff; cursor: pointer; user-select: all;" title="برای کپی کد کلیک کنید" onclick="navigator.clipboard.writeText('<?= escape($hc['hash']) ?>'); alert('کد دستگاه کپی شد: <?= escape($hc['hash']) ?>');">
+                        <?= escape($hc['hash']) ?> 📋
+                      </div>
+                    </td>
+                    <td style="padding: 12px 10px;"><strong class="ltr" style="font-size: 14px;"><?= escape($hc['phone']) ?></strong></td>
+                    <td style="padding: 12px 10px;"><span class="ltr"><?= escape($hc['expiry']) ?></span></td>
+                    <td style="padding: 12px 10px;">
+                      <?php if ($hc['days_remaining'] >= 0): ?>
+                        <strong class="ok"><?= $hc['days_remaining'] ?> روز</strong>
+                      <?php else: ?>
+                        <strong class="bad"><?= abs($hc['days_remaining']) ?> روز گذشته</strong>
+                      <?php endif; ?>
+                    </td>
+                    <td style="padding: 12px 10px;">
+                      <span class="status-badge <?= escape($hc['state']) ?>"><?= escape($hc['state_label']) ?></span>
+                    </td>
+                    <td style="padding: 12px 10px; color: var(--muted);"><?= escape($hc['notes'] ?: '-') ?></td>
+                    <td style="padding: 12px 10px;">
+                      <div style="display: flex; gap: 6px; justify-content: center; align-items: center; flex-wrap: wrap;">
+                        <!-- Quick +30 days -->
+                        <form method="post" style="margin: 0;">
+                          <input type="hidden" name="csrf" value="<?= escape(csrfToken()) ?>">
+                          <input type="hidden" name="action" value="adjust_home_client">
+                          <input type="hidden" name="operation" value="extend_days">
+                          <input type="hidden" name="days" value="30">
+                          <input type="hidden" name="hash" value="<?= escape($hc['hash']) ?>">
+                          <button class="button secondary" type="submit" style="min-height: 30px; padding: 2px 8px; font-size: 12px;" title="تمدید ۳۰ روزه">+۳۰ روز</button>
+                        </form>
+                        <!-- Quick +90 days -->
+                        <form method="post" style="margin: 0;">
+                          <input type="hidden" name="csrf" value="<?= escape(csrfToken()) ?>">
+                          <input type="hidden" name="action" value="adjust_home_client">
+                          <input type="hidden" name="operation" value="extend_days">
+                          <input type="hidden" name="days" value="90">
+                          <input type="hidden" name="hash" value="<?= escape($hc['hash']) ?>">
+                          <button class="button secondary" type="submit" style="min-height: 30px; padding: 2px 8px; font-size: 12px;" title="تمدید ۹۰ روزه">+۹۰ روز</button>
+                        </form>
+                        <!-- Suspend / Resume -->
+                        <form method="post" class="confirm-form" data-confirm="<?= !empty($hc['suspended']) ? 'اشتراک این دستگاه فعال شود؟' : 'اشتراک این دستگاه معلق شود؟' ?>" style="margin: 0;">
+                          <input type="hidden" name="csrf" value="<?= escape(csrfToken()) ?>">
+                          <input type="hidden" name="action" value="adjust_home_client">
+                          <input type="hidden" name="operation" value="<?= !empty($hc['suspended']) ? 'resume' : 'suspend' ?>">
+                          <input type="hidden" name="hash" value="<?= escape($hc['hash']) ?>">
+                          <button class="button <?= !empty($hc['suspended']) ? 'primary' : 'warning' ?>" type="submit" style="min-height: 30px; padding: 2px 8px; font-size: 12px;">
+                            <?= !empty($hc['suspended']) ? 'رفع تعلیق' : 'تعلیق' ?>
+                          </button>
+                        </form>
+                        <!-- Delete -->
+                        <form method="post" class="confirm-form" data-confirm="آیا از حذف کامل این کلاینت خانگی اطمینان دارید؟" style="margin: 0;">
+                          <input type="hidden" name="csrf" value="<?= escape(csrfToken()) ?>">
+                          <input type="hidden" name="action" value="delete_home_client">
+                          <input type="hidden" name="hash" value="<?= escape($hc['hash']) ?>">
+                          <button class="button danger" type="submit" style="min-height: 30px; padding: 2px 8px; font-size: 12px;">حذف</button>
+                        </form>
+                      </div>
+                    </td>
+                  </tr>
+                <?php endforeach; ?>
+              </tbody>
+            </table>
+          </div>
+        <?php else: ?>
+          <div class="empty-state" style="text-align: center; padding: 30px; color: var(--muted);">
+            <strong>در حال حاضر هیچ کلاینت خانگی ثبت نشده است.</strong>
+            <p style="margin-top: 6px;">هنگامی که کاربر اینستالر را اجرا می‌کند، کد ۲۴ کاراکتری خود را برای شما می‌فرستد. با ثبت آن در فرم بالا، اشتراک دستگاه فعال می‌شود.</p>
+          </div>
+        <?php endif; ?>
       </div>
     </section>
 
