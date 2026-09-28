@@ -207,6 +207,8 @@ void ClientLauncher::Run()
     if (config_provider_->get_value_int("create_console_window", 0))
         CreateConsoleWindowAndRedirectOutput();
 
+    EnsureSmartSteamEmuActive();
+
     // Video-mode changes are applied before the engine starts, avoiding the
     // fragile in-game restart path. Internal engine restarts skip this page.
     if (!is_relaunch_ && !cmd_line_->CheckParm("-novideosettings") &&
@@ -354,6 +356,8 @@ ClientLauncher::NextProcess ClientLauncher::BuildNewGameProcess()
 
 ClientLauncher::EngineSessionResult ClientLauncher::RunEngine()
 {
+    EnsureSmartSteamEmuActive();
+
     if (analytics_)
         analytics_->SendAnalyticsEvent("startup_run_engine");
 
@@ -515,6 +519,65 @@ ClientLauncher::EngineSessionResult ClientLauncher::RunEngine()
     ModifyCmdLineAfterRestart(post_restart_cmd_line);
 
     return engine_session_result;
+}
+
+void ClientLauncher::EnsureSmartSteamEmuActive()
+{
+    try
+    {
+        const auto root = GetCurrentProcessPath().parent_path();
+        const auto sseDll = root / L"platform/steam/games/SmartEmu/SmartSteamEmu/SmartSteamEmu.dll";
+        const auto sseDll64 = root / L"platform/steam/games/SmartEmu/SmartSteamEmu/SmartSteamEmu64.dll";
+
+        if (std::filesystem::is_regular_file(sseDll))
+        {
+            SetEnvironmentVariableA("SteamAppId", "10");
+            SetEnvironmentVariableA("SteamGameId", "10");
+            SetEnvironmentVariableA("SmartSteamEmu", "1");
+
+            HKEY hActiveKey = nullptr;
+            if (RegCreateKeyExW(HKEY_CURRENT_USER, L"Software\\Valve\\Steam\\ActiveProcess", 0, nullptr,
+                REG_OPTION_NON_VOLATILE, KEY_SET_VALUE, nullptr, &hActiveKey, nullptr) == ERROR_SUCCESS)
+            {
+                const DWORD pid = GetCurrentProcessId();
+                const DWORD activeUser = 1;
+                const std::wstring sseStr = sseDll.wstring();
+                const std::wstring sse64Str = sseDll64.wstring();
+
+                RegSetValueExW(hActiveKey, L"pid", 0, REG_DWORD, reinterpret_cast<const BYTE*>(&pid), sizeof(pid));
+                RegSetValueExW(hActiveKey, L"ActiveUser", 0, REG_DWORD, reinterpret_cast<const BYTE*>(&activeUser), sizeof(activeUser));
+                RegSetValueExW(hActiveKey, L"SteamClientDll", 0, REG_SZ,
+                    reinterpret_cast<const BYTE*>(sseStr.c_str()), static_cast<DWORD>((sseStr.size() + 1) * sizeof(wchar_t)));
+                if (std::filesystem::is_regular_file(sseDll64))
+                {
+                    RegSetValueExW(hActiveKey, L"SteamClientDll64", 0, REG_SZ,
+                        reinterpret_cast<const BYTE*>(sse64Str.c_str()), static_cast<DWORD>((sse64Str.size() + 1) * sizeof(wchar_t)));
+                }
+                RegCloseKey(hActiveKey);
+            }
+
+            HKEY hSteamKey = nullptr;
+            if (RegCreateKeyExW(HKEY_CURRENT_USER, L"Software\\Valve\\Steam", 0, nullptr,
+                REG_OPTION_NON_VOLATILE, KEY_SET_VALUE, nullptr, &hSteamKey, nullptr) == ERROR_SUCCESS)
+            {
+                const auto sseDir = root / L"platform/steam/games/SmartEmu/SmartSteamEmu";
+                const auto sseExe = root / L"platform/steam/games/SmartEmu/SSELauncher.exe";
+                const std::wstring sseDirStr = sseDir.wstring();
+                const std::wstring sseExeStr = sseExe.wstring();
+
+                RegSetValueExW(hSteamKey, L"SteamPath", 0, REG_SZ,
+                    reinterpret_cast<const BYTE*>(sseDirStr.c_str()), static_cast<DWORD>((sseDirStr.size() + 1) * sizeof(wchar_t)));
+                RegSetValueExW(hSteamKey, L"SteamExe", 0, REG_SZ,
+                    reinterpret_cast<const BYTE*>(sseExeStr.c_str()), static_cast<DWORD>((sseExeStr.size() + 1) * sizeof(wchar_t)));
+                RegCloseKey(hSteamKey);
+            }
+
+            LoadLibraryW(sseDll.c_str());
+        }
+    }
+    catch (...)
+    {
+    }
 }
 
 void ClientLauncher::PrepareEngineCommandLine()

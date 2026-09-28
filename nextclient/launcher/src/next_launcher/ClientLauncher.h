@@ -96,6 +96,7 @@ private:
 #endif
     UpdaterDoneStatus RunStartupUpdater();
 
+    void EnsureSmartSteamEmuActive();
     void PrepareEngineCommandLine();
     EngineSessionResult RunEngine();
     NextProcess BuildRestartProcess();
