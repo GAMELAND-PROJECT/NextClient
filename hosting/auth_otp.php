@@ -22,7 +22,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 $MROTP_API_KEY = "e8b8180a-d6c5-4065-94dc-e902e3151789"; // Set your MrOTP API Key here
 $DATA_DIR = __DIR__ . DIRECTORY_SEPARATOR . 'storage' . DIRECTORY_SEPARATOR . 'cloud_auth';
 $DB_FILE = $DATA_DIR . DIRECTORY_SEPARATOR . 'gameland_users.sqlite';
-+
+
 if (!is_dir($DATA_DIR)) {
     @mkdir($DATA_DIR, 0755, true);
 }
@@ -149,14 +149,14 @@ try {
         }
 
         if ($curlError || !$response) {
-            echo json_encode(['success' => false, 'message' => 'خطا در ارتباط با سامانه OTP: ' . ($curlError ?: 'پاسخی دریافت نشد')]);
+            echo json_encode(['success' => false, 'message' => 'خطا در ارتباط با سامانه OTP: ' . ($curlError ?: 'پاسخی دریافت نشد')], JSON_UNESCAPED_UNICODE);
             exit;
         }
 
         $mrotpResult = json_decode($response, true);
         if (!$mrotpResult || !isset($mrotpResult['code']) || (int)$mrotpResult['code'] <= 0) {
             $errDetail = $mrotpResult['message'] ?? 'خطای ناشناخته در سامانه پیامکی';
-            echo json_encode(['success' => false, 'message' => 'سامانه پیامک: ' . $errDetail]);
+            echo json_encode(['success' => false, 'message' => 'سامانه پیامک: ' . $errDetail], JSON_UNESCAPED_UNICODE);
             exit;
         }
 
@@ -299,7 +299,7 @@ try {
         $user = $stmt->fetch(PDO::FETCH_ASSOC);
 
         if (!$user || !password_verify($password, $user['password_hash'])) {
-            echo json_encode(['success' => false, 'message' => 'شماره موبایل یا رمز عبور اشتباه است.']);
+            echo json_encode(['success' => false, 'message' => 'شماره موبایل یا رمز عبور اشتباه است.'], JSON_UNESCAPED_UNICODE);
             exit;
         }
 
@@ -313,7 +313,7 @@ try {
             'message' => 'ورود با موفقیت انجام شد.',
             'token' => $newToken,
             'mobile' => $mobile
-        ]);
+        ], JSON_UNESCAPED_UNICODE);
         exit;
     }
 
@@ -334,12 +334,12 @@ try {
             'success' => true,
             'authenticated' => true,
             'mobile' => $user['mobile']
-        ]);
+        ], JSON_UNESCAPED_UNICODE);
         exit;
     }
 
-    echo json_encode(['success' => false, 'message' => 'اکشن نامعتبر است.']);
+    echo json_encode(['success' => false, 'message' => 'عملیات نامعتبر است.'], JSON_UNESCAPED_UNICODE);
 } catch (Exception $e) {
     http_response_code(500);
-    echo json_encode(['success' => false, 'message' => 'Server Error: ' . $e->getMessage()]);
+    echo json_encode(['success' => false, 'message' => 'Server Error: ' . $e->getMessage()], JSON_UNESCAPED_UNICODE);
 }
