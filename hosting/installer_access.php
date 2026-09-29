@@ -9,6 +9,29 @@ header('Expires: 0');
 header('X-Content-Type-Options: nosniff');
 header('Access-Control-Allow-Origin: *');
 
+define('GL_LICENSE_HMAC_SECRET', 'GL_SECRET_HANDSHAKE_KEY_2026_NCL_GAMELAND');
+
+function sendSignedResponse(array $payload): void
+{
+    $ts = time();
+    $nonce = bin2hex(random_bytes(8));
+    $payload['ts'] = $ts;
+    $payload['nonce'] = $nonce;
+
+    $raw = ($payload['valid'] ? '1' : '0') . '|' . 
+           ($payload['days_remaining'] ?? '-1') . '|' . 
+           ($payload['hash'] ?? '') . '|' . 
+           ($payload['phone'] ?? '') . '|' . 
+           $ts . '|' . 
+           $nonce;
+
+    $payload['sig'] = hash('sha256', $raw . ':' . GL_LICENSE_HMAC_SECRET);
+
+    echo json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
+
 function verificationAttemptAllowed(string $username): bool
 {
     $clientAddress = (string)($_SERVER['REMOTE_ADDR'] ?? 'unknown');
@@ -262,7 +285,7 @@ if ($action === 'verify_home' || $action === 'check_home_subscription') {
     $daysRemaining = jalaliRemainingDays($expiry);
 
     if ($daysRemaining < 0) {
-        echo json_encode([
+        sendSignedResponse([
             'valid' => false,
             'status' => 'expired',
             'hash' => $hash,
@@ -270,11 +293,10 @@ if ($action === 'verify_home' || $action === 'check_home_subscription') {
             'expiry' => $expiry,
             'days_remaining' => $daysRemaining,
             'error' => 'مدت زمان اشتراک این دستگاه به پایان رسیده است.'
-        ], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
-        exit;
+        ]);
     }
 
-    echo json_encode([
+    sendSignedResponse([
         'valid' => true,
         'status' => 'active',
         'hash' => $hash,
@@ -282,8 +304,7 @@ if ($action === 'verify_home' || $action === 'check_home_subscription') {
         'expiry' => $expiry,
         'days_remaining' => $daysRemaining,
         'notes' => (string)($record['notes'] ?? ''),
-    ], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
-    exit;
+    ]);
 }
 
 http_response_code(400);

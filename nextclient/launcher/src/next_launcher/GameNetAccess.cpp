@@ -860,6 +860,36 @@ std::string Compute24CharDeviceHash()
     return hex_hash;
 }
 
+
+static std::string ComputeSha256Hex(const std::string& input)
+{
+    HCRYPTPROV hProv = 0;
+    HCRYPTHASH hHash = 0;
+    std::string hexResult;
+
+    if (CryptAcquireContext(&hProv, nullptr, nullptr, PROV_RSA_AES, CRYPT_VERIFYCONTEXT))
+    {
+        if (CryptCreateHash(hProv, CALG_SHA_256, 0, 0, &hHash))
+        {
+            if (CryptHashData(hHash, reinterpret_cast<const BYTE*>(input.data()), static_cast<DWORD>(input.size()), 0))
+            {
+                BYTE hashBuf[32]{};
+                DWORD hashLen = sizeof(hashBuf);
+                if (CryptGetHashParam(hHash, HP_HASHVAL, hashBuf, &hashLen, 0))
+                {
+                    char hex[65]{};
+                    for (DWORD i = 0; i < hashLen; ++i)
+                        sprintf_s(hex + (i * 2), 3, "%02x", hashBuf[i]);
+                    hexResult = hex;
+                }
+            }
+            CryptDestroyHash(hHash);
+        }
+        CryptReleaseContext(hProv, 0);
+    }
+    return hexResult;
+}
+
 GameNetAccessStatus QueryGameNetOnlineAccess()
 {
     // Check if running in Home Client mode (either by INI or build config)
@@ -940,6 +970,42 @@ GameNetAccessStatus QueryGameNetOnlineAccess()
 
             if (valid && response.find("\"status\":\"active\"") != std::string::npos)
             {
+                // CRITICAL ANTI-CRACK VERIFICATION:
+                // Verify cryptographic response signature if provided:
+                size_t sig_pos = response.find("\"sig\":\"");
+                if (sig_pos != std::string::npos)
+                {
+                    sig_pos += 7;
+                    size_t sig_end = response.find('"', sig_pos);
+                    std::string sig = response.substr(sig_pos, sig_end - sig_pos);
+
+                    std::string ts, nonce;
+                    size_t ts_pos = response.find("\"ts\":");
+                    if (ts_pos != std::string::npos)
+                    {
+                        ts_pos += 5;
+                        size_t ts_end = response.find_first_of(",}", ts_pos);
+                        ts = response.substr(ts_pos, ts_end - ts_pos);
+                    }
+                    size_t nonce_pos = response.find("\"nonce\":\"");
+                    if (nonce_pos != std::string::npos)
+                    {
+                        nonce_pos += 9;
+                        size_t nonce_end = response.find('"', nonce_pos);
+                        nonce = response.substr(nonce_pos, nonce_end - nonce_pos);
+                    }
+
+                    std::string raw = std::string("1|") + std::to_string(status.days_remaining) + "|" +
+                        local_hash + "|" + phoneNum + "|" + ts + "|" + nonce;
+                    std::string expected_sig = ComputeSha256Hex(raw + ":GL_SECRET_HANDSHAKE_KEY_2026_NCL_GAMELAND");
+                    if (_stricmp(sig.c_str(), expected_sig.c_str()) != 0)
+                    {
+                        status.state = GameNetAccessState::InvalidEntry;
+                        status.days_remaining = -1;
+                        return status;
+                    }
+                }
+
                 status.state = GameNetAccessState::Active;
             }
             else
