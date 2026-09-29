@@ -52,6 +52,7 @@ enum ControlId
     IdDemoVerify,
     IdDemoList,
     IdDemoUpload,
+    IdDemoToVideo,
     IdDemoDelete,
     IdDemoRefresh,
     IdDemoClose,
@@ -189,6 +190,7 @@ constexpr DWORD kUploadBufferSize = 64 * 1024;
 HWND g_demoPassword{};
 HWND g_demoList{};
 HWND g_demoUpload{};
+HWND g_demoToVideo{};
 HWND g_demoDelete{};
 HWND g_demoStatus{};
 std::wstring g_demoRoot;
@@ -1003,6 +1005,7 @@ void SetDemoActionsEnabled(bool enabled)
 {
     EnableWindow(g_demoList, enabled);
     EnableWindow(g_demoUpload, enabled);
+    EnableWindow(g_demoToVideo, enabled);
     EnableWindow(g_demoDelete, enabled);
     EnableWindow(GetDlgItem(GetParent(g_demoList), IdDemoRefresh), enabled);
 }
@@ -1056,6 +1059,93 @@ void UploadSelectedDemo(HWND window)
         MB_OK | (ok ? MB_ICONINFORMATION : MB_ICONERROR));
 }
 
+void ConvertSelectedDemoToVideo(HWND window)
+{
+    const auto path = SelectedDemoPath();
+    if (path.empty())
+    {
+        MessageBoxW(window, L"لطفاً ابتدا یک دمو را از لیست انتخاب کنید.", L"تبدیل به ویدیو", MB_OK | MB_ICONWARNING);
+        return;
+    }
+
+    const auto root = ExecutableRoot();
+    std::wstring ffmpegPath;
+    if (std::filesystem::exists(root / L"ffmpeg.exe"))
+    {
+        ffmpegPath = (root / L"ffmpeg.exe").wstring();
+    }
+    else if (std::filesystem::exists(root / L"cstrike" / L"ffmpeg.exe"))
+    {
+        ffmpegPath = (root / L"cstrike" / L"ffmpeg.exe").wstring();
+    }
+    else
+    {
+        wchar_t buf[MAX_PATH]{};
+        if (SearchPathW(nullptr, L"ffmpeg.exe", nullptr, MAX_PATH, buf, nullptr) > 0)
+        {
+            ffmpegPath = buf;
+        }
+    }
+
+    if (ffmpegPath.empty())
+    {
+        const int choice = MessageBoxW(window,
+            L"برای تبدیل مستقیم دمو به ویدیوی MP4 با کیفیت 60 FPS، فایل ffmpeg.exe مورد نیاز است.\n\n"
+            L"آیا می‌خواهید پوشه بازی باز شود تا فایل ffmpeg.exe را در آن قرار دهید؟\n"
+            L"(می‌توانید ffmpeg را رایگان از gyan.dev یا ffmpeg.org دریافت نمایید)",
+            L"نیاز به FFmpeg",
+            MB_YESNO | MB_ICONINFORMATION);
+        if (choice == IDYES)
+        {
+            ShellExecuteW(nullptr, L"open", root.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+        }
+        return;
+    }
+
+    const auto demoName = path.stem().wstring();
+    const auto videoDir = root / L"cstrike" / L"videos";
+    std::error_code ec;
+    std::filesystem::create_directories(videoDir, ec);
+
+    const std::wstring confirmMsg =
+        L"آیا مایلید این دمو با نرخ ۶۰ فریم بر ثانیه به فایل ویدیویی MP4 تبدیل شود؟\n\n"
+        L"فایل دمو: " + path.filename().wstring() + L"\n"
+        L"خروجی: cstrike/videos/" + demoName + L".mp4\n\n"
+        L"تضمین پایداری: این فرایند با اولویت کنترل‌شده (Below Normal) در پس‌زمینه اجرا شده و هیچ لگی در بازی عادی ایجاد نمی‌کند.";
+
+    if (MessageBoxW(window, confirmMsg.c_str(), L"تأیید رندر ویدیو", MB_YESNO | MB_ICONQUESTION) != IDYES)
+        return;
+
+    SetDemoStatus(L"در حال آغاز رندر ویدیوی MP4 در پس‌زمینه...");
+
+    const auto scriptPath = root / L"Render-DemoToVideo.ps1";
+    std::wstring cmd = LR"(powershell.exe -ExecutionPolicy Bypass -NoProfile -File ")" + scriptPath.wstring() +
+                       LR"(" -DemoPath ")" + path.wstring() + LR"(" -FfmpegPath ")" + ffmpegPath + LR"(")";
+
+    STARTUPINFOW si{sizeof(si)};
+    si.dwFlags = STARTF_USESHOWWINDOW;
+    si.wShowWindow = SW_MINIMIZE;
+    PROCESS_INFORMATION pi{};
+
+    std::vector<wchar_t> cmdBuf(cmd.begin(), cmd.end());
+    cmdBuf.push_back(L'\0');
+
+    if (CreateProcessW(nullptr, cmdBuf.data(), nullptr, nullptr, FALSE,
+                       BELOW_NORMAL_PRIORITY_CLASS, nullptr, root.c_str(), &si, &pi))
+    {
+        CloseHandle(pi.hThread);
+        CloseHandle(pi.hProcess);
+        MessageBoxW(window,
+            L"فرایند تبدیل دمو به ویدیوی MP4 با کیفیت 60 FPS در پس‌زمینه آغاز شد.\n\n"
+            L"پس از اتمام کامل رندر، فایل ویدیویی به صورت خودکار در پوشه cstrike/videos نمایش داده خواهد شد.",
+            L"آغاز رندر ویدیو", MB_OK | MB_ICONINFORMATION);
+    }
+    else
+    {
+        MessageBoxW(window, L"خطا در آغاز فرایند رندر.", L"خطا", MB_OK | MB_ICONERROR);
+    }
+}
+
 void DeleteSelectedDemo(HWND window)
 {
     const auto path = SelectedDemoPath();
@@ -1100,11 +1190,12 @@ LRESULT CALLBACK DemoManagerProc(HWND window, UINT message, WPARAM wParam, LPARA
         g_demoPassword = add(L"EDIT", L"", ES_PASSWORD | ES_AUTOHSCROLL | WS_BORDER | WS_TABSTOP, 170, 14, 210, 26, IdDemoPassword, WS_EX_CLIENTEDGE);
         add(L"BUTTON", L"Unlock", BS_PUSHBUTTON | WS_TABSTOP, 390, 13, 90, 28, IdDemoVerify);
         g_demoList = add(L"LISTBOX", L"", LBS_NOTIFY | WS_BORDER | WS_VSCROLL | WS_TABSTOP, 18, 56, 462, 210, IdDemoList, WS_EX_CLIENTEDGE);
-        g_demoUpload = add(L"BUTTON", L"Upload selected", BS_PUSHBUTTON | WS_TABSTOP, 18, 280, 132, 32, IdDemoUpload);
-        g_demoDelete = add(L"BUTTON", L"Delete local", BS_PUSHBUTTON | WS_TABSTOP, 160, 280, 100, 32, IdDemoDelete);
-        add(L"BUTTON", L"Refresh", BS_PUSHBUTTON | WS_TABSTOP, 270, 280, 90, 32, IdDemoRefresh);
-        add(L"BUTTON", L"Close", BS_PUSHBUTTON | WS_TABSTOP, 370, 280, 110, 32, IdDemoClose);
-        g_demoStatus = add(L"STATIC", L"Enter password to unlock demo list.", SS_LEFT, 18, 324, 462, 40, IdDemoStatus);
+        g_demoUpload = add(L"BUTTON", L"Upload selected", BS_PUSHBUTTON | WS_TABSTOP, 18, 276, 120, 32, IdDemoUpload);
+        g_demoDelete = add(L"BUTTON", L"Delete local", BS_PUSHBUTTON | WS_TABSTOP, 146, 276, 95, 32, IdDemoDelete);
+        add(L"BUTTON", L"Refresh", BS_PUSHBUTTON | WS_TABSTOP, 250, 276, 85, 32, IdDemoRefresh);
+        add(L"BUTTON", L"Close", BS_PUSHBUTTON | WS_TABSTOP, 345, 276, 135, 32, IdDemoClose);
+        g_demoToVideo = add(L"BUTTON", L"تبدیل به ویدیو (MP4)", BS_PUSHBUTTON | WS_TABSTOP, 18, 316, 462, 34, IdDemoToVideo);
+        g_demoStatus = add(L"STATIC", L"Enter password to unlock demo list.", SS_LEFT, 18, 358, 462, 40, IdDemoStatus);
         SetDemoActionsEnabled(false);
         SetFocus(g_demoPassword);
         return 0;
@@ -1146,6 +1237,9 @@ LRESULT CALLBACK DemoManagerProc(HWND window, UINT message, WPARAM wParam, LPARA
             return 0;
         case IdDemoUpload:
             UploadSelectedDemo(window);
+            return 0;
+        case IdDemoToVideo:
+            ConvertSelectedDemoToVideo(window);
             return 0;
         case IdDemoDelete:
             DeleteSelectedDemo(window);
@@ -1190,7 +1284,7 @@ void ShowDemoManager(HWND owner)
     windowClass.hIconSm = windowClass.hIcon;
     RegisterClassExW(&windowClass);
 
-    RECT rect{0, 0, 500, 382};
+    RECT rect{0, 0, 500, 430};
     AdjustWindowRectEx(&rect, WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU, FALSE, 0);
     RECT ownerRect{};
     GetWindowRect(owner, &ownerRect);
