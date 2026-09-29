@@ -127,6 +127,7 @@ private:
                                             IGameUINext* gameui_next);
     static void ProvisionDefaultConfigs();
     static void RestoreGameConfigOnFreshLaunch();
+    static void EnsureDefaultGameConfig(const std::filesystem::path& target_path);
 
     template<class T>
     std::tuple<T*, CSysModule*> LoadModule(const char* module_name, const char* interface_version)

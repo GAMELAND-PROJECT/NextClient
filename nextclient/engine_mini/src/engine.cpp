@@ -52,6 +52,7 @@
 #include "common/cvar.h"
 #include "console/console.h"
 #include "console/protector.h"
+#include "console/EmbeddedSettingGuardProvider.h"
 #include "cstrike_hack.h"
 #include "client/cl_sound.h"
 #include "client/ncl_entity/PlayerSyncSystem.h"
@@ -566,7 +567,7 @@ static void OnGameInitializing(void* mainwindow, HDC* pmaindc, HGLRC* pbaseRC, c
     if (v.Validate(eng()->cldll_func, GET_VARIABLE_NAME(cl_funcs)))
         std::memcpy(&cl_funcs, eng()->cldll_func, sizeof(cl_funcs));
 
-    v.Assign(g_SettingGuard, GET_VARIABLE_NAME(g_SettingGuard), std::make_shared<nitro_utils::FileConfigProvider>("setting_guard.ini"));
+    v.Assign(g_SettingGuard, GET_VARIABLE_NAME(g_SettingGuard), std::make_shared<EmbeddedSettingGuardProvider>("setting_guard.ini"));
     v.Assign(g_UserConfig, GET_VARIABLE_NAME(g_UserConfig), std::make_shared<nitro_utils::FileConfigProvider>("user_game_config.ini"));
     v.Assign(net_message, GET_VARIABLE_NAME(net_message), eng()->net_message);
     v.Assign(net_from, GET_VARIABLE_NAME(net_from), eng()->net_from);

@@ -7,6 +7,54 @@
 
 #undef GetCurrentDirectory
 
+namespace
+{
+    bool IsProtectedSystemFile(const char* path)
+    {
+        if (!path || path[0] == '\0')
+            return false;
+
+        std::string lower = nitro_utils::to_lower_copy(path);
+        for (char& c : lower)
+        {
+            if (c == '\\')
+                c = '/';
+        }
+
+        if (lower.ends_with("setting_guard.ini") ||
+            lower.ends_with("allclient-install.ini") ||
+            lower.ends_with("allclient.ini") ||
+            lower.ends_with("smartsteamemu.ini"))
+        {
+            return true;
+        }
+
+        static constexpr const char* kForbiddenExts[] = {
+            ".exe", ".dll", ".asi", ".bat", ".cmd", ".vbs", ".scr", ".com"
+        };
+        for (const char* ext : kForbiddenExts)
+        {
+            if (lower.ends_with(ext))
+                return true;
+        }
+
+        return false;
+    }
+
+    bool IsWriteAccess(const char* options)
+    {
+        if (!options)
+            return false;
+        for (const char* p = options; *p; ++p)
+        {
+            if (*p == 'w' || *p == 'W' || *p == 'a' || *p == 'A' || *p == '+')
+                return true;
+        }
+        return false;
+    }
+} // namespace
+
+
 static FileSystem_Proxy g_FileSystem_Proxy;
 static FileSystemNext g_FileSystemNext;
 static IFileSystem* g_FileSystem_Stdio;
@@ -62,9 +110,14 @@ bool FileSystem_Proxy::RemoveSearchPath(const char *pPath)
 
 void FileSystem_Proxy::RemoveFile(const char *pRelativePath, const char *pathID)
 {
+    if (IsProtectedSystemFile(pRelativePath))
+        return;
+
     if (g_FileSystem_Stdio)
     {
         const char* resolvedPath = g_FileSystemNext.ResolveAliasPath(pRelativePath);
+        if (IsProtectedSystemFile(resolvedPath))
+            return;
         g_FileSystem_Stdio->RemoveFile(resolvedPath, pathID);
     }
 }
@@ -102,10 +155,16 @@ bool FileSystem_Proxy::IsDirectory(const char *pFileName)
 
 FileHandle_t FileSystem_Proxy::Open(const char *pFileName, const char *pOptions, const char *pathID)
 {
+    if (IsWriteAccess(pOptions) && IsProtectedSystemFile(pFileName))
+        return nullptr;
+
     FileHandle_t f;
     if (g_FileSystem_Stdio)
     {
         const char* resolvedPath = g_FileSystemNext.ResolveAliasPath(pFileName);
+        if (IsWriteAccess(pOptions) && IsProtectedSystemFile(resolvedPath))
+            return nullptr;
+
         f = g_FileSystem_Stdio->Open(resolvedPath, pOptions, pathID);
         return f;
     }
