@@ -19,6 +19,8 @@
 #include <vector>
 
 #include "../next_launcher/GameNetAccess.h"
+#include "../next_launcher/EmbeddedDefaultConfig.h"
+#include "../next_launcher/VideoSettingsDialog.h"
 #pragma comment(lib, "msimg32.lib")
 
 namespace
@@ -2327,12 +2329,36 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
         return 0;
 
     case WM_COMMAND:
+        if (HIWORD(wParam) == EN_CHANGE && reinterpret_cast<HWND>(lParam) == g_userPhone)
+        {
+            wchar_t curPhone[64]{};
+            GetWindowTextW(g_userPhone, curPhone, static_cast<int>(std::size(curPhone)));
+            if (!g_activeUserToken.empty() && std::wstring(curPhone) != g_activeUserPhone)
+            {
+                g_activeUserToken.clear();
+                g_activeUserPhone.clear();
+                if (g_userStatusLabel)
+                {
+                    SetWindowTextW(g_userStatusLabel, L"وارد نشده‌اید (مهمان: کانفیگ پیش‌فرض لود می‌شود)");
+                    InvalidateRect(g_userStatusLabel, nullptr, TRUE);
+                }
+                if (g_userRegisterBtn)
+                {
+                    SetWindowTextW(g_userRegisterBtn, L"ثبت‌نام / فراموشی رمز");
+                    InvalidateRect(g_userRegisterBtn, nullptr, TRUE);
+                }
+            }
+        }
         switch (LOWORD(wParam))
         {
         case IDOK:
         case IdLaunch:
             if (ApplySettings())
             {
+                if (!IsUserAuthenticated())
+                {
+                    ResetGuestConfigToDefault();
+                }
                 g_launchRequested = true;
                 DestroyWindow(window);
             }
@@ -2501,6 +2527,58 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
     return DefWindowProcW(window, message, wParam, lParam);
 }
 } // namespace
+
+bool IsUserAuthenticated()
+{
+    return !g_activeUserToken.empty();
+}
+
+void ResetGuestConfigToDefault()
+{
+    namespace fs = std::filesystem;
+    const auto gameDir = ExecutableRoot() / L"cstrike";
+    const auto gameCfg = gameDir / L"config.cfg";
+    const auto userCfg = gameDir / L"userconfig.cfg";
+    const auto defaultCfg = ExecutableRoot() / L"default" / L"config.cfg";
+
+    std::error_code ec;
+    fs::create_directories(gameDir, ec);
+
+    bool restored = false;
+    if (fs::is_regular_file(defaultCfg, ec) && fs::file_size(defaultCfg, ec) >= 50)
+    {
+        ec.clear();
+        if (fs::copy_file(defaultCfg, gameCfg, fs::copy_options::overwrite_existing, ec))
+        {
+            restored = true;
+        }
+    }
+
+    if (!restored)
+    {
+        std::ofstream out(gameCfg, std::ios::binary | std::ios::trunc);
+        if (out.is_open())
+        {
+            out.write(next_launcher::kEmbeddedDefaultConfigCfg, std::strlen(next_launcher::kEmbeddedDefaultConfigCfg));
+            out.close();
+            restored = true;
+        }
+    }
+
+    constexpr char kDefaultUserConfig[] = R"CFG(alias d "disconnect"
+alias q "quit"
+alias ret "retry"
+
+exec gameland_lan_host.cfg
+)CFG";
+
+    std::ofstream userOut(userCfg, std::ios::binary | std::ios::trunc);
+    if (userOut.is_open())
+    {
+        userOut.write(kDefaultUserConfig, std::strlen(kDefaultUserConfig));
+        userOut.close();
+    }
+}
 
 void SyncPlayerConfig()
 {

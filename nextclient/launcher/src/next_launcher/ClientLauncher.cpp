@@ -880,30 +880,13 @@ void ClientLauncher::ProvisionDefaultConfigs()
 
 void ClientLauncher::RestoreGameConfigOnFreshLaunch()
 {
-    namespace fs = std::filesystem;
-
     constexpr char kDefaultConfig[] = "default/config.cfg";
-    constexpr char kGameConfig[] = "cstrike/config.cfg";
-
     EnsureDefaultGameConfig(kDefaultConfig);
 
-    std::error_code ec;
-    fs::create_directories(fs::path(kGameConfig).parent_path(), ec);
-    if (ec)
-        return;
-
-    // If the user already has a valid config (either from previous local edits or cloud sync),
-    // preserve it on startup!
-    if (fs::is_regular_file(kGameConfig, ec) && fs::file_size(kGameConfig, ec) >= 50)
+    // On fresh launch, if no user is authenticated (guest mode), cleanly reset to default!
+    if (!IsUserAuthenticated())
     {
-        LOG(INFO) << "Existing user game config preserved at " << kGameConfig;
-        return;
-    }
-
-    std::ofstream out(kGameConfig, std::ios::binary | std::ios::trunc);
-    if (out.is_open())
-    {
-        out.write(next_launcher::kEmbeddedDefaultConfigCfg, std::strlen(next_launcher::kEmbeddedDefaultConfigCfg));
-        LOG(INFO) << "Restored pure in-root default config to " << kGameConfig;
+        ResetGuestConfigToDefault();
+        LOG(INFO) << "Fresh launch: guest mode config reset to default.";
     }
 }
