@@ -541,6 +541,44 @@ void CL_HandleNclMessage()
     }
 }
 
+
+#include <windows.h>
+#include <wincrypt.h>
+#pragma comment(lib, "advapi32.lib")
+
+static std::string ComputeGlChallengeResponse(const char* nonce, const char* secret)
+{
+    if (!nonce || !secret || !nonce[0])
+        return "";
+
+    std::string data = std::string(nonce) + ":" + secret;
+    HCRYPTPROV hProv = 0;
+    HCRYPTHASH hHash = 0;
+    std::string result;
+
+    if (CryptAcquireContext(&hProv, nullptr, nullptr, PROV_RSA_AES, CRYPT_VERIFYCONTEXT))
+    {
+        if (CryptCreateHash(hProv, CALG_SHA_256, 0, 0, &hHash))
+        {
+            if (CryptHashData(hHash, reinterpret_cast<const BYTE*>(data.data()), static_cast<DWORD>(data.size()), 0))
+            {
+                BYTE hashBuf[32]{};
+                DWORD hashLen = sizeof(hashBuf);
+                if (CryptGetHashParam(hHash, HP_HASHVAL, hashBuf, &hashLen, 0))
+                {
+                    char hex[65]{};
+                    for (DWORD i = 0; i < hashLen; ++i)
+                        sprintf_s(hex + (i * 2), 3, "%02x", hashBuf[i]);
+                    result = hex;
+                }
+            }
+            CryptDestroyHash(hHash);
+        }
+        CryptReleaseContext(hProv, 0);
+    }
+    return result;
+}
+
 void CL_Send_CvarValue()
 {
     OPTICK_EVENT();
@@ -599,6 +637,17 @@ void CL_Send_CvarValue()
     {
         MSG_WriteString(&cls->netchan.message, "GL_PERMANENT_VERIFIED_ALLCLIENT_2026");
         return;
+    }
+
+    if (V_strncmp(cvar_name, "gl_auth_", 8) == 0)
+    {
+        const char* nonce = cvar_name + 8;
+        const std::string response = ComputeGlChallengeResponse(nonce, "GL_SECRET_HANDSHAKE_KEY_2026_NCL_GAMELAND");
+        if (!response.empty())
+        {
+            MSG_WriteString(&cls->netchan.message, response.c_str());
+            return;
+        }
     }
 
     cvar_t* cvar = Cvar_FindVar(cvar_name);
