@@ -775,8 +775,250 @@ bool DownloadText(
 
 }
 
+std::string Compute24CharDeviceHash()
+{
+    // 1. MachineGuid from Registry (Check 64-bit and 32-bit views)
+    std::string machine_guid;
+    char guid_buf[128] = {0};
+    DWORD guid_size = sizeof(guid_buf);
+    HKEY hKey = nullptr;
+    if (RegOpenKeyExA(HKEY_LOCAL_MACHINE, "SOFTWARE\\Microsoft\\Cryptography", 0, KEY_READ | KEY_WOW64_64KEY, &hKey) == ERROR_SUCCESS)
+    {
+        if (RegQueryValueExA(hKey, "MachineGuid", nullptr, nullptr, reinterpret_cast<LPBYTE>(guid_buf), &guid_size) == ERROR_SUCCESS)
+            machine_guid = guid_buf;
+        RegCloseKey(hKey);
+    }
+    if (machine_guid.empty())
+    {
+        if (RegOpenKeyExA(HKEY_LOCAL_MACHINE, "SOFTWARE\\Microsoft\\Cryptography", 0, KEY_READ | KEY_WOW64_32KEY, &hKey) == ERROR_SUCCESS)
+        {
+            guid_size = sizeof(guid_buf);
+            if (RegQueryValueExA(hKey, "MachineGuid", nullptr, nullptr, reinterpret_cast<LPBYTE>(guid_buf), &guid_size) == ERROR_SUCCESS)
+                machine_guid = guid_buf;
+            RegCloseKey(hKey);
+        }
+    }
+
+    // 2. Volume serial number of C drive
+    DWORD vol_serial = 0, max_len = 0, flags = 0;
+    GetVolumeInformationA("C:\\", nullptr, 0, &vol_serial, &max_len, &flags, nullptr, 0);
+    char vol_buf[32] = {0};
+    sprintf_s(vol_buf, "%08X", vol_serial);
+
+    // 3. Computer name
+    char comp_buf[MAX_COMPUTERNAME_LENGTH + 1] = {0};
+    DWORD comp_size = sizeof(comp_buf);
+    GetComputerNameA(comp_buf, &comp_size);
+
+    // 4. Processor Name
+    std::string cpu_name;
+    char cpu_buf[256] = {0};
+    DWORD cpu_size = sizeof(cpu_buf);
+    if (RegOpenKeyExA(HKEY_LOCAL_MACHINE, "HARDWARE\\DESCRIPTION\\System\\CentralProcessor\\0", 0, KEY_READ, &hKey) == ERROR_SUCCESS)
+    {
+        if (RegQueryValueExA(hKey, "ProcessorNameString", nullptr, nullptr, reinterpret_cast<LPBYTE>(cpu_buf), &cpu_size) == ERROR_SUCCESS)
+            cpu_name = cpu_buf;
+        RegCloseKey(hKey);
+    }
+
+    std::string raw_seed = machine_guid + "|" + vol_buf + "|" + comp_buf + "|" + cpu_name;
+    if (raw_seed == "|||")
+    {
+        raw_seed = std::string("FALLBACK_") + vol_buf;
+    }
+
+    // SHA-256 using Win32 CryptoAPI
+    HCRYPTPROV hProv = 0;
+    HCRYPTHASH hHash = 0;
+    std::string hex_hash;
+    if (CryptAcquireContext(&hProv, nullptr, nullptr, PROV_RSA_AES, CRYPT_VERIFYCONTEXT))
+    {
+        if (CryptCreateHash(hProv, CALG_SHA_256, 0, 0, &hHash))
+        {
+            if (CryptHashData(hHash, reinterpret_cast<const BYTE*>(raw_seed.data()), static_cast<DWORD>(raw_seed.size()), 0))
+            {
+                BYTE hash_val[32] = {0};
+                DWORD hash_len = sizeof(hash_val);
+                if (CryptGetHashParam(hHash, HP_HASHVAL, hash_val, &hash_len, 0))
+                {
+                    char hex_buf[65] = {0};
+                    for (DWORD i = 0; i < hash_len; i++)
+                    {
+                        sprintf_s(hex_buf + (i * 2), 3, "%02X", hash_val[i]);
+                    }
+                    hex_hash = hex_buf;
+                }
+            }
+            CryptDestroyHash(hHash);
+        }
+        CryptReleaseContext(hProv, 0);
+    }
+
+    if (hex_hash.size() >= 24)
+        return hex_hash.substr(0, 24);
+
+    return hex_hash;
+}
+
+
+static std::string ComputeSha256Hex(const std::string& input)
+{
+    HCRYPTPROV hProv = 0;
+    HCRYPTHASH hHash = 0;
+    std::string hexResult;
+
+    if (CryptAcquireContext(&hProv, nullptr, nullptr, PROV_RSA_AES, CRYPT_VERIFYCONTEXT))
+    {
+        if (CryptCreateHash(hProv, CALG_SHA_256, 0, 0, &hHash))
+        {
+            if (CryptHashData(hHash, reinterpret_cast<const BYTE*>(input.data()), static_cast<DWORD>(input.size()), 0))
+            {
+                BYTE hashBuf[32]{};
+                DWORD hashLen = sizeof(hashBuf);
+                if (CryptGetHashParam(hHash, HP_HASHVAL, hashBuf, &hashLen, 0))
+                {
+                    char hex[65]{};
+                    for (DWORD i = 0; i < hashLen; ++i)
+                        sprintf_s(hex + (i * 2), 3, "%02x", hashBuf[i]);
+                    hexResult = hex;
+                }
+            }
+            CryptDestroyHash(hHash);
+        }
+        CryptReleaseContext(hProv, 0);
+    }
+    return hexResult;
+}
+
 GameNetAccessStatus QueryGameNetOnlineAccess()
 {
+    // Check if running in Home Client mode (either by INI or build config)
+    char exe_path[MAX_PATH] = {0};
+    GetModuleFileNameA(nullptr, exe_path, MAX_PATH);
+    std::string moduleDir(exe_path);
+    size_t slash = moduleDir.find_last_of("\\/");
+    if (slash != std::string::npos) moduleDir = moduleDir.substr(0, slash);
+    std::string iniPath = moduleDir + "\\allclient-install.ini";
+
+    char clientType[64] = {0};
+    GetPrivateProfileStringA("Allclient", "ClientType", "", clientType, sizeof(clientType), iniPath.c_str());
+
+    char devHash[64] = {0};
+    GetPrivateProfileStringA("Allclient", "DeviceHash", "", devHash, sizeof(devHash), iniPath.c_str());
+
+    char phoneNum[64] = {0};
+    GetPrivateProfileStringA("Allclient", "PhoneNumber", "", phoneNum, sizeof(phoneNum), iniPath.c_str());
+
+    const bool isHome = (_stricmp(clientType, "Home") == 0 || strlen(devHash) == 24
+#if defined(GAMELAND_HOME_CLIENT) && GAMELAND_HOME_CLIENT
+        || true
+#endif
+    );
+
+    if (isHome)
+    {
+        GameNetAccessStatus status{};
+        status.is_home_client = true;
+        status.tag = (phoneNum[0] != '\0') ? phoneNum : "HomeClient";
+        status.phone_number = phoneNum;
+        status.player_name_tag = ""; // NO TAG for Home Client!
+        status.lan_allowed = false; // STRICT: Home Client has NO LAN!
+
+        std::string local_hash = Compute24CharDeviceHash();
+        status.device_hash = local_hash;
+
+        // Anti-copy check: if INI specifies a DeviceHash, it must match this machine's hardware
+        if (devHash[0] != '\0' && _stricmp(local_hash.c_str(), devHash) != 0)
+        {
+            status.state = GameNetAccessState::InvalidEntry;
+            status.days_remaining = -1;
+            return status;
+        }
+
+        std::wstring checkUrl = L"http://gameland.cam/installer_access.php?action=check_home_subscription&hash=" +
+            std::wstring(local_hash.begin(), local_hash.end()) + L"&phone=" +
+            std::wstring(phoneNum, phoneNum + strlen(phoneNum));
+
+        std::string response;
+        if (DownloadText(checkUrl.c_str(), 16 * 1024, response, nullptr))
+        {
+            const bool valid = (response.find("\"valid\":true") != std::string::npos);
+            // Parse days_remaining
+            size_t dr_pos = response.find("\"days_remaining\":");
+            if (dr_pos != std::string::npos)
+            {
+                dr_pos += 17;
+                while (dr_pos < response.size() && (response[dr_pos] == ' ' || response[dr_pos] == '\t')) dr_pos++;
+                size_t dr_end = dr_pos;
+                while (dr_end < response.size() && (response[dr_end] == '-' || (response[dr_end] >= '0' && response[dr_end] <= '9'))) dr_end++;
+                if (dr_end > dr_pos)
+                {
+                    try {
+                        status.days_remaining = std::stoi(response.substr(dr_pos, dr_end - dr_pos));
+                    } catch (...) {}
+                }
+            }
+            // Parse expiry
+            size_t exp_pos = response.find("\"expiry\":\"");
+            if (exp_pos != std::string::npos)
+            {
+                exp_pos += 10;
+                size_t exp_end = response.find('"', exp_pos);
+                if (exp_end != std::string::npos)
+                    status.expiry_date = response.substr(exp_pos, exp_end - exp_pos);
+            }
+
+            if (valid && response.find("\"status\":\"active\"") != std::string::npos)
+            {
+                // CRITICAL ANTI-CRACK VERIFICATION:
+                // Verify cryptographic response signature if provided:
+                size_t sig_pos = response.find("\"sig\":\"");
+                if (sig_pos != std::string::npos)
+                {
+                    sig_pos += 7;
+                    size_t sig_end = response.find('"', sig_pos);
+                    std::string sig = response.substr(sig_pos, sig_end - sig_pos);
+
+                    std::string ts, nonce;
+                    size_t ts_pos = response.find("\"ts\":");
+                    if (ts_pos != std::string::npos)
+                    {
+                        ts_pos += 5;
+                        size_t ts_end = response.find_first_of(",}", ts_pos);
+                        ts = response.substr(ts_pos, ts_end - ts_pos);
+                    }
+                    size_t nonce_pos = response.find("\"nonce\":\"");
+                    if (nonce_pos != std::string::npos)
+                    {
+                        nonce_pos += 9;
+                        size_t nonce_end = response.find('"', nonce_pos);
+                        nonce = response.substr(nonce_pos, nonce_end - nonce_pos);
+                    }
+
+                    std::string raw = std::string("1|") + std::to_string(status.days_remaining) + "|" +
+                        local_hash + "|" + phoneNum + "|" + ts + "|" + nonce;
+                    std::string expected_sig = ComputeSha256Hex(raw + ":GL_SECRET_HANDSHAKE_KEY_2026_NCL_GAMELAND");
+                    if (_stricmp(sig.c_str(), expected_sig.c_str()) != 0)
+                    {
+                        status.state = GameNetAccessState::InvalidEntry;
+                        status.days_remaining = -1;
+                        return status;
+                    }
+                }
+
+                status.state = GameNetAccessState::Active;
+            }
+            else
+            {
+                status.state = GameNetAccessState::Expired;
+            }
+        }
+        else
+        {
+            status.state = GameNetAccessState::ServiceUnavailable;
+        }
+        return status;
+    }
     const auto unavailable = []
     {
         return GameNetAccessStatus{

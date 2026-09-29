@@ -20,9 +20,15 @@ struct GameNetAccessStatus
     int days_remaining = -1;
     bool lan_allowed = false;
     int offline_days_remaining = 0;
+    bool is_home_client = false;
+    std::string device_hash;
+    std::string phone_number;
 
     [[nodiscard]] bool allowed() const { return state == GameNetAccessState::Active; }
 };
 
 // Checks access at startup. LAN requires verification within the configured grace period.
 GameNetAccessStatus QueryGameNetOnlineAccess();
+
+// Helper to compute 24-character hardware hash matching Inno Setup
+std::string Compute24CharDeviceHash();

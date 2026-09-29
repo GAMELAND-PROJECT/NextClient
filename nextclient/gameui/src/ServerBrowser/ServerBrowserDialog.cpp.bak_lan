@@ -69,13 +69,8 @@ public:
         card_ = new vgui2::Panel(this, "AccessCard");
         title_ = new vgui2::Label(card_, "AccessTitle", "Online access unavailable");
         status_ = new vgui2::Label(card_, "AccessStatus", "SUBSCRIPTION INACTIVE");
-        #if defined(GAMELAND_HOME_CLIENT) && GAMELAND_HOME_CLIENT
-        description_ = new vgui2::Label(card_, "AccessDescription",
-            "This installation is not currently authorized for Online play.\nPlease verify your GameLand subscription.");
-#else
         description_ = new vgui2::Label(card_, "AccessDescription",
             "This installation is not currently authorized for Online play.\nLAN play remains available from the LAN tab.");
-#endif
         title_->SetContentAlignment(vgui2::Label::a_center);
         status_->SetContentAlignment(vgui2::Label::a_center);
         description_->SetContentAlignment(vgui2::Label::a_center);
@@ -143,12 +138,8 @@ CServerBrowserDialog::CServerBrowserDialog(vgui2::Panel *parent) : Frame(parent,
     m_pFavorites = nullptr;
     LoadUserData();
 
-        m_pFavorites = new CFavoriteGames(this);
-#if defined(GAMELAND_HOME_CLIENT) && GAMELAND_HOME_CLIENT
-    m_pLanGames = nullptr;
-#else
+    m_pFavorites = new CFavoriteGames(this);
     m_pLanGames = new CLanGames(this);
-#endif
 
     SetMinimumSize(640, 384);
     SetSize(960, 640);
@@ -163,10 +154,8 @@ CServerBrowserDialog::CServerBrowserDialog(vgui2::Panel *parent) : Frame(parent,
     m_pTabPanel = new PropertySheet(this, "GameTabs");
     m_pTabPanel->SetTabWidth(72);
 
-        m_pTabPanel->AddPage(m_pOnlinePage, "Online");
-#if !defined(GAMELAND_HOME_CLIENT) || !GAMELAND_HOME_CLIENT
+    m_pTabPanel->AddPage(m_pOnlinePage, "Online");
     m_pTabPanel->AddPage(m_pLanGames, "#ServerBrowser_LanTab");
-#endif
     m_pTabPanel->AddActionSignalTarget(this);
 
     m_pStatusLabel = new Label(this, "StatusLabel", "");
@@ -264,28 +253,20 @@ void CServerBrowserDialog::LoadUserData()
 
 void CServerBrowserDialog::ActivateTab(ServerBrowserTab tab)
 {
-#if defined(GAMELAND_HOME_CLIENT) && GAMELAND_HOME_CLIENT
-    m_pTabPanel->SetActivePage(m_pOnlinePage);
-#else
     if (tab == ServerBrowserTab::LAN)
         m_pTabPanel->SetActivePage(m_pLanGames);
     else
         m_pTabPanel->SetActivePage(m_pOnlinePage);
-#endif
 }
 
 void CServerBrowserDialog::SaveUserData()
 {
-#if defined(GAMELAND_HOME_CLIENT) && GAMELAND_HOME_CLIENT
-    m_pSavedData->SetString("GameList", "favorites");
-#else
     if (m_pGameList == m_pFavorites)
         m_pSavedData->SetString("GameList", "favorites");
     if (m_pGameList == m_pLanGames)
         m_pSavedData->SetString("GameList", "lan");
     else
         m_pSavedData->SetString("GameList", "favorites");
-#endif
 
     m_pSavedData->RemoveSubKey(m_pSavedData->FindKey("Filters"));
     m_pSavedData->AddSubKey(m_pFilterData->MakeCopy());
@@ -467,10 +448,8 @@ void CServerBrowserDialog::GetInternetFilterState(FilterState* out)
 
 void CServerBrowserDialog::ReloadFilterSettings()
 {
-    if (m_pFavorites)
-        m_pFavorites->LoadFilterSettings();
-    if (m_pLanGames)
-        m_pLanGames->LoadFilterSettings();
+    m_pFavorites->LoadFilterSettings();
+    m_pLanGames->LoadFilterSettings();
 }
 
 void CServerBrowserDialog::GetMostCommonQueryPorts(CUtlVector<uint16> &ports)
@@ -549,20 +528,16 @@ void CServerBrowserDialog::OnConnectToGame(KeyValues *pMessageValues)
         }
     }
 
-    if (m_pFavorites)
-        vgui2::ivgui()->PostMessage(m_pFavorites->GetVPanel(), new KeyValues("ConnectedToGame", "ip", ip, "connectionport", connectionPort), NULL);
-    if (m_pLanGames)
-        vgui2::ivgui()->PostMessage(m_pLanGames->GetVPanel(), new KeyValues("ConnectedToGame", "ip", ip, "connectionport", connectionPort), NULL);
+    vgui2::ivgui()->PostMessage(m_pFavorites->GetVPanel(), new KeyValues("ConnectedToGame", "ip", ip, "connectionport", connectionPort), NULL);
+    vgui2::ivgui()->PostMessage(m_pLanGames->GetVPanel(), new KeyValues("ConnectedToGame", "ip", ip, "connectionport", connectionPort), NULL);
 
     m_bCurrentlyConnected = true;
 }
 
 void CServerBrowserDialog::OnDisconnectFromGame()
 {
-    if (m_pFavorites)
-        vgui2::ivgui()->PostMessage(m_pFavorites->GetVPanel(),  new KeyValues("DisconnectedFromGame"), NULL);
-    if (m_pLanGames)
-        vgui2::ivgui()->PostMessage(m_pLanGames->GetVPanel(),  new KeyValues("DisconnectedFromGame"), NULL);
+    vgui2::ivgui()->PostMessage(m_pFavorites->GetVPanel(),  new KeyValues("DisconnectedFromGame"), NULL);
+    vgui2::ivgui()->PostMessage(m_pLanGames->GetVPanel(),  new KeyValues("DisconnectedFromGame"), NULL);
 
     m_bCurrentlyConnected = false;
     m_CurrentConnection = servernetadr_t();

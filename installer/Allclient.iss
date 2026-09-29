@@ -11,7 +11,7 @@
 #endif
 
 #ifndef SourceRoot
-  #define SourceRoot "D:\Allclient"
+  #define SourceRoot "F:\Allclient"
 #endif
 
 [Setup]
@@ -55,17 +55,20 @@ Source: "runtime\vc_redist.x64.exe"; Flags: dontcopy
 Source: "runtime\vcredist2010_x86.exe"; Flags: dontcopy
 Source: "runtime\vcredist2010_x64.exe"; Flags: dontcopy
 ; 1. Base files excluding maps and user config (so custom maps are never overwritten)
-Source: "{#SourceRoot}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "cstrike\maps\*,cstrike\userconfig.cfg,backups\*,cstrike_downloads\*,crashes\*,htmlcache\*,*.log,*.mdmp,debug.log,install.bat,unins000.exe,unins000.dat,*.bak*,hitbox_vis.asi*,*.asi.disabled,auto_launcher_tests.exe"
+Source: "{#SourceRoot}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "cstrike\maps\*,cstrike\userconfig.cfg,backups\*,cstrike_downloads\*,crashes\*,htmlcache\*,*.log,*.mdmp,debug.log,install.bat,unins000.exe,unins000.dat,*.bak*,hitbox_vis.asi*,*.asi.disabled,auto_launcher_tests.exe,allclient-install.ini"
 ; 2. Game maps - NEVER overwrite existing maps! Custom and downloaded maps are 100% preserved
 Source: "{#SourceRoot}\cstrike\maps\*"; DestDir: "{app}\cstrike\maps"; Flags: onlyifdoesntexist recursesubdirs createallsubdirs; Excludes: "*.log,*.bak*"
 ; 3. User config template - only install if not already existing
 Source: "{#SourceRoot}\cstrike\userconfig.cfg"; DestDir: "{app}\cstrike"; Flags: onlyifdoesntexist;
 ; 4. Overlay latest compiled binaries and configs
-Source: "{#BinaryRoot}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "cstrike\maps\*,*.log,*.mdmp,debug.log,hitbox_vis.asi*,*.asi.disabled,auto_launcher_tests.exe"
+Source: "{#BinaryRoot}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "cstrike\maps\*,*.log,*.mdmp,debug.log,hitbox_vis.asi*,*.asi.disabled,auto_launcher_tests.exe,allclient-install.ini"
 
 [INI]
 Filename: "{app}\allclient-install.ini"; Section: "Allclient"; Key: "Schema"; String: "1"
-Filename: "{app}\allclient-install.ini"; Section: "Allclient"; Key: "GameNetTag"; String: "{code:GetActiveGameNetTag}"
+Filename: "{app}\allclient-install.ini"; Section: "Allclient"; Key: "ClientType"; String: "Home"
+Filename: "{app}\allclient-install.ini"; Section: "Allclient"; Key: "GameNetTag"; String: ""
+Filename: "{app}\allclient-install.ini"; Section: "Allclient"; Key: "DeviceHash"; String: "{code:GetDeviceHash}"
+Filename: "{app}\allclient-install.ini"; Section: "Allclient"; Key: "PhoneNumber"; String: "{code:GetUserPhoneNumber}"
 
 [Registry]
 Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Uninstall\{{D9E46BD1-52F8-470F-8639-FF31FE7C5E48}_is1"; ValueType: string; ValueName: "GameNetTag"; ValueData: "{code:GetActiveGameNetTag}"; Flags: uninsdeletevalue
@@ -137,15 +140,17 @@ const
   AllclientUninstallKey = 'Software\Microsoft\Windows\CurrentVersion\Uninstall\{D9E46BD1-52F8-470F-8639-FF31FE7C5E48}_is1';
 
 var
-  PreparationPage: TWizardPage;
-  PreparationStatusLabel: TNewStaticText;
-  PreparationProgress: TNewProgressBar;
-  PreparationRetryButton: TNewButton;
-  PreparationStarted: Boolean;
-  PreparationReady: Boolean;
-  AccessPage: TInputQueryWizardPage;
-  AccessStatusLabel: TNewStaticText;
-  RefreshAccessButton: TNewButton;
+  HomeActivationPage: TWizardPage;
+  HomeDescLabel: TNewStaticText;
+  HomeHashLabel: TNewStaticText;
+  HomeHashEdit: TNewEdit;
+  HomeCopyButton: TNewButton;
+  HomePhoneLabel: TNewStaticText;
+  HomePhoneEdit: TNewEdit;
+  HomeStatusLabel: TNewStaticText;
+  HomeVerifyButton: TNewButton;
+  DeviceHash24: String;
+  UserPhoneNumber: String;
   OnlineServiceUnavailable: Boolean;
   OnlineVerificationMessage: String;
   AccessApproved: Boolean;
@@ -157,10 +162,179 @@ var
   DetectedInstallDirectory: String;
   DetectedInstallRoot: Integer;
   DependenciesReady: Boolean;
-  PayloadDownloadUrl: String;
-  PayloadDownloadPage: TDownloadWizardPage;
   ActiveGameNetTag: String;
   IsPatchMode: Boolean;
+
+function GetDeviceHash(Param: String): String;
+begin
+  Result := DeviceHash24;
+end;
+
+function GetUserPhoneNumber(Param: String): String;
+begin
+  Result := Trim(UserPhoneNumber);
+end;
+
+function Compute24CharDeviceHash(): String;
+var
+  MachineGuid: String;
+  VolSerial, MaxLen, Flags: DWORD;
+  ComputerName: String;
+  CpuName: String;
+  RawSeed: String;
+  Sha256Hex: String;
+begin
+  MachineGuid := '';
+  if IsWin64 then
+    RegQueryStringValue(HKLM64, 'SOFTWARE\Microsoft\Cryptography', 'MachineGuid', MachineGuid);
+  if MachineGuid = '' then
+    RegQueryStringValue(HKLM, 'SOFTWARE\Microsoft\Cryptography', 'MachineGuid', MachineGuid);
+  if MachineGuid = '' then
+    RegQueryStringValue(HKLM32, 'SOFTWARE\Microsoft\Cryptography', 'MachineGuid', MachineGuid);
+
+  VolSerial := 0;
+  MaxLen := 0;
+  Flags := 0;
+  GetVolumeInformation('C:\', '', 0, VolSerial, MaxLen, Flags, '', 0);
+
+  ComputerName := ExpandConstant('{computername}');
+
+  CpuName := '';
+  RegQueryStringValue(HKLM, 'HARDWARE\DESCRIPTION\System\CentralProcessor\0', 'ProcessorNameString', CpuName);
+
+  RawSeed := MachineGuid + '|' + Format('%.8X', [VolSerial]) + '|' + ComputerName + '|' + CpuName;
+  if Trim(RawSeed) = '|||' then
+    RawSeed := Format('FALLBACK_%.8X', [VolSerial]);
+
+  Sha256Hex := Uppercase(GetSHA256OfString(RawSeed));
+  Result := Copy(Sha256Hex, 1, 24);
+end;
+
+procedure CopyDeviceHashClick(Sender: TObject);
+begin
+  HomeHashEdit.SelectAll;
+  SendMessage(HomeHashEdit.Handle, 769 {WM_COPY}, 0, 0);
+  HomeCopyButton.Caption := '✓ کپی شد!';
+end;
+
+function FetchAccessApi(const Query: String; var ResponseText: String): Boolean; forward;
+function GetJsonString(const Json, Key: String): String; forward;
+
+function NormalizeDigitsAndPhone(const S: String): String;
+var
+  I: Integer;
+  C: Char;
+  Res: String;
+begin
+  Res := '';
+  for I := 1 to Length(S) do
+  begin
+    C := S[I];
+    if (Ord(C) >= $06F0) and (Ord(C) <= $06F9) then
+      Res := Res + Chr(Ord(C) - $06F0 + Ord('0'))
+    else if (Ord(C) >= $0660) and (Ord(C) <= $0669) then
+      Res := Res + Chr(Ord(C) - $0660 + Ord('0'))
+    else if (C >= '0') and (C <= '9') then
+      Res := Res + C
+    else if (C = '+') and (Res = '') then
+      Res := '+';
+  end;
+  if (Length(Res) >= 3) and (Copy(Res, 1, 3) = '+98') then
+    Res := '0' + Copy(Res, 4, Length(Res) - 3)
+  else if (Length(Res) >= 2) and (Copy(Res, 1, 2) = '98') and (Length(Res) = 12) then
+    Res := '0' + Copy(Res, 3, Length(Res) - 2);
+
+  Result := Trim(Res);
+end;
+
+function HomeAccessVerify(const Hash, Phone: String): Boolean;
+var
+  CleanHash: String;
+  CleanPhone: String;
+  RequestUrl: String;
+  ResponseText: String;
+  NormalizedResponse: String;
+  DaysRemainingStr: String;
+  ExpiryStr: String;
+  ServerErr: String;
+begin
+  Result := False;
+  OnlineServiceUnavailable := False;
+  OnlineVerificationMessage := '';
+
+  CleanHash := Uppercase(Trim(Hash));
+  CleanPhone := NormalizeDigitsAndPhone(Phone);
+
+  if Length(CleanHash) <> 24 then
+  begin
+    OnlineVerificationMessage := 'کد سخت‌افزاری دستگاه باید دقیقاً ۲۴ کاراکتر باشد.';
+    Exit;
+  end;
+
+  if Length(CleanPhone) = 0 then
+  begin
+    OnlineVerificationMessage := 'لطفاً شماره تلفن همراه ثبت‌شده در پنل را وارد نمایید.';
+    Exit;
+  end;
+
+  HomePhoneEdit.Text := CleanPhone;
+  HomeStatusLabel.Caption := 'در حال بررسی اتصال و وضعیت اشتراک…';
+  HomeStatusLabel.Font.Color := clGray;
+  WizardForm.Update;
+
+  RequestUrl := '?action=verify_home&hash=' + CleanHash + '&phone=' + CleanPhone;
+  if FetchAccessApi(RequestUrl, ResponseText) then
+  begin
+    NormalizedResponse := Lowercase(ResponseText);
+    if Pos('"valid":true', NormalizedResponse) > 0 then
+    begin
+      Result := True;
+      UserPhoneNumber := CleanPhone;
+      DaysRemainingStr := GetJsonString(ResponseText, 'days_remaining');
+      ExpiryStr := GetJsonString(ResponseText, 'expiry');
+      OnlineVerificationMessage := '✓ اشتراک کلاینت خانگی با موفقیت تأیید شد. اعتبار: ' + DaysRemainingStr + ' روز باقی‌مانده (تا تاریخ ' + ExpiryStr + ')';
+    end
+    else
+    begin
+      Result := False;
+      ServerErr := GetJsonString(ResponseText, 'error');
+      if ServerErr <> '' then
+        OnlineVerificationMessage := ServerErr
+      else
+        OnlineVerificationMessage := 'این کد دستگاه هنوز با این شماره تلفن در پنل مدیریت تأیید نشده است.';
+    end;
+  end
+  else
+  begin
+    OnlineServiceUnavailable := True;
+    OnlineVerificationMessage := 'خطا در برقراری ارتباط با سرور تأیید آنلاین. اتصال اینترنت را بررسی کنید.';
+  end;
+end;
+
+procedure VerifyHomeClientClick(Sender: TObject);
+begin
+  HomeVerifyButton.Enabled := False;
+  try
+    if HomeAccessVerify(HomeHashEdit.Text, HomePhoneEdit.Text) then
+    begin
+      AccessApproved := True;
+      HomeStatusLabel.Caption := OnlineVerificationMessage;
+      HomeStatusLabel.Font.Color := clGreen;
+      if (DetectedInstallDirectory <> '') and (CompareText(WizardForm.DirEdit.Text, DetectedInstallDirectory) = 0) then
+        SubscriptionUpdate := True;
+      MsgBox(OnlineVerificationMessage, mbInformation, MB_OK);
+    end
+    else
+    begin
+      AccessApproved := False;
+      HomeStatusLabel.Caption := OnlineVerificationMessage;
+      HomeStatusLabel.Font.Color := clRed;
+      MsgBox(OnlineVerificationMessage, mbError, MB_OK);
+    end;
+  finally
+    HomeVerifyButton.Enabled := True;
+  end;
+end;
 
 function GetActiveGameNetTag(Param: String): String;
 begin
@@ -177,11 +351,19 @@ function URLDownloadToFile(Caller: NativeInt; URL, FileName: String;
 function SetFileAttributes(lpFileName: String; dwFileAttributes: DWORD): BOOL;
   external 'SetFileAttributesW@kernel32.dll stdcall';
 
+
+
 procedure SetAccessStatus(const Caption: String; Color: TColor);
 begin
-  AccessStatusLabel.Font.Color := Color;
-  AccessStatusLabel.Caption := Caption;
-  WizardForm.Update;
+  try
+    if HomeStatusLabel <> nil then
+    begin
+      HomeStatusLabel.Font.Color := Color;
+      HomeStatusLabel.Caption := Caption;
+    end;
+    WizardForm.Update;
+  except
+  end;
 end;
 
 function NormalizeAccessCode(const Value: String): String;
@@ -404,243 +586,6 @@ begin
     if EndPos > 0 then
       Result := Copy(Json, StartPos, EndPos - 1);
   end;
-end;
-
-function OnlineAccessCodeIsValid(const Username, Password: String): Boolean;
-var
-  RequestUrl: String;
-  ResponseText: String;
-  NormalizedResponse: String;
-begin
-  Result := False;
-  OnlineServiceUnavailable := False;
-  OnlineVerificationMessage := '';
-  PayloadDownloadUrl := '';
-
-  if Length(Trim(Username)) = 0 then
-  begin
-    OnlineVerificationMessage := 'نام کاربری نمی‌تواند خالی باشد.';
-    Exit;
-  end;
-
-  if Length(Trim(Password)) = 0 then
-  begin
-    OnlineVerificationMessage := 'رمز عبور نمی‌تواند خالی باشد.';
-    Exit;
-  end;
-
-
-  SetAccessStatus('در حال بررسی اطلاعات واردشده…', clGray);
-  RequestUrl := '?action=verify&username=' + Trim(Username) + '&password=' + Trim(Password);
-  if FetchAccessApi(RequestUrl, ResponseText) then
-  begin
-    SetAccessStatus('پاسخ دریافت شد؛ در حال بررسی نتیجه…', clGray);
-    NormalizedResponse := Lowercase(ResponseText);
-    if Pos('"valid":true', NormalizedResponse) > 0 then
-    begin
-      Result := True;
-      ActiveGameNetTag := Trim(Username);
-      OnlineVerificationMessage := 'لایسنس آنلاین تأیید شد.';
-      PayloadDownloadUrl := GetJsonString(ResponseText, 'download_url');
-      if PayloadDownloadUrl <> '' then
-        PayloadDownloadUrl := Copy(PayloadDownloadUrl, 1, Length(PayloadDownloadUrl)); // Clean copy
-    end
-    else if Pos('"valid":false', NormalizedResponse) > 0 then
-      OnlineVerificationMessage := 'اطلاعات ورود اشتباه است یا اشتراک لغو شده است.'
-    else
-    begin
-      OnlineServiceUnavailable := True;
-      OnlineVerificationMessage := 'پاسخ سرویس آنلاین معتبر نیست.';
-    end;
-  end
-  else
-  begin
-    OnlineServiceUnavailable := True;
-    if OnlineVerificationMessage = '' then
-      OnlineVerificationMessage := 'سرویس تأیید آنلاین در دسترس نیست.';
-  end;
-end;
-
-function AccessCodeIsValid(const Username, Password: String): Boolean;
-begin
-  Result := CompareText(Trim(Password), OfflineCode) = 0;
-  if Result then
-    OnlineVerificationMessage := 'کد دسترسی آفلاین تأیید شد.'
-  else
-    Result := OnlineAccessCodeIsValid(Username, Password);
-end;
-
-procedure RefreshAccessStatus(Sender: TObject);
-var
-  ResponseText: String;
-begin
-  RefreshAccessButton.Enabled := False;
-  OnlineVerificationMessage := '';
-  SetAccessStatus('در حال آماده‌سازی بررسی اتصال…', clGray);
-  try
-    if FetchAccessApi('?action=status', ResponseText) and
-       (Pos('"service":"allclient-access"', Lowercase(ResponseText)) > 0) then
-      SetAccessStatus('سرویس آنلاین متصل است و پاسخ می‌دهد.', clGreen)
-    else
-    begin
-      if OnlineVerificationMessage = '' then
-        OnlineVerificationMessage := 'وضعیت معتبری از سرویس دریافت نشد.';
-      SetAccessStatus('سرویس در دسترس نیست: ' + OnlineVerificationMessage, clRed);
-    end;
-  except
-    SetAccessStatus('بررسی اتصال با خطا مواجه شد؛ دوباره تلاش کنید.', clRed);
-  end;
-  RefreshAccessButton.Enabled := True;
-end;
-
-procedure RunEarlyPreparation(Sender: TObject);
-var
-  ResponseText: String;
-begin
-  PreparationStarted := True;
-  PreparationReady := False;
-  PreparationRetryButton.Visible := False;
-  WizardForm.NextButton.Enabled := False;
-
-  PreparationProgress.Position := 15;
-  PreparationStatusLabel.Font.Color := clGray;
-  PreparationStatusLabel.Caption :=
-    'در حال آماده‌سازی اتصال برای تأیید آنلاین…';
-  WizardForm.Update;
-
-  try
-    PreparationProgress.Position := 55;
-    PreparationStatusLabel.Caption :=
-      'اتصال آماده است؛ در حال بررسی دسترسی آنلاین…';
-    WizardForm.Update;
-
-    if FetchAccessApi('?action=status', ResponseText) and
-       (Pos('"service":"allclient-access"', Lowercase(ResponseText)) > 0) then
-    begin
-      PreparationProgress.Position := 100;
-      PreparationReady := True;
-      PreparationStatusLabel.Font.Color := clGreen;
-      PreparationStatusLabel.Caption :=
-        'آماده‌سازی کامل شد؛ تأیید آنلاین آماده است.';
-    end
-    else
-    begin
-      PreparationProgress.Position := 55;
-      PreparationStatusLabel.Font.Color := clRed;
-      PreparationStatusLabel.Caption :=
-        'سرویس آنلاین پاسخ نداد؛ دوباره تلاش کنید یا با کد آفلاین ادامه دهید.';
-      PreparationRetryButton.Visible := True;
-    end;
-  except
-    PreparationProgress.Position := 0;
-    PreparationStatusLabel.Font.Color := clRed;
-    PreparationStatusLabel.Caption :=
-      'آماده‌سازی انجام نشد؛ دوباره تلاش کنید یا با کد آفلاین ادامه دهید.';
-    PreparationRetryButton.Visible := True;
-  end;
-
-  WizardForm.NextButton.Enabled := True;
-  WizardForm.Update;
-end;
-
-procedure CheckInstalledSubscription; forward;
-
-procedure CurPageChanged(CurPageID: Integer);
-begin
-  if (CurPageID = PreparationPage.ID) and not PreparationStarted then
-  begin
-    CheckInstalledSubscription;
-    if SubscriptionUpdate then
-    begin
-      PreparationStarted := True;
-      PreparationReady := True;
-      PreparationProgress.Position := 100;
-      PreparationStatusLabel.Font.Color := clGreen;
-      PreparationStatusLabel.Caption := 'کلاینت قبلی با برچسب «' + ActiveGameNetTag + '» شناسایی شد و اشتراک فعال است.' + #13#10 +
-        'برای به‌روزرسانی خودکار، «بعدی» را بزنید:' + #13#10 + DetectedInstallDirectory;
-    end
-    else
-      RunEarlyPreparation(nil);
-  end;
-  if SubscriptionUpdate and (CurPageID = wpReady) then
-  begin
-    WizardForm.NextButton.Caption := 'به‌روزرسانی';
-    WizardForm.ReadyMemo.Text := 'اشتراک گیم‌نت «' + ActiveGameNetTag + '» تأیید شد؛ نیازی به ورود مشخصات نیست.' + #13#10 +
-      'مسیر به‌روزرسانی: ' + DetectedInstallDirectory + #13#10 +
-      'فایل‌ها و پچ جدید کلاینت جایگزین خواهند شد. لطفاً بازی و لانچر را ببندید.';
-  end;
-end;
-
-procedure InitializeWizard;
-begin
-  PreparationPage := CreateCustomPage(
-    wpWelcome,
-    'آماده‌سازی Allclient',
-    'آماده‌سازی اولیه اتصال');
-
-  PreparationStatusLabel := TNewStaticText.Create(WizardForm);
-  PreparationStatusLabel.Parent := PreparationPage.Surface;
-  PreparationStatusLabel.Left := ScaleX(12);
-  PreparationStatusLabel.Top := ScaleY(34);
-  PreparationStatusLabel.Width := PreparationPage.SurfaceWidth - ScaleX(24);
-  PreparationStatusLabel.Height := ScaleY(54);
-  PreparationStatusLabel.AutoSize := False;
-  PreparationStatusLabel.WordWrap := True;
-  PreparationStatusLabel.Caption :=
-    'برای بررسی اتصال آنلاین آماده است.';
-  PreparationStatusLabel.Font.Color := clGray;
-
-  PreparationProgress := TNewProgressBar.Create(WizardForm);
-  PreparationProgress.Parent := PreparationPage.Surface;
-  PreparationProgress.Left := ScaleX(12);
-  PreparationProgress.Top := PreparationStatusLabel.Top +
-    PreparationStatusLabel.Height + ScaleY(16);
-  PreparationProgress.Width := PreparationPage.SurfaceWidth - ScaleX(24);
-  PreparationProgress.Height := ScaleY(18);
-  PreparationProgress.Min := 0;
-  PreparationProgress.Max := 100;
-  PreparationProgress.Position := 0;
-
-  PreparationRetryButton := TNewButton.Create(WizardForm);
-  PreparationRetryButton.Parent := PreparationPage.Surface;
-  PreparationRetryButton.Left := ScaleX(12);
-  PreparationRetryButton.Top := PreparationProgress.Top +
-    PreparationProgress.Height + ScaleY(18);
-  PreparationRetryButton.Width := ScaleX(130);
-  PreparationRetryButton.Height := ScaleY(30);
-  PreparationRetryButton.Caption := 'تلاش دوباره';
-  PreparationRetryButton.OnClick := @RunEarlyPreparation;
-  PreparationRetryButton.Visible := False;
-
-  AccessPage := CreateInputQueryPage(
-    PreparationPage.ID,
-    'تأیید مجوز نصب',
-    'اطلاعات گیم‌نت را وارد کنید',
-    'نام کاربری و رمز عبور اختصاصی گیم‌نت خود را وارد کنید.');
-  AccessPage.Add('نام کاربری (کد شعبه):', False);
-  AccessPage.Add('رمز عبور نصب کلاینت:', True);
-
-  AccessStatusLabel := TNewStaticText.Create(WizardForm);
-  AccessStatusLabel.Parent := AccessPage.Surface;
-  AccessStatusLabel.Left := AccessPage.Edits[1].Left;
-  AccessStatusLabel.Top := AccessPage.Edits[1].Top + AccessPage.Edits[1].Height + ScaleY(20);
-  AccessStatusLabel.Width := AccessPage.SurfaceWidth;
-  AccessStatusLabel.Height := ScaleY(42);
-  AccessStatusLabel.AutoSize := False;
-  AccessStatusLabel.WordWrap := True;
-  AccessStatusLabel.Caption := 'اتصال آنلاین هنوز بررسی نشده است.';
-  AccessStatusLabel.Font.Color := clGray;
-
-  RefreshAccessButton := TNewButton.Create(WizardForm);
-  RefreshAccessButton.Parent := AccessPage.Surface;
-  RefreshAccessButton.Left := AccessPage.Edits[1].Left;
-  RefreshAccessButton.Top := AccessStatusLabel.Top + AccessStatusLabel.Height + ScaleY(10);
-  RefreshAccessButton.Width := ScaleX(150);
-  RefreshAccessButton.Height := ScaleY(30);
-  RefreshAccessButton.Caption := 'بررسی دوباره اتصال';
-  RefreshAccessButton.OnClick := @RefreshAccessStatus;
-
-  PayloadDownloadPage := CreateDownloadPage('در حال دریافت اطلاعات گیم‌نت', 'لطفاً منتظر بمانید...', nil);
 end;
 
 function ReadPreviousInstallFromRoot(RootKey: Integer;
@@ -953,67 +898,168 @@ begin
   Result := True;
 end;
 
-function NextButtonClick(CurPageID: Integer): Boolean;
+procedure CheckInstalledHomeSubscription;
 var
-  InputUsername, InputPassword: String;
+  Directory, Version: String;
+  IdentityFile, StoredPhone: String;
 begin
-  Result := True;
-  if CurPageID = AccessPage.ID then
+  if not UpdateAccessChecked then
   begin
-    WizardForm.NextButton.Enabled := False;
-    SetAccessStatus('در حال تأیید مجوز نصب…', clGray);
-    InputUsername := AccessPage.Values[0];
-    InputPassword := NormalizeAccessCode(AccessPage.Values[1]);
-    try
-      try
-        Result := AccessCodeIsValid(InputUsername, InputPassword);
-      except
-        Result := False;
-        OnlineServiceUnavailable := True;
-        OnlineVerificationMessage := 'تأیید با خطای غیرمنتظره متوقف شد؛ دوباره تلاش کنید.';
-      end;
-
-      if Result then
+    UpdateAccessChecked := True;
+    if FindPreviousAllclient(Directory, Version) and
+       FileExists(AddBackslash(Directory) + 'cstrike.exe') and
+       PreviousInstallPathIsSafe(Directory) then
+    begin
+      DetectedInstallDirectory := Directory;
+      IdentityFile := AddBackslash(Directory) + 'allclient-install.ini';
+      if FileExists(IdentityFile) then
       begin
-        AccessApproved := True;
-        SetAccessStatus(OnlineVerificationMessage, clGreen)
-      end
-      else
-      begin
-        AccessApproved := False;
-        if OnlineVerificationMessage = '' then
-          OnlineVerificationMessage := 'اطلاعات نصب تأیید نشد.';
-        SetAccessStatus(OnlineVerificationMessage, clRed);
-        MsgBox(OnlineVerificationMessage, mbError, MB_OK);
-        WizardForm.ActiveControl := AccessPage.Edits[0];
+        StoredPhone := Trim(GetIniString('Allclient', 'PhoneNumber', '', IdentityFile));
+        if (StoredPhone <> '') and (HomePhoneEdit.Text = '') then
+        begin
+          HomePhoneEdit.Text := StoredPhone;
+        end;
       end;
-    finally
-      WizardForm.NextButton.Enabled := True;
+      WizardForm.DirEdit.Text := Directory;
     end;
   end;
+end;
 
-  if CurPageID = wpReady then
+procedure CurPageChanged(CurPageID: Integer);
+begin
+  if (CurPageID = HomeActivationPage.ID) and not UpdateAccessChecked then
   begin
-    if PayloadDownloadUrl <> '' then
+    CheckInstalledHomeSubscription;
+  end;
+  if SubscriptionUpdate and (CurPageID = wpReady) then
+  begin
+    WizardForm.NextButton.Caption := 'به‌روزرسانی';
+    WizardForm.ReadyMemo.Text := 'اشتراک کلاینت خانگی (شماره: ' + UserPhoneNumber + ') تأیید شد.' + #13#10 +
+      'مسیر به‌روزرسانی: ' + DetectedInstallDirectory + #13#10 +
+      'فایل‌ها و پچ جدید کلاینت جایگزین خواهند شد. لطفاً قبل از شروع، بازی و لانچر را ببندید.';
+  end;
+end;
+
+procedure InitializeWizard;
+begin
+  DeviceHash24 := Compute24CharDeviceHash();
+
+  HomeActivationPage := CreateCustomPage(
+    wpWelcome,
+    'فعال‌سازی اشتراک کلاینت خانگی گیم‌لند',
+    'شناسه سخت‌افزاری اختصاصی دستگاه و تأیید شماره موبایل');
+
+  HomeDescLabel := TNewStaticText.Create(WizardForm);
+  HomeDescLabel.Parent := HomeActivationPage.Surface;
+  HomeDescLabel.Left := ScaleX(4);
+  HomeDescLabel.Top := ScaleY(4);
+  HomeDescLabel.Width := HomeActivationPage.SurfaceWidth - ScaleX(8);
+  HomeDescLabel.Height := ScaleY(46);
+  HomeDescLabel.AutoSize := False;
+  HomeDescLabel.WordWrap := True;
+  HomeDescLabel.Caption :=
+    'این نسخه مخصوص کلاینت خانگی است. کد دستگاه زیر به صورت هوشمند از قطعات سخت‌افزاری رایانه شما تولید شده است. لطفاً آن را کپی کرده و برای مدیریت ارسال کنید تا با شماره همراه شما فعال شود:';
+
+  HomeHashLabel := TNewStaticText.Create(WizardForm);
+  HomeHashLabel.Parent := HomeActivationPage.Surface;
+  HomeHashLabel.Left := ScaleX(4);
+  HomeHashLabel.Top := ScaleY(54);
+  HomeHashLabel.Width := HomeActivationPage.SurfaceWidth - ScaleX(8);
+  HomeHashLabel.Height := ScaleY(18);
+  HomeHashLabel.Caption := 'کد اختصاصی دستگاه شما (۲۴ کاراکتر - غیرقابل ویرایش):';
+  HomeHashLabel.Font.Style := [fsBold];
+
+  HomeHashEdit := TNewEdit.Create(WizardForm);
+  HomeHashEdit.Parent := HomeActivationPage.Surface;
+  HomeHashEdit.Left := ScaleX(4);
+  HomeHashEdit.Top := ScaleY(74);
+  HomeHashEdit.Width := HomeActivationPage.SurfaceWidth - ScaleX(140);
+  HomeHashEdit.Height := ScaleY(30);
+  HomeHashEdit.Text := DeviceHash24;
+  HomeHashEdit.ReadOnly := True;
+  HomeHashEdit.Color := clBtnFace;
+  HomeHashEdit.Font.Name := 'Consolas';
+  HomeHashEdit.Font.Size := 11;
+  HomeHashEdit.Font.Style := [fsBold];
+
+  HomeCopyButton := TNewButton.Create(WizardForm);
+  HomeCopyButton.Parent := HomeActivationPage.Surface;
+  HomeCopyButton.Left := HomeActivationPage.SurfaceWidth - ScaleX(130);
+  HomeCopyButton.Top := ScaleY(73);
+  HomeCopyButton.Width := ScaleX(130);
+  HomeCopyButton.Height := ScaleY(32);
+  HomeCopyButton.Caption := 'کپی کد دستگاه (Copy)';
+  HomeCopyButton.OnClick := @CopyDeviceHashClick;
+
+  HomePhoneLabel := TNewStaticText.Create(WizardForm);
+  HomePhoneLabel.Parent := HomeActivationPage.Surface;
+  HomePhoneLabel.Left := ScaleX(4);
+  HomePhoneLabel.Top := ScaleY(118);
+  HomePhoneLabel.Width := HomeActivationPage.SurfaceWidth - ScaleX(8);
+  HomePhoneLabel.Height := ScaleY(18);
+  HomePhoneLabel.Caption := 'شماره تلفن همراه شما (ثبت‌شده در پنل مدیریت):';
+  HomePhoneLabel.Font.Style := [fsBold];
+
+  HomePhoneEdit := TNewEdit.Create(WizardForm);
+  HomePhoneEdit.Parent := HomeActivationPage.Surface;
+  HomePhoneEdit.Left := ScaleX(4);
+  HomePhoneEdit.Top := ScaleY(138);
+  HomePhoneEdit.Width := ScaleX(200);
+  HomePhoneEdit.Height := ScaleY(26);
+  HomePhoneEdit.MaxLength := 15;
+  HomePhoneEdit.Text := '';
+
+  HomeVerifyButton := TNewButton.Create(WizardForm);
+  HomeVerifyButton.Parent := HomeActivationPage.Surface;
+  HomeVerifyButton.Left := ScaleX(215);
+  HomeVerifyButton.Top := ScaleY(137);
+  HomeVerifyButton.Width := ScaleX(160);
+  HomeVerifyButton.Height := ScaleY(28);
+  HomeVerifyButton.Caption := 'بررسی و تأیید فعال‌سازی';
+  HomeVerifyButton.OnClick := @VerifyHomeClientClick;
+
+  HomeStatusLabel := TNewStaticText.Create(WizardForm);
+  HomeStatusLabel.Parent := HomeActivationPage.Surface;
+  HomeStatusLabel.Left := ScaleX(4);
+  HomeStatusLabel.Top := ScaleY(178);
+  HomeStatusLabel.Width := HomeActivationPage.SurfaceWidth - ScaleX(8);
+  HomeStatusLabel.Height := ScaleY(52);
+  HomeStatusLabel.AutoSize := False;
+  HomeStatusLabel.WordWrap := True;
+  HomeStatusLabel.Caption := 'پس از ارسال کد بالا به مدیریت، شماره موبایل خود را وارد کرده و روی «بررسی و تأیید فعال‌سازی» کلیک کنید.';
+  HomeStatusLabel.Font.Color := clGray;
+end;
+
+function NextButtonClick(CurPageID: Integer): Boolean;
+begin
+  Result := True;
+  if CurPageID = HomeActivationPage.ID then
+  begin
+    if not AccessApproved then
     begin
-      PayloadDownloadPage.Clear;
-      PayloadDownloadPage.Add(PayloadDownloadUrl, 'gameland_license.dat', '');
-      PayloadDownloadPage.Show;
+      WizardForm.NextButton.Enabled := False;
       try
-        try
-          PayloadDownloadPage.Download;
-          Result := True;
-        except
-          if PayloadDownloadPage.AbortedByUser then
-            Log('Aborted by user.')
-          else
-            MsgBox('خطا در دانلود فایل اختصاصی گیم‌نت. لطفاً اتصال اینترنت را بررسی کنید.', mbError, MB_OK);
-          Result := False;
+        Result := HomeAccessVerify(HomeHashEdit.Text, HomePhoneEdit.Text);
+        if Result then
+        begin
+          AccessApproved := True;
+          HomeStatusLabel.Caption := OnlineVerificationMessage;
+          HomeStatusLabel.Font.Color := clGreen;
+          if (DetectedInstallDirectory <> '') and (CompareText(WizardForm.DirEdit.Text, DetectedInstallDirectory) = 0) then
+            SubscriptionUpdate := True;
+        end
+        else
+        begin
+          AccessApproved := False;
+          HomeStatusLabel.Caption := OnlineVerificationMessage;
+          HomeStatusLabel.Font.Color := clRed;
+          MsgBox(OnlineVerificationMessage, mbError, MB_OK);
         end;
       finally
-        PayloadDownloadPage.Hide;
+        WizardForm.NextButton.Enabled := True;
       end;
     end;
+    Exit;
   end;
 end;
 
@@ -1082,7 +1128,7 @@ end;
 function ShouldSkipPage(PageID: Integer): Boolean;
 begin
   Result := SubscriptionUpdate and
-    ((PageID = AccessPage.ID) or (PageID = wpSelectDir) or (PageID = wpSelectProgramGroup));
+    ((PageID = wpSelectDir) or (PageID = wpSelectProgramGroup));
 end;
 
 function IsVCRedist2015To2022InstalledX86(): Boolean;
@@ -1342,15 +1388,11 @@ begin
     else
       RegWriteStringValue(HKLM32, 'Software\NextClient', 'InstallID', GetHardwareID(''));
 
-    if PayloadDownloadUrl <> '' then
-    begin
-      if FileExists(ExpandConstant('{tmp}\gameland_license.dat')) then
-      begin
-        FileCopy(ExpandConstant('{tmp}\gameland_license.dat'), ExpandConstant('{app}\gameland_license.dat'), False);
-        // 1 = ReadOnly, 2 = Hidden, 4 = System. Total = 7
-        SetFileAttributes(ExpandConstant('{app}\gameland_license.dat'), 7);
-      end;
-    end;
+
+    SetIniString('Allclient', 'ClientType', 'Home', ExpandConstant('{app}\allclient-install.ini'));
+    SetIniString('Allclient', 'GameNetTag', '', ExpandConstant('{app}\allclient-install.ini'));
+    SetIniString('Allclient', 'DeviceHash', DeviceHash24, ExpandConstant('{app}\allclient-install.ini'));
+    SetIniString('Allclient', 'PhoneNumber', UserPhoneNumber, ExpandConstant('{app}\allclient-install.ini'));
     ConfigureSmartEmu(ExpandConstant('{app}\platform\steam\games\SmartEmu\config.xml'));
   end;
 end;

@@ -218,6 +218,9 @@ ConnectTargetKind ClassifyConnectTarget(const char* target)
 
 std::string OnlineNamePrefix()
 {
+#if defined(GAMELAND_HOME_CLIENT) && GAMELAND_HOME_CLIENT
+    return {};
+#else
     char value[13]{};
     const DWORD length = GetEnvironmentVariableA("NEXTCLIENT_PLAYER_NAME_TAG", value, sizeof(value));
     if (length == 0 || length >= sizeof(value))
@@ -234,6 +237,7 @@ std::string OnlineNamePrefix()
     }
 
     return std::string("[") + std::string(tag) + "] ";
+#endif
 }
 
 std::string RemoveOwnOnlineNamePrefix(std::string_view name)
@@ -256,6 +260,9 @@ std::string BuildOnlinePlayerName(std::string_view original_name)
 
 void EnableOnlinePlayerNameTag()
 {
+#if defined(GAMELAND_HOME_CLIENT) && GAMELAND_HOME_CLIENT
+    return;
+#else
     if (OnlineNamePrefix().empty())
         return;
 
@@ -266,6 +273,7 @@ void EnableOnlinePlayerNameTag()
     g_OriginalPlayerName = RemoveOwnOnlineNamePrefix(name->string);
     g_OnlinePlayerNameTagActive = true;
     Cvar_Set("name", g_OriginalPlayerName.c_str());
+#endif
 }
 
 void RestoreOriginalPlayerName()
@@ -690,7 +698,31 @@ static void OnGameInitializing(void* mainwindow, HDC* pmaindc, HGLRC* pbaseRC, c
         // internally. Apply the online tag afterwards so that cleanup cannot
         // immediately restore and remove it before the handshake begins.
         if (target_kind == ConnectTargetKind::Online)
+        {
+#if defined(GAMELAND_HOME_CLIENT) && GAMELAND_HOME_CLIENT
+            // Unconditionally remove any tag prefix from player name in Home Client
+            cvar_t* name_cvar = Cvar_FindVar("name");
+            if (name_cvar && name_cvar->string)
+            {
+                std::string_view cur_name = name_cvar->string;
+                if (!cur_name.empty() && cur_name.front() == '[')
+                {
+                    size_t close_bracket = cur_name.find(']');
+                    if (close_bracket != std::string_view::npos)
+                    {
+                        size_t after_tag = close_bracket + 1;
+                        while (after_tag < cur_name.size() && cur_name[after_tag] == ' ')
+                            after_tag++;
+                        std::string clean_name = std::string(cur_name.substr(after_tag));
+                        if (!clean_name.empty())
+                            Cvar_Set("name", clean_name.c_str());
+                    }
+                }
+            }
+#else
             EnableOnlinePlayerNameTag();
+#endif
+        }
     });
     g_Unsubs.emplace_back(eng()->Host_Map_f |= [](const auto& next) {
         // New Game turns this process into a listen server. Browser discovery
