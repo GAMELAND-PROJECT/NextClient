@@ -124,11 +124,22 @@ if (MSVC)
     endforeach ()
 endif ()
 
-# Install directory: cache variable with env fallback
+# Install directory: cache variable with env fallback and branch auto-detection
 if (DEFINED ENV{NEXTCLIENT_INSTALL_DIR} AND NOT NEXTCLIENT_INSTALL_DIR)
     set(NEXTCLIENT_INSTALL_DIR "$ENV{NEXTCLIENT_INSTALL_DIR}" CACHE PATH "NextClient install directory")
-else ()
-    set(NEXTCLIENT_INSTALL_DIR "" CACHE PATH "NextClient install directory")
+elseif (NOT NEXTCLIENT_INSTALL_DIR)
+    execute_process(
+        COMMAND git rev-parse --abbrev-ref HEAD
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+        OUTPUT_VARIABLE CURRENT_GIT_BRANCH
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET
+    )
+    if (CURRENT_GIT_BRANCH STREQUAL "کلاین-های-خونگی")
+        set(NEXTCLIENT_INSTALL_DIR "F:/Allclient" CACHE PATH "NextClient install directory")
+    else ()
+        set(NEXTCLIENT_INSTALL_DIR "D:/Allclient" CACHE PATH "NextClient install directory")
+    endif ()
 endif ()
 
 # custom build target

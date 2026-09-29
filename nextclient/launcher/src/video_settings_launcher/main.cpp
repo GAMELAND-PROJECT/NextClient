@@ -19,6 +19,8 @@
 #include <vector>
 
 #include "../next_launcher/GameNetAccess.h"
+#include "../next_launcher/EmbeddedDefaultConfig.h"
+#include "../next_launcher/VideoSettingsDialog.h"
 #pragma comment(lib, "msimg32.lib")
 
 namespace
@@ -1108,6 +1110,34 @@ LRESULT CALLBACK DemoManagerProc(HWND window, UINT message, WPARAM wParam, LPARA
         return 0;
     }
     case WM_COMMAND:
+        if (HIWORD(wParam) == EN_CHANGE && reinterpret_cast<HWND>(lParam) == g_userPhone)
+        {
+            wchar_t curPhone[64]{};
+            GetWindowTextW(g_userPhone, curPhone, static_cast<int>(std::size(curPhone)));
+            if (!g_activeUserToken.empty() && std::wstring(curPhone) != g_activeUserPhone)
+            {
+                g_activeUserToken.clear();
+                g_activeUserPhone.clear();
+                RegistryKey regKey(HKEY_CURRENT_USER, kLauncherKey, KEY_SET_VALUE);
+                regKey.WriteString(L"SavedUserToken", L"");
+                regKey.WriteDword(L"AutoLoginEnabled", 0);
+                if (g_userLoginBtn)
+                {
+                    SetWindowTextW(g_userLoginBtn, L"ورود");
+                    InvalidateRect(g_userLoginBtn, nullptr, TRUE);
+                }
+                if (g_userStatusLabel)
+                {
+                    SetWindowTextW(g_userStatusLabel, L"وارد نشده‌اید (مهمان: کانفیگ پیش‌فرض لود می‌شود)");
+                    InvalidateRect(g_userStatusLabel, nullptr, TRUE);
+                }
+                if (g_userRegisterBtn)
+                {
+                    SetWindowTextW(g_userRegisterBtn, L"ثبت‌نام / فراموشی رمز");
+                    InvalidateRect(g_userRegisterBtn, nullptr, TRUE);
+                }
+            }
+        }
         switch (LOWORD(wParam))
         {
         case IDOK:
@@ -1458,7 +1488,7 @@ bool AttemptLogin(HWND window, const std::wstring& phone, const std::wstring& pa
         InvalidateRect(g_userStatusLabel, nullptr, TRUE);
         SetWindowTextW(g_userRegisterBtn, L"ریست کردن کانفیگ");
         InvalidateRect(g_userRegisterBtn, nullptr, TRUE);
-        SetWindowTextW(g_userLoginBtn, L"خروج از حساب");
+        SetWindowTextW(g_userLoginBtn, L"خروج از اکانت");
         InvalidateRect(g_userLoginBtn, nullptr, TRUE);
 
         PullUserConfigFromCloud(token);
@@ -1485,22 +1515,57 @@ bool AttemptLogin(HWND window, const std::wstring& phone, const std::wstring& pa
     }
 }
 
+void PerformUserLogout(HWND window)
+{
+    if (g_activeUserToken.empty())
+        return;
+
+    if (MessageBoxW(window,
+        L"آیا مطمئن هستید که می‌خواهید از حساب کاربری خود خارج شوید؟\n(تنظیمات به حالت پیش‌فرض مهمان بازنشانی خواهد شد)",
+        L"تأیید خروج از حساب",
+        MB_YESNO | MB_ICONQUESTION) != IDYES)
+    {
+        return;
+    }
+
+    g_activeUserToken.clear();
+    g_activeUserPhone.clear();
+
+    RegistryKey regKey(HKEY_CURRENT_USER, kLauncherKey, KEY_SET_VALUE);
+    regKey.WriteString(L"SavedUserToken", L"");
+    regKey.WriteString(L"SavedUserPassword", L"");
+    regKey.WriteDword(L"AutoLoginEnabled", 0);
+
+    if (g_userPassword)
+        SetWindowTextW(g_userPassword, L"");
+
+    if (g_userLoginBtn)
+    {
+        SetWindowTextW(g_userLoginBtn, L"ورود");
+        InvalidateRect(g_userLoginBtn, nullptr, TRUE);
+    }
+
+    if (g_userRegisterBtn)
+    {
+        SetWindowTextW(g_userRegisterBtn, L"ثبت‌نام / فراموشی رمز");
+        InvalidateRect(g_userRegisterBtn, nullptr, TRUE);
+    }
+
+    if (g_userStatusLabel)
+    {
+        SetWindowTextW(g_userStatusLabel, L"وارد نشده‌اید (مهمان: کانفیگ پیش‌فرض لود می‌شود)");
+        InvalidateRect(g_userStatusLabel, nullptr, TRUE);
+    }
+
+    ResetGuestConfigToDefault();
+    SetStatus(L"از حساب کاربری خارج شدید. حالت مهمان فعال شد.");
+}
+
 void PerformUserLogin(HWND window)
 {
     if (!g_activeUserToken.empty())
     {
-        // Logout action
-        g_activeUserPhone.clear();
-        g_activeUserToken.clear();
-        RegistryKey regKey(HKEY_CURRENT_USER, kLauncherKey, KEY_SET_VALUE);
-        regKey.WriteString(L"SavedUserToken", L"");
-        regKey.WriteDword(L"AutoLoginEnabled", 0);
-        SetWindowTextW(g_userStatusLabel, L"از حساب خارج شدید.");
-        InvalidateRect(g_userStatusLabel, nullptr, TRUE);
-        SetWindowTextW(g_userLoginBtn, L"ورود");
-        InvalidateRect(g_userLoginBtn, nullptr, TRUE);
-        SetWindowTextW(g_userRegisterBtn, L"ثبت‌نام / بازیابی رمز");
-        InvalidateRect(g_userRegisterBtn, nullptr, TRUE);
+        PerformUserLogout(window);
         return;
     }
 
@@ -1943,6 +2008,11 @@ LRESULT CALLBACK OtpRegisterProc(HWND window, UINT message, WPARAM wParam, LPARA
                 if (g_userRegisterBtn)
                 {
                     SetWindowTextW(g_userRegisterBtn, L"\u0631\u06cc\u0633\u062a \u06a9\u0631\u062f\u0646 \u06a9\u0627\u0646\u0641\u06cc\u06af");
+                if (g_userLoginBtn)
+                {
+                    SetWindowTextW(g_userLoginBtn, L"\u062e\u0631\u0648\u062c \u0627\u0632 \u0627\u06a9\u0627\u0646\u062a");
+                    InvalidateRect(g_userLoginBtn, nullptr, TRUE);
+                }
                     InvalidateRect(g_userRegisterBtn, nullptr, TRUE);
                 }
 
@@ -2058,9 +2128,18 @@ void DrawActionButton(const DRAWITEMSTRUCT& item)
     }
     else if (item.CtlID == IdUserLogin)
     {
-        fill = pressed ? RGB(0, 130, 95) : RGB(0, 160, 120);
-        border = focused ? kColorAccentHot : RGB(0, 200, 150);
-        text = RGB(255, 255, 255);
+        if (!g_activeUserToken.empty())
+        {
+            fill = pressed ? RGB(150, 36, 36) : RGB(185, 48, 48);
+            border = focused ? RGB(255, 95, 95) : RGB(220, 70, 70);
+            text = RGB(255, 255, 255);
+        }
+        else
+        {
+            fill = pressed ? RGB(0, 130, 95) : RGB(0, 160, 120);
+            border = focused ? kColorAccentHot : RGB(0, 200, 150);
+            text = RGB(255, 255, 255);
+        }
     }
     else if (item.CtlID == IdUserRegister)
     {
@@ -2424,6 +2503,10 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
             }
             if (ApplySettings())
             {
+                if (!IsUserAuthenticated())
+                {
+                    ResetGuestConfigToDefault();
+                }
                 g_launchRequested = true;
                 DestroyWindow(window);
             }
@@ -2441,7 +2524,14 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
             ShowDemoManager(window);
             return 0;
         case IdUserLogin:
-            PerformUserLogin(window);
+            if (!g_activeUserToken.empty())
+            {
+                PerformUserLogout(window);
+            }
+            else
+            {
+                PerformUserLogin(window);
+            }
             return 0;
         case IdUserRegister:
             if (!g_activeUserToken.empty())
@@ -2592,6 +2682,58 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
     return DefWindowProcW(window, message, wParam, lParam);
 }
 } // namespace
+
+bool IsUserAuthenticated()
+{
+    return !g_activeUserToken.empty();
+}
+
+void ResetGuestConfigToDefault()
+{
+    namespace fs = std::filesystem;
+    const auto gameDir = ExecutableRoot() / L"cstrike";
+    const auto gameCfg = gameDir / L"config.cfg";
+    const auto userCfg = gameDir / L"userconfig.cfg";
+    const auto defaultCfg = ExecutableRoot() / L"default" / L"config.cfg";
+
+    std::error_code ec;
+    fs::create_directories(gameDir, ec);
+
+    bool restored = false;
+    if (fs::is_regular_file(defaultCfg, ec) && fs::file_size(defaultCfg, ec) >= 50)
+    {
+        ec.clear();
+        if (fs::copy_file(defaultCfg, gameCfg, fs::copy_options::overwrite_existing, ec))
+        {
+            restored = true;
+        }
+    }
+
+    if (!restored)
+    {
+        std::ofstream out(gameCfg, std::ios::binary | std::ios::trunc);
+        if (out.is_open())
+        {
+            out.write(next_launcher::kEmbeddedDefaultConfigCfg, std::strlen(next_launcher::kEmbeddedDefaultConfigCfg));
+            out.close();
+            restored = true;
+        }
+    }
+
+    constexpr char kDefaultUserConfig[] = R"CFG(alias d "disconnect"
+alias q "quit"
+alias ret "retry"
+
+exec gameland_lan_host.cfg
+)CFG";
+
+    std::ofstream userOut(userCfg, std::ios::binary | std::ios::trunc);
+    if (userOut.is_open())
+    {
+        userOut.write(kDefaultUserConfig, std::strlen(kDefaultUserConfig));
+        userOut.close();
+    }
+}
 
 void SyncPlayerConfig()
 {
