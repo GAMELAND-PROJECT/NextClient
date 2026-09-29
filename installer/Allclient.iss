@@ -241,12 +241,14 @@ begin
   for I := 1 to Length(S) do
   begin
     C := S[I];
-    case C of
-      #$06F0..#$06F9: Res := Res + Chr(Ord(C) - $06F0 + Ord('0'));
-      #$0660..#$0669: Res := Res + Chr(Ord(C) - $0660 + Ord('0'));
-      '0'..'9': Res := Res + C;
-      '+': if Res = '' then Res := '+';
-    end;
+    if (Ord(C) >= $06F0) and (Ord(C) <= $06F9) then
+      Res := Res + Chr(Ord(C) - $06F0 + Ord('0'))
+    else if (Ord(C) >= $0660) and (Ord(C) <= $0669) then
+      Res := Res + Chr(Ord(C) - $0660 + Ord('0'))
+    else if (C >= '0') and (C <= '9') then
+      Res := Res + C
+    else if (C = '+') and (Res = '') then
+      Res := '+';
   end;
   if (Length(Res) >= 3) and (Copy(Res, 1, 3) = '+98') then
     Res := '0' + Copy(Res, 4, Length(Res) - 3)
