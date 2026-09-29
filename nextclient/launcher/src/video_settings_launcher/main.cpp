@@ -1453,6 +1453,11 @@ void PerformUserLogin(HWND window)
         const std::wstring status = L"وارد شده: \u200e" + phone;
         SetWindowTextW(g_userStatusLabel, status.c_str());
         InvalidateRect(g_userStatusLabel, nullptr, TRUE);
+        if (g_userLoginBtn)
+        {
+            SetWindowTextW(g_userLoginBtn, L"خروج از اکانت");
+            InvalidateRect(g_userLoginBtn, nullptr, TRUE);
+        }
         SetWindowTextW(g_userRegisterBtn, L"ریست کردن کانفیگ");
         InvalidateRect(g_userRegisterBtn, nullptr, TRUE);
         PullUserConfigFromCloud(token);
@@ -1465,6 +1470,47 @@ void PerformUserLogin(HWND window)
         InvalidateRect(g_userStatusLabel, nullptr, TRUE);
         MessageBoxW(window, err.c_str(), L"خطا در ورود", MB_OK | MB_ICONERROR);
     }
+}
+
+void PerformUserLogout(HWND window)
+{
+    if (g_activeUserToken.empty())
+        return;
+
+    if (MessageBoxW(window,
+        L"آیا مطمئن هستید که می‌خواهید از حساب کاربری خود خارج شوید؟\n(تنظیمات به حالت پیش‌فرض مهمان بازنشانی خواهد شد)",
+        L"تأیید خروج از حساب",
+        MB_YESNO | MB_ICONQUESTION) != IDYES)
+    {
+        return;
+    }
+
+    g_activeUserToken.clear();
+    g_activeUserPhone.clear();
+
+    if (g_userPassword)
+        SetWindowTextW(g_userPassword, L"");
+
+    if (g_userLoginBtn)
+    {
+        SetWindowTextW(g_userLoginBtn, L"ورود");
+        InvalidateRect(g_userLoginBtn, nullptr, TRUE);
+    }
+
+    if (g_userRegisterBtn)
+    {
+        SetWindowTextW(g_userRegisterBtn, L"ثبت‌نام / فراموشی رمز");
+        InvalidateRect(g_userRegisterBtn, nullptr, TRUE);
+    }
+
+    if (g_userStatusLabel)
+    {
+        SetWindowTextW(g_userStatusLabel, L"وارد نشده‌اید (مهمان: کانفیگ پیش‌فرض لود می‌شود)");
+        InvalidateRect(g_userStatusLabel, nullptr, TRUE);
+    }
+
+    ResetGuestConfigToDefault();
+    SetStatus(L"از حساب کاربری خارج شدید. حالت مهمان فعال شد.");
 }
 
 void ResetUserConfigToDefault(HWND window)
@@ -1884,6 +1930,11 @@ LRESULT CALLBACK OtpRegisterProc(HWND window, UINT message, WPARAM wParam, LPARA
                     SetWindowTextW(g_userStatusLabel, status.c_str());
                     InvalidateRect(g_userStatusLabel, nullptr, TRUE);
                 }
+                if (g_userLoginBtn)
+                {
+                    SetWindowTextW(g_userLoginBtn, L"\u062e\u0631\u0648\u062c \u0627\u0632 \u0627\u06a9\u0627\u0646\u062a");
+                    InvalidateRect(g_userLoginBtn, nullptr, TRUE);
+                }
                 if (g_userRegisterBtn)
                 {
                     SetWindowTextW(g_userRegisterBtn, L"\u0631\u06cc\u0633\u062a \u06a9\u0631\u062f\u0646 \u06a9\u0627\u0646\u0641\u06cc\u06af");
@@ -2002,9 +2053,18 @@ void DrawActionButton(const DRAWITEMSTRUCT& item)
     }
     else if (item.CtlID == IdUserLogin)
     {
-        fill = pressed ? RGB(0, 130, 95) : RGB(0, 160, 120);
-        border = focused ? kColorAccentHot : RGB(0, 200, 150);
-        text = RGB(255, 255, 255);
+        if (!g_activeUserToken.empty())
+        {
+            fill = pressed ? RGB(150, 36, 36) : RGB(185, 48, 48);
+            border = focused ? RGB(255, 95, 95) : RGB(220, 70, 70);
+            text = RGB(255, 255, 255);
+        }
+        else
+        {
+            fill = pressed ? RGB(0, 130, 95) : RGB(0, 160, 120);
+            border = focused ? kColorAccentHot : RGB(0, 200, 150);
+            text = RGB(255, 255, 255);
+        }
     }
     else if (item.CtlID == IdUserRegister)
     {
@@ -2337,6 +2397,11 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
             {
                 g_activeUserToken.clear();
                 g_activeUserPhone.clear();
+                if (g_userLoginBtn)
+                {
+                    SetWindowTextW(g_userLoginBtn, L"ورود");
+                    InvalidateRect(g_userLoginBtn, nullptr, TRUE);
+                }
                 if (g_userStatusLabel)
                 {
                     SetWindowTextW(g_userStatusLabel, L"وارد نشده‌اید (مهمان: کانفیگ پیش‌فرض لود می‌شود)");
@@ -2376,7 +2441,14 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
             ShowDemoManager(window);
             return 0;
         case IdUserLogin:
-            PerformUserLogin(window);
+            if (!g_activeUserToken.empty())
+            {
+                PerformUserLogout(window);
+            }
+            else
+            {
+                PerformUserLogin(window);
+            }
             return 0;
         case IdUserRegister:
             if (!g_activeUserToken.empty())
