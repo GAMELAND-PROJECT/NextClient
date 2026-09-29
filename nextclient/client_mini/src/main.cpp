@@ -18,6 +18,7 @@
 #include "view.h"
 #include "fov.h"
 #include "color_chat_in_console.h"
+#include "turn_speed_patch.h"
 #include "inspect.h"
 #include "invert_mouse.h"
 
@@ -562,6 +563,7 @@ static void HUD_InitPost()
     InvertMouseInit();
 
     ColorChatInConsolePatch();
+    TurnSpeedLimitPatch();
 }
 
 static int HUD_RedrawHandler(float flTime, int iIntermission, HUD_RedrawNext next)

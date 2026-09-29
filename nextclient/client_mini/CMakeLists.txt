@@ -51,6 +51,8 @@ add_library(${PROJECT_NAME} SHARED
         src/hlsdk/sys_dll.h
         src/color_chat_in_console.cpp
         src/color_chat_in_console.h
+        src/turn_speed_patch.cpp
+        src/turn_speed_patch.h
         src/inspect.cpp
         src/inspect.h
         src/camera.cpp
