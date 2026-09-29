@@ -1354,36 +1354,32 @@ bool PullUserConfigFromCloud(const std::string& token)
     const std::string success = ExtractJsonString(response, "success");
     const std::string exists = ExtractJsonString(response, "exists");
 
-    const std::filesystem::path targetDir = L"D:\\Allclient\\cstrike";
-    const std::filesystem::path targetCfg = targetDir / L"config.cfg";
-    const auto gameCfg = ExecutableRoot() / L"cstrike" / L"config.cfg";
+    const auto gameDir = ExecutableRoot() / L"cstrike";
+    const auto gameCfg = gameDir / L"config.cfg";
     const auto defaultCfg = ExecutableRoot() / L"default" / L"config.cfg";
 
     std::error_code ec;
-    std::filesystem::create_directories(targetDir, ec);
-    std::filesystem::create_directories(ExecutableRoot() / L"cstrike", ec);
+    std::filesystem::create_directories(gameDir, ec);
 
     if (success == "true" && exists == "true")
     {
         const std::string cfgContent = ExtractJsonStringDecoded(response, "cfg_content");
         if (cfgContent.size() >= 20)
         {
-            std::ofstream out1(targetCfg, std::ios::binary | std::ios::trunc);
-            if (out1) out1.write(cfgContent.data(), cfgContent.size());
-            std::ofstream out2(gameCfg, std::ios::binary | std::ios::trunc);
-            if (out2) out2.write(cfgContent.data(), cfgContent.size());
+            std::ofstream out(gameCfg, std::ios::binary | std::ios::trunc);
+            if (out)
+            {
+                out.write(cfgContent.data(), cfgContent.size());
+                out.close();
+            }
             return true;
         }
     }
 
-    // IF cloud has no config yet, but user already has D:\Allclient\cstrike\config.cfg locally:
-    // KEEP user's local config! Mirror to game and upload to cloud!
-    if (std::filesystem::exists(targetCfg, ec) && std::filesystem::file_size(targetCfg, ec) > 50)
+    // If cloud has no config yet, but user already has config.cfg locally:
+    // Keep user's local config and upload to cloud!
+    if (std::filesystem::exists(gameCfg, ec) && std::filesystem::file_size(gameCfg, ec) > 50)
     {
-        if (targetCfg != gameCfg)
-        {
-            std::filesystem::copy_file(targetCfg, gameCfg, std::filesystem::copy_options::overwrite_existing, ec);
-        }
         PushUserConfigToCloud(token);
         return true;
     }
@@ -1391,7 +1387,6 @@ bool PullUserConfigFromCloud(const std::string& token)
     // Only if user has NO config locally and NO config in cloud:
     if (std::filesystem::is_regular_file(defaultCfg, ec))
     {
-        std::filesystem::copy_file(defaultCfg, targetCfg, std::filesystem::copy_options::overwrite_existing, ec);
         std::filesystem::copy_file(defaultCfg, gameCfg, std::filesystem::copy_options::overwrite_existing, ec);
     }
     return true;
@@ -1401,13 +1396,9 @@ bool PushUserConfigToCloud(const std::string& token)
 {
     if (token.empty())
         return false;
-    std::filesystem::path cfgPath = L"D:\\Allclient\\cstrike\\config.cfg";
+    const auto cfgPath = ExecutableRoot() / L"cstrike" / L"config.cfg";
     std::error_code ec;
     if (!std::filesystem::exists(cfgPath, ec) || std::filesystem::file_size(cfgPath, ec) < 50)
-    {
-        cfgPath = ExecutableRoot() / L"cstrike" / L"config.cfg";
-    }
-    if (!std::filesystem::exists(cfgPath, ec))
         return false;
 
     std::ifstream in(cfgPath, std::ios::binary);
@@ -1550,18 +1541,13 @@ void ResetUserConfigToDefault(HWND window)
     const std::string defaultContent((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
     in.close();
 
-    const std::filesystem::path targetDir = L"D:\\Allclient\\cstrike";
-    std::filesystem::create_directories(targetDir, ec);
-    const std::filesystem::path targetCfg = targetDir / L"config.cfg";
-    const auto gameCfg = ExecutableRoot() / L"cstrike" / L"config.cfg";
+    const auto gameDir = ExecutableRoot() / L"cstrike";
+    std::filesystem::create_directories(gameDir, ec);
+    const auto gameCfg = gameDir / L"config.cfg";
 
-    std::ofstream out1(targetCfg, std::ios::binary | std::ios::trunc);
-    if (out1) out1.write(defaultContent.data(), defaultContent.size());
-    out1.close();
-
-    std::ofstream out2(gameCfg, std::ios::binary | std::ios::trunc);
-    if (out2) out2.write(defaultContent.data(), defaultContent.size());
-    out2.close();
+    std::ofstream out(gameCfg, std::ios::binary | std::ios::trunc);
+    if (out) out.write(defaultContent.data(), defaultContent.size());
+    out.close();
 
     const bool pushed = PushUserConfigToCloud(g_activeUserToken);
     if (pushed)
@@ -2609,9 +2595,15 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
 
 void SyncPlayerConfig()
 {
-    if (!g_activeUserToken.empty())
+    std::string token = g_activeUserToken;
+    if (token.empty())
     {
-        PushUserConfigToCloud(g_activeUserToken);
+        RegistryKey regKey(HKEY_CURRENT_USER, kLauncherKey, KEY_QUERY_VALUE);
+        token = NarrowUtf8(regKey.ReadString(L"SavedUserToken"));
+    }
+    if (!token.empty())
+    {
+        PushUserConfigToCloud(token);
     }
 }
 
