@@ -1003,11 +1003,7 @@ bool ReadDemoPassword(HWND window, std::wstring& password)
 
 void SetDemoActionsEnabled(bool enabled)
 {
-    EnableWindow(g_demoList, enabled);
     EnableWindow(g_demoUpload, enabled);
-    EnableWindow(g_demoToVideo, enabled);
-    EnableWindow(g_demoDelete, enabled);
-    EnableWindow(GetDlgItem(GetParent(g_demoList), IdDemoRefresh), enabled);
 }
 
 void VerifyPasswordAndUnlock(HWND window)
@@ -1027,7 +1023,7 @@ void VerifyPasswordAndUnlock(HWND window)
 
     g_demoPasswordValue = password;
     SetDemoActionsEnabled(true);
-    RefreshDemoList();
+    SetDemoStatus(L"قفل آپلود دمو باز شد. اکنون می‌توانید دمو را آپلود کنید.");
 }
 
 std::filesystem::path SelectedDemoPath()
@@ -1195,9 +1191,10 @@ LRESULT CALLBACK DemoManagerProc(HWND window, UINT message, WPARAM wParam, LPARA
         add(L"BUTTON", L"Refresh", BS_PUSHBUTTON | WS_TABSTOP, 250, 276, 85, 32, IdDemoRefresh);
         add(L"BUTTON", L"Close", BS_PUSHBUTTON | WS_TABSTOP, 345, 276, 135, 32, IdDemoClose);
         g_demoToVideo = add(L"BUTTON", L"تبدیل به ویدیو (MP4)", BS_PUSHBUTTON | WS_TABSTOP, 18, 316, 462, 34, IdDemoToVideo);
-        g_demoStatus = add(L"STATIC", L"Enter password to unlock demo list.", SS_LEFT, 18, 358, 462, 40, IdDemoStatus);
+        g_demoStatus = add(L"STATIC", L"یک دمو را انتخاب کنید (آپلود به سرور نیازمند رمز عبور است).", SS_LEFT, 18, 358, 462, 40, IdDemoStatus);
         SetDemoActionsEnabled(false);
-        SetFocus(g_demoPassword);
+        RefreshDemoList();
+        SetFocus(g_demoList);
         return 0;
     }
     case WM_COMMAND:
