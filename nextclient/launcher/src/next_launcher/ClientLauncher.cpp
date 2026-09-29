@@ -1,4 +1,6 @@
 #include "ClientLauncher.h"
+#include "EmbeddedDefaultConfig.h"
+#include <fstream>
 
 #include <clocale>
 #include <exception>
@@ -814,9 +816,34 @@ std::string ClientLauncher::CreateVersionsString(nitroapi::NitroApiInterface* ni
     return versions;
 }
 
+void ClientLauncher::EnsureDefaultGameConfig(const std::filesystem::path& target_path)
+{
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    if (fs::is_regular_file(target_path, ec) && fs::file_size(target_path, ec) >= 100)
+    {
+        return;
+    }
+
+    ec.clear();
+    if (fs::path parent = target_path.parent_path(); !parent.empty())
+    {
+        fs::create_directories(parent, ec);
+    }
+
+    std::ofstream out(target_path, std::ios::binary | std::ios::trunc);
+    if (out.is_open())
+    {
+        out.write(next_launcher::kEmbeddedDefaultConfigCfg, std::strlen(next_launcher::kEmbeddedDefaultConfigCfg));
+        LOG(INFO) << "Provisioned embedded default config to " << target_path.string();
+    }
+}
+
 void ClientLauncher::ProvisionDefaultConfigs()
 {
     namespace fs = std::filesystem;
+
+    EnsureDefaultGameConfig("default/config.cfg");
 
     for (const char* target : kDefaultConfigs)
     {
@@ -858,15 +885,17 @@ void ClientLauncher::RestoreGameConfigOnFreshLaunch()
     constexpr char kDefaultConfig[] = "default/config.cfg";
     constexpr char kGameConfig[] = "cstrike/config.cfg";
 
-    std::error_code ec;
-    if (!fs::is_regular_file(kDefaultConfig, ec))
-        return;
+    EnsureDefaultGameConfig(kDefaultConfig);
 
-    ec.clear();
+    std::error_code ec;
     fs::create_directories(fs::path(kGameConfig).parent_path(), ec);
     if (ec)
         return;
 
-    ec.clear();
-    fs::copy_file(kDefaultConfig, kGameConfig, fs::copy_options::overwrite_existing, ec);
+    std::ofstream out(kGameConfig, std::ios::binary | std::ios::trunc);
+    if (out.is_open())
+    {
+        out.write(next_launcher::kEmbeddedDefaultConfigCfg, std::strlen(next_launcher::kEmbeddedDefaultConfigCfg));
+        LOG(INFO) << "Restored pure in-root default config to " << kGameConfig;
+    }
 }
