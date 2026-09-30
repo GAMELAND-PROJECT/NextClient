@@ -912,6 +912,9 @@ static void GetGameScreenResolution(int& outWidth, int& outHeight)
                     }
                     if (demoName.empty()) demoName = "Demo";
 
+                    // Force demo playback to exact 1.0x normal speed (resets 2x/4x fast-forward)
+                    gEngfuncs.pfnClientCmd("dem_speed 1.0\n");
+                    gEngfuncs.pfnClientCmd("unpause\n");
                     GameVideoRecorder::Instance().StartHighlightClip(demoName, curW, curH, 60);
                     return 0;
                 }

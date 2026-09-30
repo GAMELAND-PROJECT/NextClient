@@ -708,8 +708,8 @@ namespace nextclient::client_mini
             return;
 
         uint64_t framesNeeded = targetTotalFrames - currentPushed;
-        if (framesNeeded > 2)
-            framesNeeded = 2; // Prevent sudden huge burst if there was a hitch
+        if (framesNeeded > 5)
+            framesNeeded = 5; // Prevent sudden huge burst if there was a hitch
 
         const size_t frameSize = static_cast<size_t>(width) * height * 3;
         if (m_preallocatedCaptureBuffer.size() != frameSize)
