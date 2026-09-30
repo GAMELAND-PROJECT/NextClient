@@ -458,7 +458,7 @@ namespace nextclient::client_mini
             << " -f rawvideo -pix_fmt rgb24 -s " << width << "x" << height
             << " -r 60 -i \"" << videoPipeName << "\""
             << " -vf " << videoFilter
-            << " -c:v libx264 -preset ultrafast -tune zerolatency -crf 18 -pix_fmt yuv420p -threads 0"
+            << " -c:v libx264 -preset superfast -tune zerolatency -crf 21 -maxrate 14M -bufsize 28M -pix_fmt yuv420p -threads 0"
             << " -colorspace bt709 -color_primaries bt709 -color_trc bt709 -color_range tv"
             << " -movflags +faststart \"" << m_tempVideoPath << "\"";
 
@@ -606,7 +606,7 @@ namespace nextclient::client_mini
 
         if (hasAudio)
         {
-            muxCmd << " -i \"" << m_tempAudioPath << "\" -c:v copy -c:a aac -b:a 192k -shortest";
+            muxCmd << " -i \"" << m_tempAudioPath << "\" -c:v copy -c:a aac -b:a 160k -shortest";
         }
         else
         {
@@ -1197,10 +1197,10 @@ namespace nextclient::client_mini
             << " -r " << fps << " -i \"" << videoPipeName << "\""
             << " -f s16le -ar " << audioRate << " -ac 2 -i \"" << audioPipeName << "\""
             << " -vf " << videoFilter
-            << " -c:v libx264 -preset ultrafast -tune zerolatency -crf 18 -pix_fmt yuv420p -threads 0"
+            << " -c:v libx264 -preset superfast -tune zerolatency -crf 21 -maxrate 14M -bufsize 28M -pix_fmt yuv420p -threads 0"
             << " -colorspace bt709 -color_primaries bt709 -color_trc bt709 -color_range tv"
             << " -af aresample=async=1000:min_hard_comp=0.100000:first_pts=0"
-            << " -c:a aac -b:a 192k"
+            << " -c:a aac -b:a 160k"
             << " -movflags +faststart+frag_keyframe+empty_moov"
             << " \"" << outputPath << "\"";
 
