@@ -26,9 +26,7 @@ namespace gameland_guard
         L"kykhack.dll",
         L"badboy.dll",
         L"r-aimbot.dll",
-        L"hlr.dll",
-        L"loader.dll",
-        L"blackhawk-main.dll"
+        L"hlr.dll"
     };
 
     // List of blacklisted cheat tools and debuggers
@@ -43,78 +41,8 @@ namespace gameland_guard
         L"ida64.exe",
         L"processhacker.exe",
         L"injector.exe",
-        L"extremeinjector.exe",
-        L"ultimate bunny jump.exe",
-        L"autobhop.exe",
-        L"bhop.exe",
-        L"bunnyhop.exe",
-        L"bhop_script.exe",
-        L"cs_bhop.exe",
-        L"csbhop.exe",
-        L"autohotkey.exe",
-        L"autohotkey32.exe",
-        L"autohotkey64.exe",
-        L"autoit3.exe",
-        L"aimpoint.exe"
+        L"extremeinjector.exe"
     };
-
-#ifndef LLKHF_INJECTED
-#define LLKHF_INJECTED 0x00000010
-#endif
-#ifndef LLKHF_LOWER_IL_INJECTED
-#define LLKHF_LOWER_IL_INJECTED 0x00000002
-#endif
-
-    static HHOOK g_hKeyboardHook = nullptr;
-    static std::atomic<bool> g_inputProtectionRunning{ false };
-    static std::thread g_inputProtectionThread;
-
-    // Low-level keyboard hook callback to filter synthetic/macro keystrokes
-    static LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam)
-    {
-        if (nCode == HC_ACTION)
-        {
-            auto* pKey = reinterpret_cast<KBDLLHOOKSTRUCT*>(lParam);
-            if (pKey && pKey->vkCode == VK_SPACE)
-            {
-                // In Windows, keystrokes injected by SendInput/keybd_event/AHK have LLKHF_INJECTED or LLKHF_LOWER_IL_INJECTED
-                if (pKey->flags & (LLKHF_INJECTED | LLKHF_LOWER_IL_INJECTED))
-                {
-                    HWND fg = GetForegroundWindow();
-                    if (fg != nullptr && g_gameWindow != nullptr && (fg == g_gameWindow || IsChild(g_gameWindow, fg)))
-                    {
-                        // Injected Space targeting active game window -> DROP IT!
-                        // Returning 1 prevents Windows from passing this message to the target window procedure.
-                        return 1;
-                    }
-                }
-            }
-        }
-        return CallNextHookEx(g_hKeyboardHook, nCode, wParam, lParam);
-    }
-
-    static void InputProtectionWorker()
-    {
-        // Dedicated thread for low-level hook with its own message pump
-        g_hKeyboardHook = SetWindowsHookExW(WH_KEYBOARD_LL, LowLevelKeyboardProc, nullptr, 0);
-
-        MSG msg;
-        while (g_inputProtectionRunning.load())
-        {
-            BOOL bRet = GetMessageW(&msg, nullptr, 0, 0);
-            if (bRet == 0 || bRet == -1)
-                break;
-
-            TranslateMessage(&msg);
-            DispatchMessageW(&msg);
-        }
-
-        if (g_hKeyboardHook)
-        {
-            UnhookWindowsHookEx(g_hKeyboardHook);
-            g_hKeyboardHook = nullptr;
-        }
-    }
 
     static std::wstring ToLower(const std::wstring& str)
     {
@@ -372,53 +300,6 @@ namespace gameland_guard
         }
     }
 
-    // Scan for external AutoHotkey / script cheat windows
-    static BOOL CALLBACK EnumAutoHotkeyWindows(HWND hwnd, LPARAM lParam)
-    {
-        wchar_t className[64] = { 0 };
-        if (GetClassNameW(hwnd, className, 63))
-        {
-            if (_wcsicmp(className, L"AutoHotkey") == 0 || _wcsicmp(className, L"AutoHotkeyGUI") == 0)
-            {
-                wchar_t windowTitle[512] = { 0 };
-                GetWindowTextW(hwnd, windowTitle, 511);
-                std::wstring titleLower = ToLower(windowTitle);
-
-                static const wchar_t* kKeywords[] = {
-                    L"bhop", L"bunny", L"jump", L"cheat", L"hack", L"trigger", L"aim", L"macro", L"ultimate"
-                };
-
-                for (const auto* kw : kKeywords)
-                {
-                    if (titleLower.find(kw) != std::wstring::npos)
-                    {
-                        DWORD pid = 0;
-                        GetWindowThreadProcessId(hwnd, &pid);
-                        if (pid != 0 && pid != GetCurrentProcessId())
-                        {
-                            HANDLE hProc = OpenProcess(PROCESS_TERMINATE, FALSE, pid);
-                            if (hProc)
-                            {
-                                TerminateProcess(hProc, 0);
-                                CloseHandle(hProc);
-                            }
-                        }
-
-                        OnViolation(L"ابزار غیرمجاز Auto-BunnyHop",
-                                    L"اسکریپت یا نرم‌افزار پرش خودکار (AutoHotkey/Auto-Bhop) در حال اجرا شناسایی شد.");
-                        return FALSE;
-                    }
-                }
-            }
-        }
-        return TRUE;
-    }
-
-    static void ScanAutoHotkeyCheats()
-    {
-        EnumWindows(EnumAutoHotkeyWindows, 0);
-    }
-
     // Background Watchdog worker
     static void WatchdogWorker()
     {
@@ -428,8 +309,6 @@ namespace gameland_guard
             if (!g_watchdogRunning)
                 break;
 
-            CheckBlacklistedProcesses();
-            ScanAutoHotkeyCheats();
             ScanOpenGLHooks();
             ScanUnbackedExecutableMemory();
             ClearHardwareBreakpoints();
@@ -481,10 +360,6 @@ namespace gameland_guard
     void StartWatchdog(HWND gameWindow)
     {
         g_gameWindow = gameWindow;
-        if (!g_inputProtectionRunning.exchange(true))
-        {
-            g_inputProtectionThread = std::thread(InputProtectionWorker);
-        }
         if (!g_watchdogRunning.exchange(true))
         {
             g_watchdogThread = std::thread(WatchdogWorker);
@@ -493,19 +368,6 @@ namespace gameland_guard
 
     void StopWatchdog()
     {
-        if (g_inputProtectionRunning.exchange(false))
-        {
-            if (g_inputProtectionThread.joinable())
-            {
-                DWORD tid = GetThreadId(g_inputProtectionThread.native_handle());
-                if (tid != 0)
-                {
-                    PostThreadMessageW(tid, WM_QUIT, 0, 0);
-                }
-                g_inputProtectionThread.join();
-            }
-        }
-
         if (g_watchdogRunning.exchange(false))
         {
             if (g_watchdogThread.joinable())

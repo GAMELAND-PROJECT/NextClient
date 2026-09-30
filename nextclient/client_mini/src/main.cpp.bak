@@ -929,31 +929,6 @@ static std::string GetActiveDemoOrMapName()
         if (!down)
             return next->Invoke(down, keynum, pszCurrentBinding);
 
-        // Anti-AutoBhop / Synthetic Space spam rate-limiter (Layer 2)
-        // Detects rapid spacebar repetition faster than humanly possible (< 35ms / > 30 taps per sec)
-        if (keynum == 32)
-        {
-            static uint64_t s_lastSpaceDownTick = 0;
-            static int s_rapidSpaceCount = 0;
-            uint64_t now = GetTickCount64();
-            uint64_t delta = now - s_lastSpaceDownTick;
-            s_lastSpaceDownTick = now;
-
-            if (delta < 35)
-            {
-                s_rapidSpaceCount++;
-                if (s_rapidSpaceCount >= 2)
-                {
-                    // Synthetic space spam detected -> drop keydown event!
-                    return 0;
-                }
-            }
-            else
-            {
-                s_rapidSpaceCount = 0;
-            }
-        }
-
         const bool isViewingDemo = (gEngfuncs.pDemoAPI && gEngfuncs.pDemoAPI->IsPlayingback());
         if (isViewingDemo)
         {
