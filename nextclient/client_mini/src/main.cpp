@@ -310,8 +310,9 @@ static void GetGameScreenResolution(int& outWidth, int& outHeight)
         gEngfuncs.pfnDrawSetTextColor(0.20f, 0.85f, 1.0f);
         DrawHudString(x + 20, y + 14, "GAMELAND DEMO STUDIO | RENDERING 1080P MP4");
 
-        const int pct = GameVideoRecorder::Instance().GetRenderProgressPercent();
-        const uint64_t pushed = GameVideoRecorder::Instance().GetRenderFramesPushed();
+        const bool isSeeking = GameVideoRecorder::Instance().IsHighlightSeeking();
+        const int pct = isSeeking ? 0 : GameVideoRecorder::Instance().GetRenderProgressPercent();
+        const uint64_t pushed = isSeeking ? 0 : GameVideoRecorder::Instance().GetRenderFramesPushed();
         const uint64_t total = GameVideoRecorder::Instance().GetRenderTargetFrames();
 
         const int barX = x + 20;
@@ -330,12 +331,19 @@ static void GetGameScreenResolution(int& outWidth, int& outHeight)
         DrawHudBox(barX + barW - 1, barY, 1, barH, 60, 100, 140, 220);
 
         char progText[96]{};
-        std::snprintf(progText, sizeof(progText), "Progress: %d%%  |  Frame %llu of %llu  |  60 FPS Lockstep", pct, pushed, total);
+        if (isSeeking)
+        {
+            std::snprintf(progText, sizeof(progText), "Jumping to Highlight Start... Seeking packets");
+        }
+        else
+        {
+            std::snprintf(progText, sizeof(progText), "Progress: %d%%  |  Frame %llu of %llu  |  60 FPS Lockstep", pct, pushed, total);
+        }
         gEngfuncs.pfnDrawSetTextColor(0.95f, 0.95f, 0.95f);
         DrawHudString(x + 20, y + 68, progText);
 
         gEngfuncs.pfnDrawSetTextColor(0.60f, 0.75f, 0.85f);
-        DrawHudString(x + 20, y + 92, "Rendering in background... (~2-3 sec)");
+        DrawHudString(x + 20, y + 92, isSeeking ? "Preparing 1080p studio lockstep capture..." : "Rendering in background... (~2-3 sec)");
     }
 
     void DrawHighlightConfirmDialog(int scrW, int scrH)
@@ -897,8 +905,9 @@ static void GetGameScreenResolution(int& outWidth, int& outHeight)
         const bool isViewingDemo = (gEngfuncs.pDemoAPI && gEngfuncs.pDemoAPI->IsPlayingback());
         if (isViewingDemo)
         {
-            if (GameVideoRecorder::Instance().IsHighlightRendering())
+            if (GameVideoRecorder::Instance().IsHighlightRendering() || GameVideoRecorder::Instance().IsHighlightSeeking())
             {
+                // Disallow interrupting an active lockstep render or seek
                 return 0;
             }
 
@@ -906,48 +915,27 @@ static void GetGameScreenResolution(int& outWidth, int& outHeight)
             {
                 if (BindingEquals(pszCurrentBinding, "slot1") || keynum == '1' || keynum == 13) // 1 or Enter
                 {
-                    int curW = 1024, curH = 768;
-                    GetGameScreenResolution(curW, curH);
+                    const float markIn = GameVideoRecorder::Instance().GetMarkInTime();
 
-                    std::string demoName = GameVideoRecorder::Instance().GetCurrentPlayingDemoName();
-                    if (demoName.empty() || demoName == "Demo")
-                    {
-                        if (gEngfuncs.pfnGetLevelName != nullptr)
-                        {
-                            const char* lvl = gEngfuncs.pfnGetLevelName();
-                            if (lvl != nullptr && *lvl != '\0')
-                            {
-                                std::string s(lvl);
-                                const size_t slash = s.find_last_of("/\\");
-                                if (slash != std::string::npos) s = s.substr(slash + 1);
-                                const size_t dot = s.find_last_of('.');
-                                if (dot != std::string::npos) s = s.substr(0, dot);
-                                demoName = s;
-                            }
-                        }
-                    }
-                    if (demoName.empty()) demoName = "Highlight";
+                    // Step 1: Jump to markIn, set speed to 1.0, and start playback
+                    char cmd[128]{};
+                    std::snprintf(cmd, sizeof(cmd), "dem_jump %.2f\n", markIn);
+                    gEngfuncs.pfnClientCmd(cmd);
+                    gEngfuncs.pfnClientCmd("dem_speed 1.0\n");
+                    gEngfuncs.pfnClientCmd("dem_start\n");
 
-                    if (GameVideoRecorder::Instance().StartStudioRender(demoName, curW, curH))
-                    {
-                        float markIn = GameVideoRecorder::Instance().GetMarkInTime();
-                        char cmd[128]{};
-                        std::snprintf(cmd, sizeof(cmd), "dem_jump %.2f\n", markIn);
-                        gEngfuncs.pfnClientCmd(cmd);
-                        gEngfuncs.pfnClientCmd("dem_speed 1.0\n");
-                        gEngfuncs.pfnClientCmd("host_framerate 0.01666667\n");
-                        gEngfuncs.pfnClientCmd("unpause\n");
-                    }
+                    // Step 2: Set seeking state; HUD_RedrawHandler will wait for dem_jump to complete
+                    GameVideoRecorder::Instance().SetHighlightSeeking();
                     return 0;
                 }
 
                 if (BindingEquals(pszCurrentBinding, "slot2") || keynum == '2' || keynum == 27 || keynum == '0') // 2 or Esc
                 {
                     GameVideoRecorder::Instance().DiscardHighlight();
+                    gEngfuncs.pfnClientCmd("dem_start\n"); // resume playback
                     g_HighlightToastText = "Highlight clip discarded";
                     g_HighlightToastSuccess = false;
                     g_HighlightToastTimer = gEngfuncs.GetClientTime() + 3.0;
-                    gEngfuncs.pfnClientCmd("unpause\n");
                     return 0;
                 }
 
@@ -961,7 +949,7 @@ static void GetGameScreenResolution(int& outWidth, int& outHeight)
                     const float curTime = static_cast<float>(gEngfuncs.GetClientTime());
                     if (GameVideoRecorder::Instance().MarkOut(curTime))
                     {
-                        gEngfuncs.pfnClientCmd("pause\n");
+                        gEngfuncs.pfnClientCmd("dem_pause 1\n"); // Pause cleanly on mark out
                     }
                     else
                     {
@@ -990,7 +978,7 @@ static void GetGameScreenResolution(int& outWidth, int& outHeight)
                 if (BindingEquals(pszCurrentBinding, "slot1") || keynum == '1')
                 {
                     gEngfuncs.pfnClientCmd("dem_speed 1.0\n");
-                    gEngfuncs.pfnClientCmd("unpause\n");
+                    gEngfuncs.pfnClientCmd("dem_start\n");
                     const float curTime = static_cast<float>(gEngfuncs.GetClientTime());
                     GameVideoRecorder::Instance().MarkIn(curTime);
                     return 0;
@@ -1263,7 +1251,44 @@ static int HUD_RedrawHandler(float flTime, int iIntermission, HUD_RedrawNext nex
     int scrW = 1024, scrH = 768;
     GetGameScreenResolution(scrW, scrH);
 
-    // Lockstep Studio Render capture occurs BEFORE custom HUD drawing (clean video without UI!)
+    // Phase 1: Seeking to highlight start point
+    if (GameVideoRecorder::Instance().IsHighlightSeeking())
+    {
+        const float curTime = static_cast<float>(gEngfuncs.GetClientTime());
+        const float markIn = GameVideoRecorder::Instance().GetMarkInTime();
+        const float markOut = GameVideoRecorder::Instance().GetMarkOutTime();
+
+        // Check if dem_jump has arrived at markIn
+        if (std::abs(curTime - markIn) <= 0.6f || (curTime < markOut - 0.5f && curTime >= markIn - 0.5f))
+        {
+            std::string demoName = GameVideoRecorder::Instance().GetCurrentPlayingDemoName();
+            if (demoName.empty() || demoName == "Demo")
+            {
+                if (gEngfuncs.pfnGetLevelName != nullptr)
+                {
+                    const char* lvl = gEngfuncs.pfnGetLevelName();
+                    if (lvl != nullptr && *lvl != '\0')
+                    {
+                        std::string s(lvl);
+                        const size_t slash = s.find_last_of("/\\");
+                        if (slash != std::string::npos) s = s.substr(slash + 1);
+                        const size_t dot = s.find_last_of('.');
+                        if (dot != std::string::npos) s = s.substr(0, dot);
+                        demoName = s;
+                    }
+                }
+            }
+            if (demoName.empty()) demoName = "Highlight";
+
+            if (GameVideoRecorder::Instance().StartStudioRender(demoName, scrW, scrH))
+            {
+                gEngfuncs.pfnClientCmd("host_framerate 0.01666667\n");
+                gEngfuncs.pfnClientCmd("dem_start\n");
+            }
+        }
+    }
+
+    // Phase 2: Lockstep Studio Render capture occurs BEFORE custom HUD drawing (clean video without UI!)
     if (GameVideoRecorder::Instance().IsHighlightRendering())
     {
         GameVideoRecorder::Instance().CaptureStudioFrame(scrW, scrH, flTime);
@@ -1272,7 +1297,7 @@ static int HUD_RedrawHandler(float flTime, int iIntermission, HUD_RedrawNext nex
         {
             GameVideoRecorder::Instance().FinishStudioRender();
             gEngfuncs.pfnClientCmd("host_framerate 0\n");
-            gEngfuncs.pfnClientCmd("pause\n");
+            gEngfuncs.pfnClientCmd("dem_pause 1\n");
 
             g_HighlightToastText = "Highlight saved: " + GameVideoRecorder::Instance().GetLastSavedHighlightPath();
             g_HighlightToastSuccess = true;
@@ -1293,7 +1318,7 @@ static int HUD_RedrawHandler(float flTime, int iIntermission, HUD_RedrawNext nex
     const bool isViewingDemo = (gEngfuncs.pDemoAPI && gEngfuncs.pDemoAPI->IsPlayingback());
     if (isViewingDemo && !overlay_visible)
     {
-        if (GameVideoRecorder::Instance().IsHighlightRendering())
+        if (GameVideoRecorder::Instance().IsHighlightRendering() || GameVideoRecorder::Instance().IsHighlightSeeking())
         {
             DrawHighlightRenderingModal(scrW, scrH);
         }
@@ -1333,11 +1358,14 @@ static void HUD_ResetHandler(HUD_ResetNext next)
     if (GameVideoRecorder::Instance().IsMatchDemoRecording())
         GameVideoRecorder::Instance().StopMatchDemo();
 
-    if (GameVideoRecorder::Instance().IsHighlightRendering())
+    if (GameVideoRecorder::Instance().IsHighlightRendering() || GameVideoRecorder::Instance().IsHighlightSeeking())
     {
         GameVideoRecorder::Instance().FinishStudioRender();
         if (gEngfuncs.pfnClientCmd)
+        {
             gEngfuncs.pfnClientCmd("host_framerate 0\n");
+            gEngfuncs.pfnClientCmd("dem_start\n");
+        }
     }
 
     if (GameVideoRecorder::Instance().IsHighlightMarking() || GameVideoRecorder::Instance().IsHighlightAwaitingConfirm())

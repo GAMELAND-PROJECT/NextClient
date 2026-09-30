@@ -30,6 +30,7 @@ namespace nextclient::client_mini
         Idle,
         Marking,
         AwaitingConfirm,
+        Seeking,
         Rendering
     };
 
@@ -50,7 +51,9 @@ namespace nextclient::client_mini
         bool IsHighlightIdle() const { return m_highlightState.load() == HighlightState::Idle; }
         bool IsHighlightMarking() const { return m_highlightState.load() == HighlightState::Marking; }
         bool IsHighlightAwaitingConfirm() const { return m_highlightState.load() == HighlightState::AwaitingConfirm; }
+        bool IsHighlightSeeking() const { return m_highlightState.load() == HighlightState::Seeking; }
         bool IsHighlightRendering() const { return m_highlightState.load() == HighlightState::Rendering; }
+        void SetHighlightSeeking() { m_highlightState = HighlightState::Seeking; }
 
         void MarkIn(float clientTime);
         bool MarkOut(float clientTime);
