@@ -1001,21 +1001,19 @@ namespace nextclient::client_mini
         }
 #endif
 
-        // Dynamic Hardware Gamma Ramp Compensation:
-        // In GoldSrc OpenGL backbuffer, raw unramped pixels are dark linear.
-        // We lift gamma matching player's in-game cvar (typical 2.5 -> ffmpeg 1.55)
-        float ffmpegGamma = 1.20f + (gameGamma - 1.5f) * 0.35f;
-        ffmpegGamma = std::clamp(ffmpegGamma, 1.35f, 1.85f);
+        // Balanced Dynamic Gamma Calibration:
+        // Lifts dark models out of shadow clamp without bleaching sunny walls or ceilings
+        float ffmpegGamma = 1.02f + (gameGamma - 1.5f) * 0.20f;
+        ffmpegGamma = std::clamp(ffmpegGamma, 1.15f, 1.35f);
 
-        // Ambient brightness offset (+0.03 to +0.08) to open up dark shadows and corners
-        float ffmpegBrightness = 0.02f + (gameBrightness * 0.018f);
-        ffmpegBrightness = std::clamp(ffmpegBrightness, 0.03f, 0.08f);
+        // Zero additive brightness offset keeps black level true black and eliminates wash-out
+        float ffmpegBrightness = 0.0f;
 
         std::ostringstream ss;
         ss << std::fixed << std::setprecision(2);
         ss << "vflip,eq=gamma=" << ffmpegGamma
-           << ":contrast=1.04:brightness=" << ffmpegBrightness
-           << ":saturation=1.20,unsharp=5:5:0.8:3:3:0.4";
+           << ":contrast=1.08:brightness=" << ffmpegBrightness
+           << ":saturation=1.15,unsharp=5:5:0.7:3:3:0.35";
         return ss.str();
     }
 
