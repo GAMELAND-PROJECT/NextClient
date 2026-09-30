@@ -1,4 +1,4 @@
-﻿#include "GameVideoRecorder.h"
+#include "GameVideoRecorder.h"
 
 #include <iostream>
 #include <fstream>
@@ -7,6 +7,8 @@
 #include <algorithm>
 #include <direct.h>
 #include <io.h>
+#include <cmath>
+#include <ctime>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -81,6 +83,23 @@ static bool SafeGlReadPixels(int width, int height, uint8_t* pDest)
 
 namespace nextclient::client_mini
 {
+    struct WavHeader
+    {
+        char riff[4]{'R', 'I', 'F', 'F'};
+        uint32_t fileSize{0};
+        char wave[4]{'W', 'A', 'V', 'E'};
+        char fmt[4]{'f', 'm', 't', ' '};
+        uint32_t fmtSize{16};
+        uint16_t audioFormat{1}; // PCM
+        uint16_t numChannels{2};
+        uint32_t sampleRate{48000};
+        uint32_t byteRate{192000};
+        uint16_t blockAlign{4};
+        uint16_t bitsPerSample{16};
+        char data[4]{'d', 'a', 't', 'a'};
+        uint32_t dataSize{0};
+    };
+
     GameVideoRecorder& GameVideoRecorder::Instance()
     {
         static GameVideoRecorder s_instance;
@@ -144,6 +163,8 @@ namespace nextclient::client_mini
 
     GameVideoRecorder::~GameVideoRecorder()
     {
+        DiscardHighlight();
+        FinishStudioRender();
         StopWorkerCapture();
         CancelConversion();
     }
@@ -181,6 +202,470 @@ namespace nextclient::client_mini
     }
 
     // -------------------------------------------------------------
+    // Bookmark & Instant Studio Render (Solution 1)
+    // -------------------------------------------------------------
+    void GameVideoRecorder::MarkIn(float clientTime)
+    {
+        _mkdir("videos");
+
+        // Stop previous audio recording if still active
+        m_stopAudioRequested = true;
+        if (m_audioRecordThread.joinable())
+            m_audioRecordThread.join();
+
+        m_markInTime = clientTime;
+        m_markOutTime = clientTime;
+        m_highlightClipInfo.clear();
+
+        const DWORD pid = GetCurrentProcessId();
+        m_tempAudioPath = "videos/temp_audio_" + std::to_string(pid) + ".wav";
+        DeleteFileA(m_tempAudioPath.c_str());
+
+        m_stopAudioRequested = false;
+        m_audioRecordThread = std::thread(&GameVideoRecorder::AudioRecordingThread, this, m_tempAudioPath, QuerySystemAudioSampleRate());
+
+        m_highlightState = HighlightState::Marking;
+    }
+
+    bool GameVideoRecorder::MarkOut(float clientTime)
+    {
+        if (m_highlightState.load() != HighlightState::Marking)
+            return false;
+
+        m_markOutTime = clientTime;
+        const float dur = m_markOutTime - m_markInTime;
+        if (dur < 0.5f)
+        {
+            DiscardHighlight();
+            return false;
+        }
+
+        m_stopAudioRequested = true;
+        if (m_audioRecordThread.joinable())
+            m_audioRecordThread.join();
+
+        char buf[128]{};
+        std::snprintf(buf, sizeof(buf), "Duration: %.1fs  |  Range: %s -> %s  |  1080p 60 FPS",
+            dur, GetFormattedTime(m_markInTime).c_str(), GetFormattedTime(m_markOutTime).c_str());
+        m_highlightClipInfo = buf;
+
+        m_highlightState = HighlightState::AwaitingConfirm;
+        return true;
+    }
+
+    void GameVideoRecorder::DiscardHighlight()
+    {
+        m_stopAudioRequested = true;
+        if (m_audioRecordThread.joinable())
+            m_audioRecordThread.join();
+
+        if (!m_tempAudioPath.empty())
+        {
+            DeleteFileA(m_tempAudioPath.c_str());
+        }
+
+        m_markInTime = 0.0f;
+        m_markOutTime = 0.0f;
+        m_highlightClipInfo.clear();
+        m_highlightState = HighlightState::Idle;
+    }
+
+    bool GameVideoRecorder::StartStudioRender(const std::string& demoOrMapName, int width, int height)
+    {
+        if (m_highlightState.load() == HighlightState::Rendering)
+            return false;
+
+        const float dur = m_markOutTime - m_markInTime;
+        if (dur <= 0.0f)
+            return false;
+
+        _mkdir("videos");
+
+        m_recordWidth = width;
+        m_recordHeight = height;
+        m_renderTargetFrames = static_cast<uint64_t>(std::ceil(dur * 60.0f));
+        m_renderFramesPushed = 0;
+
+        std::time_t now = std::time(nullptr);
+        std::tm lt{};
+        localtime_s(&lt, &now);
+
+        char stamp[64]{};
+        std::snprintf(stamp, sizeof(stamp), "%04d-%02d-%02d_%02d-%02d-%02d",
+            lt.tm_year + 1900, lt.tm_mon + 1, lt.tm_mday, lt.tm_hour, lt.tm_min, lt.tm_sec);
+
+        std::string safeName = demoOrMapName;
+        const size_t dot = safeName.find_last_of('.');
+        if (dot != std::string::npos) safeName = safeName.substr(0, dot);
+        for (char& c : safeName)
+        {
+            if (c == ' ' || c == '/' || c == '\\' || c == ':') c = '_';
+        }
+
+        m_lastSavedHighlightPath = "videos/Highlight_" + safeName + "_" + stamp + "_1080p.mp4";
+
+        const DWORD pid = GetCurrentProcessId();
+        const DWORD randId = GetTickCount();
+        const std::string videoPipeName = "\\\\.\\pipe\\gl_studio_vid_" + std::to_string(pid) + "_" + std::to_string(randId);
+
+#ifdef _WIN32
+        HANDLE hVideoPipe = CreateNamedPipeA(
+            videoPipeName.c_str(),
+            PIPE_ACCESS_OUTBOUND,
+            PIPE_TYPE_BYTE | PIPE_WAIT,
+            1,
+            1024 * 1024 * 4,
+            1024 * 1024 * 4,
+            0,
+            nullptr
+        );
+
+        if (hVideoPipe == INVALID_HANDLE_VALUE)
+        {
+            m_highlightState = HighlightState::Idle;
+            return false;
+        }
+
+        m_hVideoPipe = hVideoPipe;
+
+        const std::string ffmpegPath = FindFfmpegExecutable();
+
+        bool hasAudio = false;
+        WIN32_FILE_ATTRIBUTE_DATA fad{};
+        if (GetFileAttributesExA(m_tempAudioPath.c_str(), GetFileExInfoStandard, &fad) && fad.nFileSizeLow > 44)
+        {
+            hasAudio = true;
+        }
+
+        std::string videoFilter = "vflip";
+        if (height < 1080)
+        {
+            videoFilter = "vflip,scale=-2:1080:flags=lanczos";
+        }
+
+        std::ostringstream cmd;
+        cmd << "\"" << ffmpegPath << "\" -y -hide_banner -loglevel error"
+            << " -f rawvideo -pix_fmt rgb24 -s " << width << "x" << height
+            << " -r 60 -i \"" << videoPipeName << "\"";
+
+        if (hasAudio)
+        {
+            cmd << " -i \"" << m_tempAudioPath << "\"";
+        }
+
+        cmd << " -vf " << videoFilter
+            << " -c:v libx264 -preset veryfast -crf 16 -pix_fmt yuv420p"
+            << " -colorspace bt709 -color_primaries bt709 -color_trc bt709 -color_range tv";
+
+        if (hasAudio)
+        {
+            cmd << " -c:a aac -b:a 192k -shortest";
+        }
+
+        cmd << " -movflags +faststart \"" << m_lastSavedHighlightPath << "\"";
+
+        STARTUPINFOA si{};
+        si.cb = sizeof(si);
+        si.dwFlags = STARTF_USESHOWWINDOW;
+        si.wShowWindow = SW_HIDE;
+
+        PROCESS_INFORMATION pi{};
+        std::string cmdStr = cmd.str();
+
+        BOOL created = CreateProcessA(
+            nullptr,
+            cmdStr.data(),
+            nullptr,
+            nullptr,
+            FALSE,
+            CREATE_NO_WINDOW | BELOW_NORMAL_PRIORITY_CLASS,
+            nullptr,
+            nullptr,
+            &si,
+            &pi
+        );
+
+        if (!created)
+        {
+            CloseHandle(m_hVideoPipe);
+            m_hVideoPipe = INVALID_HANDLE_VALUE;
+            m_highlightState = HighlightState::Idle;
+            return false;
+        }
+
+        m_hFfmpegProcess = pi.hProcess;
+        CloseHandle(pi.hThread);
+
+        ConnectNamedPipe(m_hVideoPipe, nullptr);
+
+        const size_t frameSize = static_cast<size_t>(width) * height * 3;
+        m_preallocatedCaptureBuffer.resize(frameSize, 0);
+
+        m_highlightState = HighlightState::Rendering;
+        return true;
+#else
+        return false;
+#endif
+    }
+
+    void GameVideoRecorder::CaptureStudioFrame(int width, int height, float clientTime)
+    {
+#ifdef _WIN32
+        if (m_highlightState.load() != HighlightState::Rendering)
+            return;
+
+        if (m_hVideoPipe == INVALID_HANDLE_VALUE)
+            return;
+
+        if (m_renderFramesPushed.load() >= m_renderTargetFrames)
+            return;
+
+        const size_t frameSize = static_cast<size_t>(width) * height * 3;
+        if (m_preallocatedCaptureBuffer.size() != frameSize)
+            m_preallocatedCaptureBuffer.resize(frameSize, 0);
+
+        if (!m_pboInitialized || m_pboWidth != width || m_pboHeight != height)
+        {
+            InitPbo(width, height);
+        }
+
+        bool captured = false;
+        if (m_pboSupported && m_pboInitialized)
+        {
+            int nextIndex = (m_pboIndex + 1) % 2;
+
+            pfnBindBuffer(GL_PIXEL_PACK_BUFFER_ARB, m_pboIds[nextIndex]);
+            glReadPixels(0, 0, width, height, GL_RGB, GL_UNSIGNED_BYTE, 0);
+
+            pfnBindBuffer(GL_PIXEL_PACK_BUFFER_ARB, m_pboIds[m_pboIndex]);
+            void* pGpuData = pfnMapBuffer(GL_PIXEL_PACK_BUFFER_ARB, GL_READ_ONLY_ARB);
+            if (pGpuData != nullptr)
+            {
+                memcpy(m_preallocatedCaptureBuffer.data(), pGpuData, frameSize);
+                pfnUnmapBuffer(GL_PIXEL_PACK_BUFFER_ARB);
+                captured = true;
+            }
+            pfnBindBuffer(GL_PIXEL_PACK_BUFFER_ARB, 0);
+
+            m_pboIndex = nextIndex;
+        }
+
+        if (!captured)
+        {
+            if (!SafeGlReadPixels(width, height, m_preallocatedCaptureBuffer.data()))
+                return;
+        }
+
+        DWORD written = 0;
+        WriteFile(m_hVideoPipe, m_preallocatedCaptureBuffer.data(), static_cast<DWORD>(frameSize), &written, nullptr);
+        m_renderFramesPushed.fetch_add(1);
+#endif
+    }
+
+    void GameVideoRecorder::FinishStudioRender()
+    {
+#ifdef _WIN32
+        if (m_highlightState.load() != HighlightState::Rendering)
+            return;
+
+        if (m_hVideoPipe != INVALID_HANDLE_VALUE)
+        {
+            FlushFileBuffers(m_hVideoPipe);
+            DisconnectNamedPipe(m_hVideoPipe);
+            CloseHandle(m_hVideoPipe);
+            m_hVideoPipe = INVALID_HANDLE_VALUE;
+        }
+
+        if (m_hFfmpegProcess != nullptr)
+        {
+            WaitForSingleObject(m_hFfmpegProcess, 10000);
+            CloseHandle(m_hFfmpegProcess);
+            m_hFfmpegProcess = nullptr;
+        }
+
+        if (!m_tempAudioPath.empty())
+        {
+            DeleteFileA(m_tempAudioPath.c_str());
+        }
+
+        CleanupPbo();
+
+        m_highlightState = HighlightState::Idle;
+        m_markInTime = 0.0f;
+        m_markOutTime = 0.0f;
+#endif
+    }
+
+    void GameVideoRecorder::AudioRecordingThread(std::string wavPath, int sampleRate)
+    {
+#ifdef _WIN32
+        HRESULT hr = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+        const bool comInit = SUCCEEDED(hr);
+
+        IMMDeviceEnumerator* pEnumerator = nullptr;
+        IMMDevice* pDevice = nullptr;
+        IAudioClient* pAudioClient = nullptr;
+        IAudioCaptureClient* pCaptureClient = nullptr;
+        WAVEFORMATEX* pwfx = nullptr;
+        bool captureReady = false;
+
+        hr = CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL,
+                              __uuidof(IMMDeviceEnumerator), (void**)&pEnumerator);
+        if (SUCCEEDED(hr) && pEnumerator != nullptr)
+        {
+            hr = pEnumerator->GetDefaultAudioEndpoint(eRender, eConsole, &pDevice);
+            if (SUCCEEDED(hr) && pDevice != nullptr)
+            {
+                hr = pDevice->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr, (void**)&pAudioClient);
+                if (SUCCEEDED(hr) && pAudioClient != nullptr)
+                {
+                    hr = pAudioClient->GetMixFormat(&pwfx);
+                    if (SUCCEEDED(hr) && pwfx != nullptr)
+                    {
+                        hr = pAudioClient->Initialize(
+                            AUDCLNT_SHAREMODE_SHARED,
+                            AUDCLNT_STREAMFLAGS_LOOPBACK,
+                            10000000,
+                            0,
+                            pwfx,
+                            nullptr
+                        );
+
+                        if (SUCCEEDED(hr))
+                        {
+                            hr = pAudioClient->GetService(__uuidof(IAudioCaptureClient), (void**)&pCaptureClient);
+                            if (SUCCEEDED(hr) && pCaptureClient != nullptr)
+                            {
+                                hr = pAudioClient->Start();
+                                if (SUCCEEDED(hr))
+                                {
+                                    captureReady = true;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        std::ofstream wav(wavPath, std::ios::binary);
+        WavHeader hdr;
+        hdr.sampleRate = static_cast<uint32_t>(sampleRate);
+        hdr.byteRate = hdr.sampleRate * 2 * sizeof(int16_t);
+        hdr.blockAlign = 2 * sizeof(int16_t);
+        wav.write(reinterpret_cast<const char*>(&hdr), sizeof(hdr));
+
+        uint32_t totalBytesWritten = 0;
+        std::vector<int16_t> pcmConversionBuffer;
+
+        while (!m_stopAudioRequested.load())
+        {
+            if (captureReady && pCaptureClient != nullptr)
+            {
+                UINT32 packetLength = 0;
+                hr = pCaptureClient->GetNextPacketSize(&packetLength);
+                if (SUCCEEDED(hr) && packetLength > 0)
+                {
+                    BYTE* pData = nullptr;
+                    UINT32 numFramesRead = 0;
+                    DWORD flags = 0;
+
+                    hr = pCaptureClient->GetBuffer(&pData, &numFramesRead, &flags, nullptr, nullptr);
+                    if (SUCCEEDED(hr) && pData != nullptr && numFramesRead > 0)
+                    {
+                        const int channels = (pwfx != nullptr && pwfx->nChannels > 0) ? pwfx->nChannels : 2;
+                        const size_t totalSamples = static_cast<size_t>(numFramesRead) * channels;
+                        pcmConversionBuffer.resize(totalSamples);
+
+                        if (flags & AUDCLNT_BUFFERFLAGS_SILENT)
+                        {
+                            std::fill(pcmConversionBuffer.begin(), pcmConversionBuffer.end(), 0);
+                        }
+                        else if (pwfx->wFormatTag == WAVE_FORMAT_IEEE_FLOAT ||
+                                 (pwfx->wFormatTag == WAVE_FORMAT_EXTENSIBLE && pwfx->wBitsPerSample == 32))
+                        {
+                            const float* fData = reinterpret_cast<const float*>(pData);
+                            for (size_t i = 0; i < totalSamples; ++i)
+                            {
+                                const float sample = std::clamp(fData[i], -1.0f, 1.0f);
+                                pcmConversionBuffer[i] = static_cast<int16_t>(sample * 32767.0f);
+                            }
+                        }
+                        else if (pwfx->wBitsPerSample == 16)
+                        {
+                            std::memcpy(pcmConversionBuffer.data(), pData, totalSamples * sizeof(int16_t));
+                        }
+
+                        const uint32_t bytesToWrite = static_cast<uint32_t>(totalSamples * sizeof(int16_t));
+                        wav.write(reinterpret_cast<const char*>(pcmConversionBuffer.data()), bytesToWrite);
+                        totalBytesWritten += bytesToWrite;
+
+                        pCaptureClient->ReleaseBuffer(numFramesRead);
+                        continue;
+                    }
+                }
+            }
+            else
+            {
+                const size_t silenceFrames = static_cast<size_t>(sampleRate) / 100;
+                std::vector<int16_t> silence(silenceFrames * 2, 0);
+                const uint32_t bytesToWrite = static_cast<uint32_t>(silence.size() * sizeof(int16_t));
+                wav.write(reinterpret_cast<const char*>(silence.data()), bytesToWrite);
+                totalBytesWritten += bytesToWrite;
+            }
+
+            Sleep(3);
+        }
+
+        if (captureReady && pAudioClient != nullptr)
+            pAudioClient->Stop();
+
+        if (pwfx != nullptr) CoTaskMemFree(pwfx);
+        if (pCaptureClient != nullptr) pCaptureClient->Release();
+        if (pAudioClient != nullptr) pAudioClient->Release();
+        if (pDevice != nullptr) pDevice->Release();
+        if (pEnumerator != nullptr) pEnumerator->Release();
+
+        if (comInit)
+            CoUninitialize();
+
+        hdr.fileSize = totalBytesWritten + 36;
+        hdr.dataSize = totalBytesWritten;
+        wav.seekp(0, std::ios::beg);
+        wav.write(reinterpret_cast<const char*>(&hdr), sizeof(hdr));
+        wav.close();
+#endif
+    }
+
+    std::string GameVideoRecorder::GetFormattedTime(float seconds) const
+    {
+        if (seconds < 0.0f) seconds = 0.0f;
+        const int totalSec = static_cast<int>(seconds);
+        const int mins = totalSec / 60;
+        const int secs = totalSec % 60;
+        char buf[16]{};
+        std::snprintf(buf, sizeof(buf), "%02d:%02d", mins, secs);
+        return buf;
+    }
+
+    std::string GameVideoRecorder::GetHighlightRangeFormatted() const
+    {
+        char buf[64]{};
+        std::snprintf(buf, sizeof(buf), "%s -> %s (%.1fs)",
+            GetFormattedTime(m_markInTime).c_str(),
+            GetFormattedTime(m_markOutTime).c_str(),
+            GetHighlightDuration());
+        return buf;
+    }
+
+    int GameVideoRecorder::GetRenderProgressPercent() const
+    {
+        if (m_renderTargetFrames == 0) return 0;
+        const int pct = static_cast<int>((m_renderFramesPushed.load() * 100) / m_renderTargetFrames);
+        return std::clamp(pct, 0, 100);
+    }
+
+    // -------------------------------------------------------------
     // In-Lobby Match Demo Studio
     // -------------------------------------------------------------
     std::vector<DemoFileItem> GameVideoRecorder::RefreshDemoList()
@@ -199,7 +684,6 @@ namespace nextclient::client_mini
                     DemoFileItem item;
                     item.fileName = fd.cFileName;
 
-                    // Parse map name if available (e.g. PLAYER_de_dust2_1405-...)
                     std::string f(fd.cFileName);
                     const size_t firstUnderscore = f.find('_');
                     if (firstUnderscore != std::string::npos)
@@ -212,11 +696,9 @@ namespace nextclient::client_mini
                     }
                     if (item.mapName.empty())
                     {
-                        // Fallback: strip .dem extension
                         item.mapName = f.substr(0, f.find_last_of('.'));
                     }
 
-                    // Format file size
                     const uint64_t sizeBytes = (static_cast<uint64_t>(fd.nFileSizeHigh) << 32) | fd.nFileSizeLow;
                     if (sizeBytes >= 1024 * 1024)
                     {
@@ -233,7 +715,6 @@ namespace nextclient::client_mini
                         item.sizeFormatted = sbuf;
                     }
 
-                    // Format date & timestamp
                     FILETIME ft = fd.ftLastWriteTime;
                     SYSTEMTIME st{};
                     FileTimeToSystemTime(&ft, &st);
@@ -249,7 +730,6 @@ namespace nextclient::client_mini
             FindClose(hFind);
         }
 
-        // Sort newest first
         std::sort(m_cachedDemos.begin(), m_cachedDemos.end(), [](const DemoFileItem& a, const DemoFileItem& b) {
             return a.timestamp > b.timestamp;
         });
@@ -417,7 +897,6 @@ namespace nextclient::client_mini
             const DWORD waitRes = WaitForSingleObject(hProcess, 500);
             if (waitRes == WAIT_OBJECT_0)
             {
-                // Process finished
                 break;
             }
 
@@ -469,9 +948,37 @@ namespace nextclient::client_mini
 
 #ifdef _WIN32
         const DWORD pid = GetCurrentProcessId();
-        const DWORD randId = GetTickCount();
-        const std::string videoPipeName = "\\\\.\\pipe\\gl_vid_" + std::to_string(pid) + "_" + std::to_string(randId);
-        const std::string audioPipeName = "\\\\.\\pipe\\gl_aud_" + std::to_string(pid) + "_" + std::to_string(randId);
+        const std::string videoPipeName = "\\\\.\\pipe\\gl_worker_vid_" + std::to_string(pid);
+        const std::string audioPipeName = "\\\\.\\pipe\\gl_worker_aud_" + std::to_string(pid);
+
+        HANDLE hVideoPipe = CreateNamedPipeA(
+            videoPipeName.c_str(),
+            PIPE_ACCESS_OUTBOUND,
+            PIPE_TYPE_BYTE | PIPE_WAIT,
+            1,
+            1024 * 1024 * 4,
+            1024 * 1024 * 4,
+            0,
+            nullptr
+        );
+
+        HANDLE hAudioPipe = CreateNamedPipeA(
+            audioPipeName.c_str(),
+            PIPE_ACCESS_OUTBOUND,
+            PIPE_TYPE_BYTE | PIPE_WAIT,
+            1,
+            1024 * 1024,
+            1024 * 1024,
+            0,
+            nullptr
+        );
+
+        if (hVideoPipe == INVALID_HANDLE_VALUE || hAudioPipe == INVALID_HANDLE_VALUE)
+        {
+            if (hVideoPipe != INVALID_HANDLE_VALUE) CloseHandle(hVideoPipe);
+            if (hAudioPipe != INVALID_HANDLE_VALUE) CloseHandle(hAudioPipe);
+            return false;
+        }
 
         const size_t frameBytes = static_cast<size_t>(width) * height * 3;
         m_preallocatedCaptureBuffer.resize(frameBytes, 0);
@@ -497,53 +1004,35 @@ namespace nextclient::client_mini
             height,
             m_targetFps
         );
-#endif
+
         return true;
+#else
+        return false;
+#endif
     }
 
-    void GameVideoRecorder::MasterWorkerThread(
-        std::string ffmpegPath,
-        std::string outputPath,
-        std::string videoPipeName,
-        std::string audioPipeName,
-        int width,
-        int height,
-        int fps)
+    void GameVideoRecorder::MasterWorkerThread(std::string ffmpegPath, std::string outputPath, std::string videoPipeName, std::string audioPipeName, int width, int height, int fps)
     {
 #ifdef _WIN32
-        constexpr DWORD kVideoBufSize = 4 * 1024 * 1024;
-        constexpr DWORD kAudioBufSize = 256 * 1024;
-
-        HANDLE hVideoPipe = CreateNamedPipeA(
+        HANDLE hVideoPipe = CreateFileA(
             videoPipeName.c_str(),
-            PIPE_ACCESS_OUTBOUND,
-            PIPE_TYPE_BYTE | PIPE_WAIT,
-            1,
-            kVideoBufSize,
-            kVideoBufSize,
-            5000,
+            GENERIC_WRITE,
+            0,
+            nullptr,
+            OPEN_EXISTING,
+            0,
             nullptr
         );
 
-        HANDLE hAudioPipe = CreateNamedPipeA(
+        HANDLE hAudioPipe = CreateFileA(
             audioPipeName.c_str(),
-            PIPE_ACCESS_OUTBOUND,
-            PIPE_TYPE_BYTE | PIPE_WAIT,
-            1,
-            kAudioBufSize,
-            kAudioBufSize,
-            5000,
+            GENERIC_WRITE,
+            0,
+            nullptr,
+            OPEN_EXISTING,
+            0,
             nullptr
         );
-
-        if (hVideoPipe == INVALID_HANDLE_VALUE || hAudioPipe == INVALID_HANDLE_VALUE)
-        {
-            if (hVideoPipe != INVALID_HANDLE_VALUE) CloseHandle(hVideoPipe);
-            if (hAudioPipe != INVALID_HANDLE_VALUE) CloseHandle(hAudioPipe);
-            m_isWorkerCapturing = false;
-            m_readyForFrames = false;
-            return;
-        }
 
         m_hVideoPipe = hVideoPipe;
         m_hAudioPipe = hAudioPipe;
@@ -604,27 +1093,21 @@ namespace nextclient::client_mini
         m_hFfmpegProcess = pi.hProcess;
         CloseHandle(pi.hThread);
 
-        // Step 1: Connect video pipe
         ConnectNamedPipe(hVideoPipe, nullptr);
 
-        // Step 2: Send 1 initial probe frame
         const size_t probeFrameSize = static_cast<size_t>(width) * height * 3;
         std::vector<uint8_t> probeFrame(probeFrameSize, 0);
         DWORD probeWritten = 0;
         WriteFile(hVideoPipe, probeFrame.data(), static_cast<DWORD>(probeFrame.size()), &probeWritten, nullptr);
 
-        // Step 3: Connect audio pipe
         ConnectNamedPipe(hAudioPipe, nullptr);
 
-        // Step 4: Symmetrical initial audio chunk
         const size_t probeAudioSamples = static_cast<size_t>(audioRate / fps);
         std::vector<int16_t> probeAudio(probeAudioSamples * 2, 0);
         WriteFile(hAudioPipe, probeAudio.data(), static_cast<DWORD>(probeAudio.size() * sizeof(int16_t)), &probeWritten, nullptr);
 
-        // Step 5: Start audio capture thread
         m_audioThread = std::thread(&GameVideoRecorder::AudioWorkerThread, this, hAudioPipe, audioRate);
 
-        // Step 6: Mark synchronized start time
         m_syncStartTime = std::chrono::steady_clock::now();
         m_lastFrameTime = m_syncStartTime;
         m_framesPushed = 1;
@@ -698,7 +1181,6 @@ namespace nextclient::client_mini
         if (width != m_recordWidth || height != m_recordHeight)
             return;
 
-        // Guaranteed 1.0x Real-Time Wall-Clock Sync (Completely eliminates fast-forward!)
         const auto now = std::chrono::steady_clock::now();
         const double elapsedSec = std::chrono::duration<double>(now - m_syncStartTime).count();
         const uint64_t targetTotalFrames = static_cast<uint64_t>(elapsedSec * m_targetFps);
@@ -709,13 +1191,12 @@ namespace nextclient::client_mini
 
         uint64_t framesNeeded = targetTotalFrames - currentPushed;
         if (framesNeeded > 5)
-            framesNeeded = 5; // Prevent sudden huge burst if there was a hitch
+            framesNeeded = 5;
 
         const size_t frameSize = static_cast<size_t>(width) * height * 3;
         if (m_preallocatedCaptureBuffer.size() != frameSize)
             m_preallocatedCaptureBuffer.resize(frameSize, 0);
 
-        // Dynamic PBO initialization / resize on demand
         if (!m_pboInitialized || m_pboWidth != width || m_pboHeight != height)
         {
             InitPbo(width, height);
@@ -726,11 +1207,9 @@ namespace nextclient::client_mini
         {
             int nextIndex = (m_pboIndex + 1) % 2;
 
-            // 1. Asynchronously transfer current frame to next PBO (DMA - non-blocking!)
             pfnBindBuffer(GL_PIXEL_PACK_BUFFER_ARB, m_pboIds[nextIndex]);
             glReadPixels(0, 0, width, height, GL_RGB, GL_UNSIGNED_BYTE, 0);
 
-            // 2. Map previously transferred PBO to CPU memory (already in fast memory)
             pfnBindBuffer(GL_PIXEL_PACK_BUFFER_ARB, m_pboIds[m_pboIndex]);
             void* pGpuData = pfnMapBuffer(GL_PIXEL_PACK_BUFFER_ARB, GL_READ_ONLY_ARB);
             if (pGpuData != nullptr)
@@ -744,7 +1223,6 @@ namespace nextclient::client_mini
             m_pboIndex = nextIndex;
         }
 
-        // Safe fallback if PBO is not supported or failed
         if (!captured)
         {
             if (!SafeGlReadPixels(width, height, m_preallocatedCaptureBuffer.data()))
@@ -777,7 +1255,6 @@ namespace nextclient::client_mini
         IAudioClient* pAudioClient = nullptr;
         IAudioCaptureClient* pCaptureClient = nullptr;
         WAVEFORMATEX* pwfx = nullptr;
-
         bool captureReady = false;
 
         hr = CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL,
@@ -796,7 +1273,7 @@ namespace nextclient::client_mini
                         hr = pAudioClient->Initialize(
                             AUDCLNT_SHAREMODE_SHARED,
                             AUDCLNT_STREAMFLAGS_LOOPBACK,
-                            400000, // 40ms low-latency buffer
+                            10000000,
                             0,
                             pwfx,
                             nullptr
@@ -807,8 +1284,11 @@ namespace nextclient::client_mini
                             hr = pAudioClient->GetService(__uuidof(IAudioCaptureClient), (void**)&pCaptureClient);
                             if (SUCCEEDED(hr) && pCaptureClient != nullptr)
                             {
-                                pAudioClient->Start();
-                                captureReady = true;
+                                hr = pAudioClient->Start();
+                                if (SUCCEEDED(hr))
+                                {
+                                    captureReady = true;
+                                }
                             }
                         }
                     }
@@ -909,167 +1389,5 @@ namespace nextclient::client_mini
         if (m_masterThread.joinable())
             m_masterThread.detach();
 #endif
-    }
-
-    // -------------------------------------------------------------
-    // Live Demo Highlight Clip Capture (Keys 1 & 2 during viewdemo)
-    // -------------------------------------------------------------
-    bool GameVideoRecorder::StartHighlightClip(const std::string& demoOrMapName, int width, int height, int fps)
-    {
-        if (m_isHighlightRecording.load() || m_isWorkerCapturing.load())
-            return false;
-
-        _mkdir("videos");
-
-        const DWORD pid = GetCurrentProcessId();
-        const DWORD randId = GetTickCount();
-        m_tempHighlightPath = "videos/temp_highlight_" + std::to_string(pid) + "_" + std::to_string(randId) + ".mp4";
-        m_currentHighlightDemoName = demoOrMapName;
-        m_highlightStartTime = std::chrono::steady_clock::now();
-        m_highlightDurationSec = 0;
-        m_highlightClipInfo.clear();
-
-        m_recordWidth = width;
-        m_recordHeight = height;
-        m_targetFps = (fps > 0) ? fps : 60;
-        m_framesPushed = 0;
-
-        const std::string ffmpegPath = FindFfmpegExecutable();
-        const std::string videoPipeName = "\\\\.\\pipe\\gl_hvid_" + std::to_string(pid) + "_" + std::to_string(randId);
-        const std::string audioPipeName = "\\\\.\\pipe\\gl_haud_" + std::to_string(pid) + "_" + std::to_string(randId);
-
-        const size_t frameBytes = static_cast<size_t>(width) * height * 3;
-        m_preallocatedCaptureBuffer.resize(frameBytes, 0);
-
-        m_stopRequested = false;
-        m_readyForFrames = false;
-        m_isWorkerCapturing = true;
-        m_isHighlightRecording = true;
-        m_isAwaitingConfirm = false;
-
-        {
-            std::lock_guard<std::mutex> lock(m_queueMutex);
-            std::queue<std::vector<uint8_t>> emptyQueue;
-            std::swap(m_frameQueue, emptyQueue);
-        }
-
-        m_masterThread = std::thread(
-            &GameVideoRecorder::MasterWorkerThread,
-            this,
-            ffmpegPath,
-            m_tempHighlightPath,
-            videoPipeName,
-            audioPipeName,
-            width,
-            height,
-            m_targetFps
-        );
-
-        return true;
-    }
-
-    void GameVideoRecorder::CaptureHighlightFrame(int width, int height)
-    {
-        if (!m_isHighlightRecording.load())
-            return;
-
-        WorkerCaptureFrame(width, height);
-    }
-
-    bool GameVideoRecorder::StopHighlightClip()
-    {
-        if (!m_isHighlightRecording.load())
-            return false;
-
-        const auto now = std::chrono::steady_clock::now();
-        m_highlightDurationSec = static_cast<int>(std::chrono::duration<double>(now - m_highlightStartTime).count());
-
-        m_readyForFrames = false;
-        m_stopRequested = true;
-        m_queueCv.notify_all();
-
-        if (m_masterThread.joinable())
-            m_masterThread.join();
-
-        m_isHighlightRecording = false;
-
-        // Query file size of the generated temporary MP4 file
-        uint64_t fileSize = 0;
-        WIN32_FILE_ATTRIBUTE_DATA fad{};
-        if (GetFileAttributesExA(m_tempHighlightPath.c_str(), GetFileExInfoStandard, &fad))
-        {
-            fileSize = (static_cast<uint64_t>(fad.nFileSizeHigh) << 32) | fad.nFileSizeLow;
-        }
-
-        const int minutes = m_highlightDurationSec / 60;
-        const int seconds = m_highlightDurationSec % 60;
-        char infoBuf[128]{};
-        if (fileSize >= 1024 * 1024)
-        {
-            const double mb = static_cast<double>(fileSize) / (1024.0 * 1024.0);
-            std::snprintf(infoBuf, sizeof(infoBuf), "Duration: %02d:%02d  |  %dx%d @ %d FPS  |  %.1f MB",
-                minutes, seconds, m_recordWidth, m_recordHeight, m_targetFps, mb);
-        }
-        else
-        {
-            const double kb = static_cast<double>(fileSize) / 1024.0;
-            std::snprintf(infoBuf, sizeof(infoBuf), "Duration: %02d:%02d  |  %dx%d @ %d FPS  |  %.0f KB",
-                minutes, seconds, m_recordWidth, m_recordHeight, m_targetFps, kb);
-        }
-        m_highlightClipInfo = infoBuf;
-        m_isAwaitingConfirm = true;
-
-        return true;
-    }
-
-    std::string GameVideoRecorder::GetFormattedHighlightTime() const
-    {
-        if (!m_isHighlightRecording.load())
-            return "00:00";
-
-        const auto now = std::chrono::steady_clock::now();
-        const int totalSeconds = static_cast<int>(std::chrono::duration<double>(now - m_highlightStartTime).count());
-        const int minutes = totalSeconds / 60;
-        const int seconds = totalSeconds % 60;
-
-        char buf[16]{};
-        std::snprintf(buf, sizeof(buf), "%02d:%02d", minutes, seconds);
-        return buf;
-    }
-
-    bool GameVideoRecorder::ConfirmSaveHighlight(bool save)
-    {
-        if (!m_isAwaitingConfirm.load())
-            return false;
-
-        if (save && !m_tempHighlightPath.empty())
-        {
-            _mkdir("videos");
-            auto now = std::chrono::system_clock::now();
-            std::time_t tt = std::chrono::system_clock::to_time_t(now);
-            std::tm tm{};
-            localtime_s(&tm, &tt);
-
-            char timeBuf[64]{};
-            std::strftime(timeBuf, sizeof(timeBuf), "%Y-%m-%d_%H-%M-%S", &tm);
-
-            std::string cleanDemo = m_currentHighlightDemoName;
-            if (cleanDemo.empty()) cleanDemo = "Highlight";
-            const size_t dot = cleanDemo.find_last_of('.');
-            if (dot != std::string::npos) cleanDemo = cleanDemo.substr(0, dot);
-
-            std::string finalPath = "videos/Highlight_" + cleanDemo + "_" + timeBuf + ".mp4";
-            MoveFileA(m_tempHighlightPath.c_str(), finalPath.c_str());
-            m_lastSavedHighlightPath = finalPath;
-        }
-        else if (!m_tempHighlightPath.empty())
-        {
-            DeleteFileA(m_tempHighlightPath.c_str());
-            m_lastSavedHighlightPath.clear();
-        }
-
-        m_tempHighlightPath.clear();
-        m_isAwaitingConfirm = false;
-        return true;
     }
 }

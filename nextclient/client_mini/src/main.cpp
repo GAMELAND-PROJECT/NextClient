@@ -257,45 +257,95 @@ static void GetGameScreenResolution(int& outWidth, int& outHeight)
     bool g_HighlightToastSuccess = false;
     double g_HighlightToastTimer = 0.0;
 
-    void DrawHighlightRecWidget(int scrW)
+    void DrawHighlightMarkingWidget(int scrW)
     {
-        const int w = 175;
-        const int h = 40;
+        const int w = 210;
+        const int h = 42;
         const int x = scrW - w - 16;
         const int y = 14;
 
-        DrawHudBox(x, y, w, h, 14, 18, 24, 230);
+        DrawHudBox(x, y, w, h, 14, 18, 24, 235);
 
-        DrawHudBox(x, y, w, 1, 220, 50, 50, 200);
-        DrawHudBox(x, y + h - 1, w, 1, 220, 50, 50, 200);
-        DrawHudBox(x, y, 1, h, 220, 50, 50, 200);
-        DrawHudBox(x + w - 1, y, 1, h, 220, 50, 50, 200);
+        DrawHudBox(x, y, w, 1, 230, 60, 60, 220);
+        DrawHudBox(x, y + h - 1, w, 1, 230, 60, 60, 220);
+        DrawHudBox(x, y, 1, h, 230, 60, 60, 220);
+        DrawHudBox(x + w - 1, y, 1, h, 230, 60, 60, 220);
 
         const double curTime = gEngfuncs.GetClientTime();
         const float pulse = static_cast<float>(0.60 + 0.40 * std::sin(curTime * 6.0));
 
-        DrawHudBox(x + 10, y + 8, 10, 10, static_cast<int>(255 * pulse), 20, 20, 255);
+        DrawHudBox(x + 10, y + 8, 10, 10, static_cast<int>(255 * pulse), 25, 25, 255);
         DrawHudBox(x + 13, y + 11, 4, 4, 255, 255, 255, 230);
 
-        const std::string timeStr = GameVideoRecorder::Instance().GetFormattedHighlightTime();
+        const float markIn = GameVideoRecorder::Instance().GetMarkInTime();
+        const std::string markInStr = GameVideoRecorder::Instance().GetFormattedTime(markIn);
+        const std::string curTimeStr = GameVideoRecorder::Instance().GetFormattedTime(static_cast<float>(curTime));
+
         char badge[64]{};
-        std::snprintf(badge, sizeof(badge), "REC  %s", timeStr.c_str());
+        std::snprintf(badge, sizeof(badge), "MARK IN: %s  |  %s", markInStr.c_str(), curTimeStr.c_str());
 
         gEngfuncs.pfnDrawSetTextColor(1.0f, 0.95f, 0.95f);
-        DrawHudString(x + 28, y + 6, badge);
+        DrawHudString(x + 28, y + 7, badge);
 
-        gEngfuncs.pfnDrawSetTextColor(0.95f, 0.80f, 0.20f);
-        DrawHudString(x + 12, y + 23, "[2] Stop & Review Clip");
+        gEngfuncs.pfnDrawSetTextColor(0.95f, 0.82f, 0.20f);
+        DrawHudString(x + 10, y + 25, "[1] Reset Start  |  [2] Mark End");
+    }
+
+    void DrawHighlightRenderingModal(int scrW, int scrH)
+    {
+        const int w = 480;
+        const int h = 120;
+        const int x = (scrW - w) / 2;
+        const int y = (scrH - h) / 2;
+
+        DrawHudBox(x, y, w, h, 12, 16, 22, 245);
+
+        DrawHudBox(x, y, w, 3, 0, 200, 255, 255);
+
+        DrawHudBox(x, y, w, 1, 50, 75, 100, 180);
+        DrawHudBox(x, y + h - 1, w, 1, 50, 75, 100, 180);
+        DrawHudBox(x, y, 1, h, 50, 75, 100, 180);
+        DrawHudBox(x + w - 1, y, 1, h, 50, 75, 100, 180);
+
+        gEngfuncs.pfnDrawSetTextColor(0.20f, 0.85f, 1.0f);
+        DrawHudString(x + 20, y + 14, "GAMELAND DEMO STUDIO | RENDERING 1080P MP4");
+
+        const int pct = GameVideoRecorder::Instance().GetRenderProgressPercent();
+        const uint64_t pushed = GameVideoRecorder::Instance().GetRenderFramesPushed();
+        const uint64_t total = GameVideoRecorder::Instance().GetRenderTargetFrames();
+
+        const int barX = x + 20;
+        const int barY = y + 42;
+        const int barW = w - 40;
+        const int barH = 16;
+
+        DrawHudBox(barX, barY, barW, barH, 20, 28, 38, 255);
+        const int fillW = (pct * barW) / 100;
+        if (fillW > 0)
+            DrawHudBox(barX, barY, fillW, barH, 0, 210, 255, 255);
+
+        DrawHudBox(barX, barY, barW, 1, 60, 100, 140, 220);
+        DrawHudBox(barX, barY + barH - 1, barW, 1, 60, 100, 140, 220);
+        DrawHudBox(barX, barY, 1, barH, 60, 100, 140, 220);
+        DrawHudBox(barX + barW - 1, barY, 1, barH, 60, 100, 140, 220);
+
+        char progText[96]{};
+        std::snprintf(progText, sizeof(progText), "Progress: %d%%  |  Frame %llu of %llu  |  60 FPS Lockstep", pct, pushed, total);
+        gEngfuncs.pfnDrawSetTextColor(0.95f, 0.95f, 0.95f);
+        DrawHudString(x + 20, y + 68, progText);
+
+        gEngfuncs.pfnDrawSetTextColor(0.60f, 0.75f, 0.85f);
+        DrawHudString(x + 20, y + 92, "Rendering in background... (~2-3 sec)");
     }
 
     void DrawHighlightConfirmDialog(int scrW, int scrH)
     {
-        const int w = 490;
-        const int h = 180;
+        const int w = 510;
+        const int h = 185;
         const int x = (scrW - w) / 2;
         const int y = (scrH - h) / 2;
 
-        DrawHudBox(x, y, w, h, 12, 16, 22, 240);
+        DrawHudBox(x, y, w, h, 12, 16, 22, 245);
 
         DrawHudBox(x, y, w, 3, 75, 210, 255, 255);
 
@@ -305,34 +355,34 @@ static void GetGameScreenResolution(int& outWidth, int& outHeight)
         DrawHudBox(x + w - 1, y, 1, h, 60, 85, 110, 180);
 
         gEngfuncs.pfnDrawSetTextColor(0.30f, 0.85f, 1.0f);
-        DrawHudString(x + 20, y + 14, "SAVE HIGHLIGHT CLIP?  |  CONFIRMATION");
+        DrawHudString(x + 20, y + 14, "EXPORT HIGHLIGHT TO MP4?  |  DEMO STUDIO");
 
         DrawHudBox(x + 16, y + 36, w - 32, 1, 60, 80, 100, 140);
 
         const std::string clipInfo = GameVideoRecorder::Instance().GetHighlightClipInfo();
-        gEngfuncs.pfnDrawSetTextColor(0.90f, 0.92f, 0.95f);
+        gEngfuncs.pfnDrawSetTextColor(0.95f, 0.95f, 0.95f);
         DrawHudString(x + 20, y + 48, clipInfo.c_str());
 
-        gEngfuncs.pfnDrawSetTextColor(0.65f, 0.72f, 0.80f);
-        DrawHudString(x + 20, y + 70, "Clip captured directly from demo playback without UI overlay.");
+        gEngfuncs.pfnDrawSetTextColor(0.65f, 0.78f, 0.90f);
+        DrawHudString(x + 20, y + 70, "Quality: 1080p Full HD (Lanczos) | 60 FPS Locked | 1.000x Speed");
 
         DrawHudBox(x + 16, y + 94, w - 32, 1, 50, 70, 90, 120);
 
         gEngfuncs.pfnDrawSetTextColor(0.20f, 1.0f, 0.40f);
-        DrawHudString(x + 20, y + 108, "[ 1 ]  YES, SAVE TO VIDEOS/ (Press 1 or Enter)");
+        DrawHudString(x + 20, y + 110, "[ 1 ]  YES, EXPORT TO VIDEOS/ (Press 1 or Enter)");
 
         gEngfuncs.pfnDrawSetTextColor(1.0f, 0.35f, 0.35f);
-        DrawHudString(x + 20, y + 134, "[ 2 ]  NO, DISCARD AND DELETE (Press 2 or Esc)");
+        DrawHudString(x + 20, y + 138, "[ 2 ]  NO, DISCARD AND CANCEL (Press 2 or Esc)");
     }
 
     void DrawHighlightToast(int scrW, int scrH)
     {
-        const int w = 490;
+        const int w = 510;
         const int h = 32;
         const int x = (scrW - w) / 2;
         const int y = 20;
 
-        DrawHudBox(x, y, w, h, 14, 18, 24, 230);
+        DrawHudBox(x, y, w, h, 14, 18, 24, 235);
         if (g_HighlightToastSuccess)
         {
             DrawHudBox(x, y, w, 2, 40, 220, 80, 255);
@@ -360,7 +410,7 @@ static void GetGameScreenResolution(int& outWidth, int& outHeight)
         DrawHudBox(x + w - 1, y, 1, h, 60, 75, 90, 120);
 
         gEngfuncs.pfnDrawSetTextColor(0.95f, 0.82f, 0.20f);
-        DrawHudString(x + 12, y + 6, "[1] Record Highlight Clip");
+        DrawHudString(x + 12, y + 6, "[1] Mark Highlight Start");
     }
 
     void DrawWindowsCaptureWidget(int scrW)
@@ -847,48 +897,14 @@ static void GetGameScreenResolution(int& outWidth, int& outHeight)
         const bool isViewingDemo = (gEngfuncs.pDemoAPI && gEngfuncs.pDemoAPI->IsPlayingback());
         if (isViewingDemo)
         {
-            if (GameVideoRecorder::Instance().IsAwaitingHighlightConfirm())
+            if (GameVideoRecorder::Instance().IsHighlightRendering())
             {
-                if (BindingEquals(pszCurrentBinding, "slot1") || keynum == '1' || keynum == 13)
-                {
-                    GameVideoRecorder::Instance().ConfirmSaveHighlight(true);
-                    g_HighlightToastText = "Clip saved: " + GameVideoRecorder::Instance().GetLastSavedHighlightPath();
-                    g_HighlightToastSuccess = true;
-                    g_HighlightToastTimer = gEngfuncs.GetClientTime() + 4.0;
-                    gEngfuncs.pfnClientCmd("unpause\n");
-                    return 0;
-                }
-
-                if (BindingEquals(pszCurrentBinding, "slot2") || keynum == '2' || keynum == 27 || keynum == '0')
-                {
-                    GameVideoRecorder::Instance().ConfirmSaveHighlight(false);
-                    g_HighlightToastText = "Highlight clip discarded";
-                    g_HighlightToastSuccess = false;
-                    g_HighlightToastTimer = gEngfuncs.GetClientTime() + 3.0;
-                    gEngfuncs.pfnClientCmd("unpause\n");
-                    return 0;
-                }
-
                 return 0;
             }
 
-            if (GameVideoRecorder::Instance().IsHighlightRecording())
+            if (GameVideoRecorder::Instance().IsHighlightAwaitingConfirm())
             {
-                if (BindingEquals(pszCurrentBinding, "slot2") || keynum == '2')
-                {
-                    GameVideoRecorder::Instance().StopHighlightClip();
-                    gEngfuncs.pfnClientCmd("pause\n");
-                    return 0;
-                }
-
-                if (BindingEquals(pszCurrentBinding, "slot1") || keynum == '1')
-                {
-                    return 0;
-                }
-            }
-            else
-            {
-                if (BindingEquals(pszCurrentBinding, "slot1") || keynum == '1')
+                if (BindingEquals(pszCurrentBinding, "slot1") || keynum == '1' || keynum == 13) // 1 or Enter
                 {
                     int curW = 1024, curH = 768;
                     GetGameScreenResolution(curW, curH);
@@ -910,12 +926,73 @@ static void GetGameScreenResolution(int& outWidth, int& outHeight)
                             }
                         }
                     }
-                    if (demoName.empty()) demoName = "Demo";
+                    if (demoName.empty()) demoName = "Highlight";
 
-                    // Force demo playback to exact 1.0x normal speed (resets 2x/4x fast-forward)
+                    if (GameVideoRecorder::Instance().StartStudioRender(demoName, curW, curH))
+                    {
+                        float markIn = GameVideoRecorder::Instance().GetMarkInTime();
+                        char cmd[128]{};
+                        std::snprintf(cmd, sizeof(cmd), "dem_jump %.2f\n", markIn);
+                        gEngfuncs.pfnClientCmd(cmd);
+                        gEngfuncs.pfnClientCmd("dem_speed 1.0\n");
+                        gEngfuncs.pfnClientCmd("host_framerate 0.01666667\n");
+                        gEngfuncs.pfnClientCmd("unpause\n");
+                    }
+                    return 0;
+                }
+
+                if (BindingEquals(pszCurrentBinding, "slot2") || keynum == '2' || keynum == 27 || keynum == '0') // 2 or Esc
+                {
+                    GameVideoRecorder::Instance().DiscardHighlight();
+                    g_HighlightToastText = "Highlight clip discarded";
+                    g_HighlightToastSuccess = false;
+                    g_HighlightToastTimer = gEngfuncs.GetClientTime() + 3.0;
+                    gEngfuncs.pfnClientCmd("unpause\n");
+                    return 0;
+                }
+
+                return 0;
+            }
+
+            if (GameVideoRecorder::Instance().IsHighlightMarking())
+            {
+                if (BindingEquals(pszCurrentBinding, "slot2") || keynum == '2')
+                {
+                    const float curTime = static_cast<float>(gEngfuncs.GetClientTime());
+                    if (GameVideoRecorder::Instance().MarkOut(curTime))
+                    {
+                        gEngfuncs.pfnClientCmd("pause\n");
+                    }
+                    else
+                    {
+                        g_HighlightToastText = "Highlight too short (< 0.5s)";
+                        g_HighlightToastSuccess = false;
+                        g_HighlightToastTimer = gEngfuncs.GetClientTime() + 3.0;
+                    }
+                    return 0;
+                }
+
+                if (BindingEquals(pszCurrentBinding, "slot1") || keynum == '1')
+                {
+                    const float curTime = static_cast<float>(gEngfuncs.GetClientTime());
+                    GameVideoRecorder::Instance().MarkIn(curTime);
+                    return 0;
+                }
+
+                if (keynum == 27 || keynum == '0')
+                {
+                    GameVideoRecorder::Instance().DiscardHighlight();
+                    return 0;
+                }
+            }
+            else
+            {
+                if (BindingEquals(pszCurrentBinding, "slot1") || keynum == '1')
+                {
                     gEngfuncs.pfnClientCmd("dem_speed 1.0\n");
                     gEngfuncs.pfnClientCmd("unpause\n");
-                    GameVideoRecorder::Instance().StartHighlightClip(demoName, curW, curH, 60);
+                    const float curTime = static_cast<float>(gEngfuncs.GetClientTime());
+                    GameVideoRecorder::Instance().MarkIn(curTime);
                     return 0;
                 }
             }
@@ -1172,9 +1249,6 @@ static int HUD_RedrawHandler(float flTime, int iIntermission, HUD_RedrawNext nex
     const bool overlay_visible = console_visible;
     const float hud_draw_value = hud_draw->value;
 
-    // Suppress both HUD layers only underneath the console. Restore the cvar
-    // immediately afterwards so user configuration remains untouched. The
-    // scoreboard intentionally keeps the complete HUD visible.
     if (overlay_visible)
         hud_draw->value = 0.0f;
 
@@ -1189,10 +1263,21 @@ static int HUD_RedrawHandler(float flTime, int iIntermission, HUD_RedrawNext nex
     int scrW = 1024, scrH = 768;
     GetGameScreenResolution(scrW, scrH);
 
-    // Frame capture occurs BEFORE drawing custom overlay widgets (recorder UI is never in the video!)
-    if (GameVideoRecorder::Instance().IsHighlightRecording())
+    // Lockstep Studio Render capture occurs BEFORE custom HUD drawing (clean video without UI!)
+    if (GameVideoRecorder::Instance().IsHighlightRendering())
     {
-        GameVideoRecorder::Instance().CaptureHighlightFrame(scrW, scrH);
+        GameVideoRecorder::Instance().CaptureStudioFrame(scrW, scrH, flTime);
+
+        if (GameVideoRecorder::Instance().GetRenderFramesPushed() >= GameVideoRecorder::Instance().GetRenderTargetFrames())
+        {
+            GameVideoRecorder::Instance().FinishStudioRender();
+            gEngfuncs.pfnClientCmd("host_framerate 0\n");
+            gEngfuncs.pfnClientCmd("pause\n");
+
+            g_HighlightToastText = "Highlight saved: " + GameVideoRecorder::Instance().GetLastSavedHighlightPath();
+            g_HighlightToastSuccess = true;
+            g_HighlightToastTimer = gEngfuncs.GetClientTime() + 6.0;
+        }
     }
 
     if (hud_draw_value != 0.0f && !overlay_visible && g_DemoMenuVisible)
@@ -1208,11 +1293,15 @@ static int HUD_RedrawHandler(float flTime, int iIntermission, HUD_RedrawNext nex
     const bool isViewingDemo = (gEngfuncs.pDemoAPI && gEngfuncs.pDemoAPI->IsPlayingback());
     if (isViewingDemo && !overlay_visible)
     {
-        if (GameVideoRecorder::Instance().IsHighlightRecording())
+        if (GameVideoRecorder::Instance().IsHighlightRendering())
         {
-            DrawHighlightRecWidget(scrW);
+            DrawHighlightRenderingModal(scrW, scrH);
         }
-        else if (GameVideoRecorder::Instance().IsAwaitingHighlightConfirm())
+        else if (GameVideoRecorder::Instance().IsHighlightMarking())
+        {
+            DrawHighlightMarkingWidget(scrW);
+        }
+        else if (GameVideoRecorder::Instance().IsHighlightAwaitingConfirm())
         {
             DrawHighlightConfirmDialog(scrW, scrH);
         }
@@ -1244,11 +1333,15 @@ static void HUD_ResetHandler(HUD_ResetNext next)
     if (GameVideoRecorder::Instance().IsMatchDemoRecording())
         GameVideoRecorder::Instance().StopMatchDemo();
 
-    if (GameVideoRecorder::Instance().IsHighlightRecording())
-        GameVideoRecorder::Instance().StopHighlightClip();
+    if (GameVideoRecorder::Instance().IsHighlightRendering())
+    {
+        GameVideoRecorder::Instance().FinishStudioRender();
+        if (gEngfuncs.pfnClientCmd)
+            gEngfuncs.pfnClientCmd("host_framerate 0\n");
+    }
 
-    if (GameVideoRecorder::Instance().IsAwaitingHighlightConfirm())
-        GameVideoRecorder::Instance().ConfirmSaveHighlight(false);
+    if (GameVideoRecorder::Instance().IsHighlightMarking() || GameVideoRecorder::Instance().IsHighlightAwaitingConfirm())
+        GameVideoRecorder::Instance().DiscardHighlight();
 }
 
 static int HUD_VidInitHandler(HUD_VidInitNext next)

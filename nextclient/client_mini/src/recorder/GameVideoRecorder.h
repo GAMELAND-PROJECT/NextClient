@@ -25,28 +25,51 @@ namespace nextclient::client_mini
         uint64_t timestamp{0};
     };
 
+    enum class HighlightState
+    {
+        Idle,
+        Marking,
+        AwaitingConfirm,
+        Rendering
+    };
+
     class GameVideoRecorder
     {
     public:
         static GameVideoRecorder& Instance();
 
-        // In-Match Zero-Lag Demo Recording (0% GPU flush, locked 100 FPS)
+        // In-Match Zero-Lag Demo Recording (F4 Menu)
         bool StartMatchDemo(const std::string& baseFileName);
         void StopMatchDemo();
         bool IsMatchDemoRecording() const { return m_isMatchDemoRecording.load(); }
         std::string GetFormattedDemoTime() const;
         std::string GetCurrentDemoFileName() const { return m_currentDemoFileName; }
 
-        // Live Demo Highlight Clip Capture (Keys 1 & 2 during viewdemo)
-        bool StartHighlightClip(const std::string& demoOrMapName, int width, int height, int fps = 60);
-        void CaptureHighlightFrame(int width, int height);
-        bool StopHighlightClip();
-        bool IsHighlightRecording() const { return m_isHighlightRecording.load(); }
-        bool IsAwaitingHighlightConfirm() const { return m_isAwaitingConfirm.load(); }
-        std::string GetFormattedHighlightTime() const;
+        // Bookmark & Instant Studio Render (Keys 1 & 2 in viewdemo)
+        HighlightState GetHighlightState() const { return m_highlightState.load(); }
+        bool IsHighlightIdle() const { return m_highlightState.load() == HighlightState::Idle; }
+        bool IsHighlightMarking() const { return m_highlightState.load() == HighlightState::Marking; }
+        bool IsHighlightAwaitingConfirm() const { return m_highlightState.load() == HighlightState::AwaitingConfirm; }
+        bool IsHighlightRendering() const { return m_highlightState.load() == HighlightState::Rendering; }
+
+        void MarkIn(float clientTime);
+        bool MarkOut(float clientTime);
+        void DiscardHighlight();
+        bool StartStudioRender(const std::string& demoOrMapName, int width, int height);
+        void CaptureStudioFrame(int width, int height, float clientTime);
+        void FinishStudioRender();
+
+        float GetMarkInTime() const { return m_markInTime; }
+        float GetMarkOutTime() const { return m_markOutTime; }
+        float GetHighlightDuration() const { return (m_markOutTime > m_markInTime) ? (m_markOutTime - m_markInTime) : 0.0f; }
+        std::string GetFormattedTime(float seconds) const;
+        std::string GetHighlightRangeFormatted() const;
         std::string GetHighlightClipInfo() const { return m_highlightClipInfo; }
-        bool ConfirmSaveHighlight(bool save);
+        int GetRenderProgressPercent() const;
+        uint64_t GetRenderFramesPushed() const { return m_renderFramesPushed.load(); }
+        uint64_t GetRenderTargetFrames() const { return m_renderTargetFrames; }
         std::string GetLastSavedHighlightPath() const { return m_lastSavedHighlightPath; }
+
         void SetCurrentPlayingDemoName(const std::string& name) { m_currentPlayingDemoName = name; }
         std::string GetCurrentPlayingDemoName() const { return m_currentPlayingDemoName; }
 
@@ -74,6 +97,7 @@ namespace nextclient::client_mini
 
         void MasterWorkerThread(std::string ffmpegPath, std::string outputPath, std::string videoPipeName, std::string audioPipeName, int width, int height, int fps);
         void AudioWorkerThread(HANDLE hPipe, int sampleRate);
+        void AudioRecordingThread(std::string wavPath, int sampleRate);
         std::string FindFfmpegExecutable() const;
         int QuerySystemAudioSampleRate() const;
         void MonitorConversionThread(HANDLE hProcess, std::string outputPath);
@@ -86,16 +110,20 @@ namespace nextclient::client_mini
         std::string m_currentDemoFileName;
         std::chrono::steady_clock::time_point m_matchDemoStartTime;
 
-        // Live Demo Highlight State
-        std::atomic<bool> m_isHighlightRecording{false};
-        std::atomic<bool> m_isAwaitingConfirm{false};
+        // Bookmark & Instant Studio Render State
+        std::atomic<HighlightState> m_highlightState{HighlightState::Idle};
+        float m_markInTime{0.0f};
+        float m_markOutTime{0.0f};
         std::string m_currentHighlightDemoName;
         std::string m_currentPlayingDemoName{"Demo"};
-        std::string m_tempHighlightPath;
+        std::string m_tempAudioPath;
         std::string m_lastSavedHighlightPath;
-        std::chrono::steady_clock::time_point m_highlightStartTime;
-        int m_highlightDurationSec{0};
         std::string m_highlightClipInfo;
+
+        uint64_t m_renderTargetFrames{0};
+        std::atomic<uint64_t> m_renderFramesPushed{0};
+        std::atomic<bool> m_stopAudioRequested{false};
+        std::thread m_audioRecordThread;
 
         // In-Lobby Studio State
         std::vector<DemoFileItem> m_cachedDemos;
