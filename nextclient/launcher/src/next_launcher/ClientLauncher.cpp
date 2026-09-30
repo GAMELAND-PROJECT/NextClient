@@ -510,6 +510,12 @@ void ClientLauncher::PrepareEngineCommandLine()
 
     if (!cmd_line_->CheckParm("-num_edicts"))
         cmd_line_->AppendParm("-num_edicts", "4096");
+
+    if (cmd_line_->CheckParm("-demorender"))
+    {
+        cmd_line_->AppendParm("+host_framerate", "60");
+        cmd_line_->AppendParm("-windowed", nullptr);
+    }
 }
 
 #ifdef UPDATER_ENABLE
