@@ -3,6 +3,7 @@
 #include <direct.h>
 #endif
 #include <cctype>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <ctime>
@@ -80,8 +81,8 @@ static void GetGameScreenResolution(int& outWidth, int& outHeight)
     enum class DemoMenuAction
     {
         None,
-        Start,
-        Stop,
+        StartDemo,
+        StopDemo,
     };
     DemoMenuAction g_PendingDemoAction = DemoMenuAction::None;
     dlight_t g_SuppressedDlight{};
@@ -190,9 +191,15 @@ static void GetGameScreenResolution(int& outWidth, int& outHeight)
         g_DemoMenuVisible = false;
     }
 
+    bool IsPlayerInMatch()
+    {
+        const char* levelName = (gEngfuncs.pfnGetLevelName != nullptr) ? gEngfuncs.pfnGetLevelName() : nullptr;
+        return (levelName != nullptr && levelName[0] != '\0');
+    }
+
     bool IsClientDemoRecording()
     {
-        if (GameVideoRecorder::Instance().IsRecording())
+        if (GameVideoRecorder::Instance().IsMatchDemoRecording())
             return true;
 
         if (gEngfuncs.pDemoAPI != nullptr && gEngfuncs.pDemoAPI->IsRecording != nullptr)
@@ -212,13 +219,9 @@ static void GetGameScreenResolution(int& outWidth, int& outHeight)
 
     std::string GetCurrentRecordingDemoName()
     {
-        if (GameVideoRecorder::Instance().IsRecording())
+        if (GameVideoRecorder::Instance().IsMatchDemoRecording())
         {
-            std::string fname = GameVideoRecorder::Instance().GetCurrentVideoPath();
-            const size_t slash = fname.find_last_of("/\\");
-            if (slash != std::string::npos)
-                fname.erase(0, slash + 1);
-            return fname;
+            return GameVideoRecorder::Instance().GetCurrentDemoFileName();
         }
 
         if (eng() != nullptr && eng()->client_static != nullptr && eng()->client_static->demorecording)
@@ -247,17 +250,54 @@ static void GetGameScreenResolution(int& outWidth, int& outHeight)
             gEngfuncs.pfnFillRGBA(x, y, w, h, r, g, b, a);
     }
 
-    void DrawDemoMenu()
+    int g_SelectedDemoIndex = -1;
+    int g_DemoPage = 0;
+
+    void DrawWindowsCaptureWidget(int scrW)
+    {
+        const int w = 135;
+        const int h = 26;
+        const int x = scrW - w - 16;
+        const int y = 14;
+
+        // Dark modern translucent glass pill background (Windows Capture Style)
+        DrawHudBox(x, y, w, h, 14, 18, 22, 225);
+
+        // Modern 1px border
+        DrawHudBox(x, y, w, 1, 55, 70, 85, 190);
+        DrawHudBox(x, y + h - 1, w, 1, 55, 70, 85, 190);
+        DrawHudBox(x, y, 1, h, 55, 70, 85, 190);
+        DrawHudBox(x + w - 1, y, 1, h, 55, 70, 85, 190);
+
+        // Pulsing red recording dot
+        const double curTime = gEngfuncs.GetClientTime();
+        const float pulse = static_cast<float>(0.65 + 0.35 * std::sin(curTime * 5.0));
+
+        // Red outer dot
+        DrawHudBox(x + 10, y + 8, 10, 10, static_cast<int>(255 * pulse), 25, 25, 255);
+        // Center white dot for glowing glass effect
+        DrawHudBox(x + 13, y + 11, 4, 4, 255, 255, 255, 220);
+
+        // Windows capture style text: "REC 01:23"
+        const std::string timeStr = GameVideoRecorder::Instance().GetFormattedDemoTime();
+        char badge[48]{};
+        std::snprintf(badge, sizeof(badge), "REC  %s", timeStr.c_str());
+
+        gEngfuncs.pfnDrawSetTextColor(0.95f, 0.95f, 0.95f);
+        DrawHudString(x + 28, y + 7, badge);
+    }
+
+    void DrawMatchDemoMenu()
     {
         const bool isRecording = IsClientDemoRecording();
 
         const int menuX = 35;
         const int menuY = 130;
-        const int menuW = 285;
+        const int menuW = 295;
         const int menuH = 175;
 
         // Background panel (Dark translucent CS-style)
-        DrawHudBox(menuX, menuY, menuW, menuH, 12, 16, 20, 215);
+        DrawHudBox(menuX, menuY, menuW, menuH, 12, 16, 20, 220);
 
         // Header accent bar (Gold / Amber)
         DrawHudBox(menuX, menuY, menuW, 3, 255, 178, 28, 255);
@@ -270,7 +310,7 @@ static void GetGameScreenResolution(int& outWidth, int& outHeight)
 
         // Header Title
         gEngfuncs.pfnDrawSetTextColor(1.0f, 0.78f, 0.12f);
-        DrawHudString(menuX + 16, menuY + 12, "GAMELAND DEMO & RECORDER");
+        DrawHudString(menuX + 16, menuY + 12, "GAMELAND MATCH RECORDER");
 
         // Separator line
         DrawHudBox(menuX + 12, menuY + 34, menuW - 24, 1, 70, 85, 100, 120);
@@ -279,14 +319,12 @@ static void GetGameScreenResolution(int& outWidth, int& outHeight)
         gEngfuncs.pfnDrawSetTextColor(0.70f, 0.75f, 0.80f);
         DrawHudString(menuX + 16, menuY + 44, "STATUS:");
 
-        const bool isFinalizing = GameVideoRecorder::Instance().IsFinalizing();
-
         if (isRecording)
         {
             // Vivid green pulse indicator
             gEngfuncs.pfnDrawSetTextColor(0.15f, 1.0f, 0.25f);
             char recStatus[64]{};
-            const std::string timeStr = GameVideoRecorder::Instance().GetFormattedTime();
+            const std::string timeStr = GameVideoRecorder::Instance().GetFormattedDemoTime();
             std::snprintf(recStatus, sizeof(recStatus), "[*] RECORDING [%s]", timeStr.c_str());
             DrawHudString(menuX + 75, menuY + 44, recStatus);
 
@@ -296,48 +334,36 @@ static void GetGameScreenResolution(int& outWidth, int& outHeight)
             gEngfuncs.pfnDrawSetTextColor(0.55f, 0.80f, 0.60f);
             DrawHudString(menuX + 16, menuY + 62, demoInfo);
         }
-        else if (isFinalizing)
-        {
-            // Amber finalizing indicator
-            gEngfuncs.pfnDrawSetTextColor(1.0f, 0.70f, 0.10f);
-            DrawHudString(menuX + 75, menuY + 44, "[~] FINALIZING & SAVING MP4...");
-
-            gEngfuncs.pfnDrawSetTextColor(0.85f, 0.85f, 0.85f);
-            DrawHudString(menuX + 16, menuY + 62, "Encoding MP4 video in background...");
-        }
         else
         {
-            // Dim standby indicator
-            gEngfuncs.pfnDrawSetTextColor(0.95f, 0.35f, 0.20f);
+            // Standby
+            gEngfuncs.pfnDrawSetTextColor(0.95f, 0.40f, 0.20f);
             DrawHudString(menuX + 75, menuY + 44, "[o] STANDBY / IDLE");
 
-            gEngfuncs.pfnDrawSetTextColor(0.55f, 0.60f, 0.65f);
-            DrawHudString(menuX + 16, menuY + 62, "Ready to capture match (Demo + MP4)");
+            gEngfuncs.pfnDrawSetTextColor(0.55f, 0.75f, 0.85f);
+            DrawHudString(menuX + 16, menuY + 62, "Zero-Lag Match Mode (100 FPS Locked)");
         }
 
         // Sub separator
         DrawHudBox(menuX + 12, menuY + 84, menuW - 24, 1, 55, 65, 75, 100);
 
         // Menu Option 1
-        if (isRecording || isFinalizing)
+        if (isRecording)
         {
             gEngfuncs.pfnDrawSetTextColor(0.55f, 0.55f, 0.55f);
-            if (isFinalizing)
-                DrawHudString(menuX + 16, menuY + 95, "1. Start Recording (Saving...)");
-            else
-                DrawHudString(menuX + 16, menuY + 95, "1. Start Recording (Active)");
+            DrawHudString(menuX + 16, menuY + 95, "1. Start Recording (Active)");
         }
         else
         {
             gEngfuncs.pfnDrawSetTextColor(1.0f, 0.82f, 0.20f);
-            DrawHudString(menuX + 16, menuY + 95, "1. Start Recording (Demo + MP4)");
+            DrawHudString(menuX + 16, menuY + 95, "1. Start Match Demo Recording");
         }
 
         // Menu Option 2
         if (isRecording)
         {
             gEngfuncs.pfnDrawSetTextColor(1.0f, 0.30f, 0.30f);
-            DrawHudString(menuX + 16, menuY + 118, "2. Stop Recording & Save MP4");
+            DrawHudString(menuX + 16, menuY + 118, "2. Stop Recording & Save Demo");
         }
         else
         {
@@ -351,6 +377,192 @@ static void GetGameScreenResolution(int& outWidth, int& outHeight)
         // Menu Option 0 / F4 Close
         gEngfuncs.pfnDrawSetTextColor(0.75f, 0.78f, 0.82f);
         DrawHudString(menuX + 16, menuY + 151, "0. Close Menu  (Press F4)");
+    }
+
+    void DrawLobbyDemoStudio()
+    {
+        const int menuX = 35;
+        const int menuY = 100;
+        const int menuW = 340;
+        const int menuH = 260;
+
+        // Background panel (Dark translucent high-tech CS-style)
+        DrawHudBox(menuX, menuY, menuW, menuH, 10, 14, 20, 230);
+
+        // Header accent bar (Cyan / Electric Blue)
+        DrawHudBox(menuX, menuY, menuW, 3, 0, 180, 255, 255);
+
+        // Border outline
+        DrawHudBox(menuX, menuY, menuW, 1, 40, 80, 120, 180);
+        DrawHudBox(menuX, menuY + menuH - 1, menuW, 1, 40, 80, 120, 180);
+        DrawHudBox(menuX, menuY, 1, menuH, 40, 80, 120, 180);
+        DrawHudBox(menuX + menuW - 1, menuY, 1, menuH, 40, 80, 120, 180);
+
+        // Header Title
+        gEngfuncs.pfnDrawSetTextColor(0.0f, 0.85f, 1.0f);
+        DrawHudString(menuX + 16, menuY + 12, "GAMELAND MATCH DEMO STUDIO");
+
+        // Separator line
+        DrawHudBox(menuX + 12, menuY + 32, menuW - 24, 1, 40, 75, 100, 130);
+
+        const bool isConverting = GameVideoRecorder::Instance().IsConverting();
+
+        if (isConverting)
+        {
+            // Status: Converting
+            gEngfuncs.pfnDrawSetTextColor(1.0f, 0.78f, 0.15f);
+            DrawHudString(menuX + 16, menuY + 44, "CONVERTING TO MP4 (BACKGROUND)");
+
+            const std::string curDemo = GameVideoRecorder::Instance().GetConvertingDemoName();
+            char demoInfo[96]{};
+            std::snprintf(demoInfo, sizeof(demoInfo), "Demo: %s", curDemo.c_str());
+            gEngfuncs.pfnDrawSetTextColor(0.80f, 0.85f, 0.90f);
+            DrawHudString(menuX + 16, menuY + 64, demoInfo);
+
+            // Progress bar
+            const int percent = GameVideoRecorder::Instance().GetConversionPercent();
+            const int barW = menuW - 32;
+            const int barH = 14;
+            const int barX = menuX + 16;
+            const int barY = menuY + 90;
+
+            // Bar background
+            DrawHudBox(barX, barY, barW, barH, 20, 30, 40, 255);
+            // Bar fill
+            const int fillW = (percent * barW) / 100;
+            if (fillW > 0)
+                DrawHudBox(barX, barY, fillW, barH, 0, 190, 240, 255);
+            // Bar border
+            DrawHudBox(barX, barY, barW, 1, 60, 120, 180, 200);
+            DrawHudBox(barX, barY + barH - 1, barW, 1, 60, 120, 180, 200);
+            DrawHudBox(barX, barY, 1, barH, 60, 120, 180, 200);
+            DrawHudBox(barX + barW - 1, barY, 1, barH, 60, 120, 180, 200);
+
+            char progText[48]{};
+            std::snprintf(progText, sizeof(progText), "Conversion Progress: %d%%", percent);
+            gEngfuncs.pfnDrawSetTextColor(0.95f, 0.95f, 0.95f);
+            DrawHudString(menuX + 16, menuY + 112, progText);
+
+            gEngfuncs.pfnDrawSetTextColor(0.60f, 0.70f, 0.80f);
+            DrawHudString(menuX + 16, menuY + 134, "Silent rendering at 1080p 60 FPS...");
+
+            DrawHudBox(menuX + 12, menuY + 165, menuW - 24, 1, 40, 75, 100, 130);
+
+            gEngfuncs.pfnDrawSetTextColor(1.0f, 0.35f, 0.35f);
+            DrawHudString(menuX + 16, menuY + 178, "1. Cancel Conversion");
+
+            gEngfuncs.pfnDrawSetTextColor(0.70f, 0.85f, 1.0f);
+            DrawHudString(menuX + 16, menuY + 202, "9. Open Videos Folder");
+
+            gEngfuncs.pfnDrawSetTextColor(0.75f, 0.78f, 0.82f);
+            DrawHudString(menuX + 16, menuY + 226, "0. Close Studio  (Press F4)");
+            return;
+        }
+
+        const auto& demos = GameVideoRecorder::Instance().GetCachedDemos();
+
+        if (g_SelectedDemoIndex >= 0 && g_SelectedDemoIndex < static_cast<int>(demos.size()))
+        {
+            // Confirmation Screen
+            const auto& sel = demos[g_SelectedDemoIndex];
+            gEngfuncs.pfnDrawSetTextColor(1.0f, 0.85f, 0.20f);
+            DrawHudString(menuX + 16, menuY + 44, "CONFIRM CONVERSION TO MP4:");
+
+            char selInfo[96]{};
+            std::snprintf(selInfo, sizeof(selInfo), "Demo: %s", sel.fileName.c_str());
+            gEngfuncs.pfnDrawSetTextColor(0.90f, 0.90f, 0.90f);
+            DrawHudString(menuX + 16, menuY + 66, selInfo);
+
+            char metaInfo[96]{};
+            std::snprintf(metaInfo, sizeof(metaInfo), "Map: %s | Size: %s", sel.mapName.c_str(), sel.sizeFormatted.c_str());
+            gEngfuncs.pfnDrawSetTextColor(0.65f, 0.80f, 0.85f);
+            DrawHudString(menuX + 16, menuY + 86, metaInfo);
+
+            gEngfuncs.pfnDrawSetTextColor(0.55f, 0.85f, 0.65f);
+            DrawHudString(menuX + 16, menuY + 110, "Target: 1080p 60 FPS Crystal Clear MP4");
+            gEngfuncs.pfnDrawSetTextColor(0.60f, 0.65f, 0.75f);
+            DrawHudString(menuX + 16, menuY + 128, "Runs silently in background with 0% lag");
+
+            DrawHudBox(menuX + 12, menuY + 152, menuW - 24, 1, 40, 75, 100, 130);
+
+            gEngfuncs.pfnDrawSetTextColor(0.20f, 1.0f, 0.35f);
+            DrawHudString(menuX + 16, menuY + 166, "1. CONFIRM & START CONVERTING");
+
+            gEngfuncs.pfnDrawSetTextColor(1.0f, 0.40f, 0.40f);
+            DrawHudString(menuX + 16, menuY + 190, "2. Cancel Selection / Go Back");
+
+            gEngfuncs.pfnDrawSetTextColor(0.75f, 0.78f, 0.82f);
+            DrawHudString(menuX + 16, menuY + 226, "0. Close Studio  (Press F4)");
+            return;
+        }
+
+        // Normal Demo Browser
+        if (demos.empty())
+        {
+            gEngfuncs.pfnDrawSetTextColor(0.85f, 0.60f, 0.20f);
+            DrawHudString(menuX + 16, menuY + 50, "No demos found in cstrike/demos/");
+
+            gEngfuncs.pfnDrawSetTextColor(0.65f, 0.70f, 0.75f);
+            DrawHudString(menuX + 16, menuY + 75, "Play a match and press F4 to record!");
+
+            DrawHudBox(menuX + 12, menuY + 165, menuW - 24, 1, 40, 75, 100, 130);
+
+            gEngfuncs.pfnDrawSetTextColor(0.70f, 0.85f, 1.0f);
+            DrawHudString(menuX + 16, menuY + 195, "9. Open Videos Folder");
+
+            gEngfuncs.pfnDrawSetTextColor(0.75f, 0.78f, 0.82f);
+            DrawHudString(menuX + 16, menuY + 226, "0. Close Studio  (Press F4)");
+            return;
+        }
+
+        gEngfuncs.pfnDrawSetTextColor(0.80f, 0.85f, 0.90f);
+        DrawHudString(menuX + 16, menuY + 42, "SELECT A DEMO TO CONVERT TO MP4:");
+
+        int startIdx = g_DemoPage * 4;
+        for (int i = 0; i < 4; ++i)
+        {
+            int demoIdx = startIdx + i;
+            int itemY = menuY + 64 + (i * 26);
+            if (demoIdx < static_cast<int>(demos.size()))
+            {
+                const auto& d = demos[demoIdx];
+                char line[96]{};
+                std::snprintf(line, sizeof(line), "%d. [%s] %s (%s)", i + 1, d.mapName.c_str(), d.dateFormatted.c_str(), d.sizeFormatted.c_str());
+                gEngfuncs.pfnDrawSetTextColor(1.0f, 0.85f, 0.25f);
+                DrawHudString(menuX + 16, itemY, line);
+            }
+            else
+            {
+                gEngfuncs.pfnDrawSetTextColor(0.35f, 0.40f, 0.45f);
+                char line[32]{};
+                std::snprintf(line, sizeof(line), "%d. (Empty slot)", i + 1);
+                DrawHudString(menuX + 16, itemY, line);
+            }
+        }
+
+        DrawHudBox(menuX + 12, menuY + 172, menuW - 24, 1, 40, 75, 100, 130);
+
+        // Footer / Controls
+        gEngfuncs.pfnDrawSetTextColor(0.70f, 0.85f, 1.0f);
+        DrawHudString(menuX + 16, menuY + 184, "9. Open Videos Folder");
+
+        // Next page if more than 4 demos
+        if (demos.size() > 4)
+        {
+            gEngfuncs.pfnDrawSetTextColor(0.85f, 0.75f, 0.35f);
+            DrawHudString(menuX + 180, menuY + 184, "8. Next Page ->");
+        }
+
+        gEngfuncs.pfnDrawSetTextColor(0.75f, 0.78f, 0.82f);
+        DrawHudString(menuX + 16, menuY + 226, "0. Close Studio  (Press F4)");
+    }
+
+    void DrawDemoMenu()
+    {
+        if (IsPlayerInMatch())
+            DrawMatchDemoMenu();
+        else
+            DrawLobbyDemoStudio();
     }
 
     std::string TrimExtension(std::string value, std::string_view extension)
@@ -493,41 +705,29 @@ static void GetGameScreenResolution(int& outWidth, int& outHeight)
         const DemoMenuAction action = g_PendingDemoAction;
         g_PendingDemoAction = DemoMenuAction::None;
 
-        if (action == DemoMenuAction::Start)
+        if (action == DemoMenuAction::StartDemo)
         {
             EnsureDemoDirectory();
             const std::string baseName = BuildDemoFileName();
 
-            // 1. Start GoldSrc engine demo
+            // 1. Start GoldSrc engine demo (0% GPU flush, locked 100 FPS)
             const std::string command = "record \"demos/" + baseName + "\"\n";
             gEngfuncs.pfnClientCmd(command.c_str());
 
-            // 2. Start direct MP4 hardware video recorder
-            int scrW = 1024, scrH = 768;
-            GetGameScreenResolution(scrW, scrH);
-            const bool started = GameVideoRecorder::Instance().Start(baseName, scrW, scrH, 60);
+            // 2. Track demo start time for top-right Windows capture widget
+            GameVideoRecorder::Instance().StartMatchDemo(baseName);
 
-            if (started)
-            {
-                gEngfuncs.pfnConsolePrint("\n^2[Gameland Recorder] Started recording: demos/ & videos/\n\n");
-            }
+            char msg[128]{};
+            std::snprintf(msg, sizeof(msg), "\n^2[Gameland Match Recorder] Started match demo: demos/%s.dem\n\n", baseName.c_str());
+            gEngfuncs.pfnConsolePrint(msg);
         }
-        else if (action == DemoMenuAction::Stop)
+        else if (action == DemoMenuAction::StopDemo)
         {
-            // 1. Stop GoldSrc demo
+            // Stop GoldSrc demo
             gEngfuncs.pfnClientCmd("stop\n");
+            GameVideoRecorder::Instance().StopMatchDemo();
 
-            // 2. Stop MP4 recorder & finalize
-            if (GameVideoRecorder::Instance().IsRecording())
-            {
-                const std::string duration = GameVideoRecorder::Instance().GetFormattedTime();
-                const std::string videoPath = GameVideoRecorder::Instance().GetCurrentVideoPath();
-                GameVideoRecorder::Instance().Stop();
-
-                char msg[160]{};
-                std::snprintf(msg, sizeof(msg), "\n^2[Gameland Recorder] Finalizing video: %s (Duration: %s)...\n\n", videoPath.c_str(), duration.c_str());
-                gEngfuncs.pfnConsolePrint(msg);
-            }
+            gEngfuncs.pfnConsolePrint("\n^2[Gameland Match Recorder] Match demo stopped and saved to cstrike/demos/!\n\n");
         }
     }
 
@@ -538,24 +738,160 @@ static void GetGameScreenResolution(int& outWidth, int& outHeight)
 
         if (IsDemoMenuKey(keynum) || BindingEquals(pszCurrentBinding, "allclient_demo_menu"))
         {
-            ToggleDemoMenu();
+            if (!g_DemoMenuVisible)
+            {
+                g_DemoMenuVisible = true;
+                g_SelectedDemoIndex = -1;
+                if (!IsPlayerInMatch())
+                    GameVideoRecorder::Instance().RefreshDemoList();
+            }
+            else
+            {
+                g_DemoMenuVisible = false;
+            }
             return 0;
         }
 
         if (!g_DemoMenuVisible)
             return next->Invoke(down, keynum, pszCurrentBinding);
 
-        if (BindingEquals(pszCurrentBinding, "slot1") || keynum == '1')
+        // In-Match Key Handling
+        if (IsPlayerInMatch())
         {
-            g_PendingDemoAction = DemoMenuAction::Start;
-            HideDemoMenu();
+            if (BindingEquals(pszCurrentBinding, "slot1") || keynum == '1')
+            {
+                g_PendingDemoAction = DemoMenuAction::StartDemo;
+                HideDemoMenu();
+                return 0;
+            }
+
+            if (BindingEquals(pszCurrentBinding, "slot2") || keynum == '2')
+            {
+                g_PendingDemoAction = DemoMenuAction::StopDemo;
+                HideDemoMenu();
+                return 0;
+            }
+
+            if (BindingEquals(pszCurrentBinding, "slot10") || keynum == '0' || keynum == 27)
+            {
+                HideDemoMenu();
+                return 0;
+            }
+
+            return next->Invoke(down, keynum, pszCurrentBinding);
+        }
+
+        // In-Lobby Studio Key Handling
+        if (GameVideoRecorder::Instance().IsConverting())
+        {
+            if (BindingEquals(pszCurrentBinding, "slot1") || keynum == '1')
+            {
+                GameVideoRecorder::Instance().CancelConversion();
+                return 0;
+            }
+
+            if (BindingEquals(pszCurrentBinding, "slot9") || keynum == '9')
+            {
+                WinExec("explorer.exe cstrike\\videos", SW_SHOW);
+                return 0;
+            }
+
+            if (BindingEquals(pszCurrentBinding, "slot10") || keynum == '0' || keynum == 27)
+            {
+                HideDemoMenu();
+                return 0;
+            }
+
             return 0;
         }
 
-        if (BindingEquals(pszCurrentBinding, "slot2") || keynum == '2')
+        // Confirming Conversion Screen
+        const auto& demos = GameVideoRecorder::Instance().GetCachedDemos();
+        if (g_SelectedDemoIndex >= 0 && g_SelectedDemoIndex < static_cast<int>(demos.size()))
         {
-            g_PendingDemoAction = DemoMenuAction::Stop;
-            HideDemoMenu();
+            if (BindingEquals(pszCurrentBinding, "slot1") || keynum == '1' || keynum == 13) // Enter or 1
+            {
+                const std::string demoFile = demos[g_SelectedDemoIndex].fileName;
+                GameVideoRecorder::Instance().StartDemoConversion(demoFile, 1280, 720, 60);
+                g_SelectedDemoIndex = -1;
+                return 0;
+            }
+
+            if (BindingEquals(pszCurrentBinding, "slot2") || keynum == '2' || keynum == 27)
+            {
+                g_SelectedDemoIndex = -1;
+                return 0;
+            }
+
+            if (BindingEquals(pszCurrentBinding, "slot10") || keynum == '0')
+            {
+                g_SelectedDemoIndex = -1;
+                HideDemoMenu();
+                return 0;
+            }
+
+            return 0;
+        }
+
+        // Normal Demo List Browsing
+        if (demos.empty())
+        {
+            if (BindingEquals(pszCurrentBinding, "slot9") || keynum == '9')
+            {
+                WinExec("explorer.exe cstrike\\videos", SW_SHOW);
+                return 0;
+            }
+
+            if (BindingEquals(pszCurrentBinding, "slot10") || keynum == '0' || keynum == 27)
+            {
+                HideDemoMenu();
+                return 0;
+            }
+            return 0;
+        }
+
+        // Slot 1..4 selects demo
+        if ((BindingEquals(pszCurrentBinding, "slot1") || keynum == '1') && demos.size() > 0)
+        {
+            int idx = g_DemoPage * 4 + 0;
+            if (idx < static_cast<int>(demos.size()))
+                g_SelectedDemoIndex = idx;
+            return 0;
+        }
+        if ((BindingEquals(pszCurrentBinding, "slot2") || keynum == '2') && demos.size() > 1)
+        {
+            int idx = g_DemoPage * 4 + 1;
+            if (idx < static_cast<int>(demos.size()))
+                g_SelectedDemoIndex = idx;
+            return 0;
+        }
+        if ((BindingEquals(pszCurrentBinding, "slot3") || keynum == '3') && demos.size() > 2)
+        {
+            int idx = g_DemoPage * 4 + 2;
+            if (idx < static_cast<int>(demos.size()))
+                g_SelectedDemoIndex = idx;
+            return 0;
+        }
+        if ((BindingEquals(pszCurrentBinding, "slot4") || keynum == '4') && demos.size() > 3)
+        {
+            int idx = g_DemoPage * 4 + 3;
+            if (idx < static_cast<int>(demos.size()))
+                g_SelectedDemoIndex = idx;
+            return 0;
+        }
+
+        // Next page
+        if ((BindingEquals(pszCurrentBinding, "slot8") || keynum == '8') && demos.size() > 4)
+        {
+            int maxPages = (static_cast<int>(demos.size()) + 3) / 4;
+            g_DemoPage = (g_DemoPage + 1) % maxPages;
+            return 0;
+        }
+
+        // Open videos folder
+        if (BindingEquals(pszCurrentBinding, "slot9") || keynum == '9')
+        {
+            WinExec("explorer.exe cstrike\\videos", SW_SHOW);
             return 0;
         }
 
@@ -565,8 +901,6 @@ static void GetGameScreenResolution(int& outWidth, int& outHeight)
             return 0;
         }
 
-        // Allow all other keys (movement W/A/S/D, jump, crouch, mouse buttons, etc.)
-        // to pass through seamlessly so the player can continue playing while menu is open.
         return next->Invoke(down, keynum, pszCurrentBinding);
     }
 }
@@ -639,6 +973,35 @@ static void HUD_InitPost()
 
     hud_draw = g_engfuncs.pfnCVarGetPointer("hud_draw");
 
+    // Handle Headless Background Demo Converter Worker
+    const char* cmdLine = GetCommandLineA();
+    if (cmdLine != nullptr && std::strstr(cmdLine, "-democonvert") != nullptr)
+    {
+        std::string baseName = "converted_demo";
+        const char* viewdemoPtr = std::strstr(cmdLine, "+viewdemo");
+        if (viewdemoPtr != nullptr)
+        {
+            std::string line = viewdemoPtr + 9;
+            while (!line.empty() && (line.front() == ' ' || line.front() == '"'))
+                line.erase(line.begin());
+            size_t endPos = line.find_first_of(" \"\r\n");
+            if (endPos != std::string::npos)
+                line = line.substr(0, endPos);
+            const size_t slash = line.find_last_of("/\\");
+            if (slash != std::string::npos)
+                line = line.substr(slash + 1);
+            const size_t dot = line.find_last_of('.');
+            if (dot != std::string::npos)
+                line = line.substr(0, dot);
+            if (!line.empty())
+                baseName = line;
+        }
+
+        int scrW = 1280, scrH = 720;
+        GetGameScreenResolution(scrW, scrH);
+        GameVideoRecorder::Instance().StartWorkerCapture(baseName, scrW, scrH, 60);
+    }
+
     InvertMouseInit();
 
     ColorChatInConsolePatch();
@@ -668,26 +1031,41 @@ static int HUD_RedrawHandler(float flTime, int iIntermission, HUD_RedrawNext nex
     if (hud_draw_value != 0.0f && !overlay_visible && g_DemoMenuVisible)
         DrawDemoMenu();
 
-    if (GameVideoRecorder::Instance().IsRecording())
-    {
-        int scrW = 1024, scrH = 768;
-        GetGameScreenResolution(scrW, scrH);
-        GameVideoRecorder::Instance().CaptureFrame(scrW, scrH);
+    // Check if running as background headless converter worker
+    const char* cmdLine = GetCommandLineA();
+    const bool isWorker = (cmdLine != nullptr && std::strstr(cmdLine, "-democonvert") != nullptr);
 
-        if (!g_DemoMenuVisible)
+    if (isWorker)
+    {
+        int scrW = 1280, scrH = 720;
+        GetGameScreenResolution(scrW, scrH);
+        GameVideoRecorder::Instance().WorkerCaptureFrame(scrW, scrH);
+
+        static int workerFrameCount = 0;
+        workerFrameCount++;
+        if (workerFrameCount > 120)
         {
-            char recBadge[32]{};
-            std::snprintf(recBadge, sizeof(recBadge), "REC %s", GameVideoRecorder::Instance().GetFormattedTime().c_str());
-            gEngfuncs.pfnDrawSetTextColor(1.0f, 0.25f, 0.25f);
-            DrawHudString(scrW - 90, 12, recBadge);
+            bool isPlaying = false;
+            if (gEngfuncs.pDemoAPI != nullptr && gEngfuncs.pDemoAPI->IsPlayingback != nullptr)
+                isPlaying = gEngfuncs.pDemoAPI->IsPlayingback();
+
+            if (!isPlaying)
+            {
+                GameVideoRecorder::Instance().StopWorkerCapture();
+                ExitProcess(0);
+            }
         }
     }
-    else if (GameVideoRecorder::Instance().IsFinalizing() && !g_DemoMenuVisible)
+    else
     {
-        int scrW = 1024, scrH = 768;
-        GetGameScreenResolution(scrW, scrH);
-        gEngfuncs.pfnDrawSetTextColor(1.0f, 0.75f, 0.15f);
-        DrawHudString(scrW - 130, 12, "SAVING VIDEO...");
+        // Normal game client:
+        // Render top-right Windows capture style timer widget if match demo is recording
+        if (GameVideoRecorder::Instance().IsMatchDemoRecording() && !g_DemoMenuVisible)
+        {
+            int scrW = 1024, scrH = 768;
+            GetGameScreenResolution(scrW, scrH);
+            DrawWindowsCaptureWidget(scrW);
+        }
     }
 
     if (g_PendingDemoAction != DemoMenuAction::None)
@@ -705,8 +1083,8 @@ static void HUD_ResetHandler(HUD_ResetNext next)
     g_GameHud->Reset();
     ResetInvertMouse();
 
-    if (GameVideoRecorder::Instance().IsRecording())
-        GameVideoRecorder::Instance().Stop();
+    if (GameVideoRecorder::Instance().IsMatchDemoRecording())
+        GameVideoRecorder::Instance().StopMatchDemo();
 }
 
 static int HUD_VidInitHandler(HUD_VidInitNext next)
