@@ -1,4 +1,4 @@
-#include "GameVideoRecorder.h"
+﻿#include "GameVideoRecorder.h"
 
 #include <iostream>
 #include <fstream>
@@ -51,7 +51,7 @@ namespace nextclient::client_mini
     // -------------------------------------------------------------
     bool GameVideoRecorder::StartMatchDemo(const std::string& baseFileName)
     {
-        _mkdir("cstrike\\demos");
+        _mkdir("demos");
         m_currentDemoFileName = baseFileName + ".dem";
         m_matchDemoStartTime = std::chrono::steady_clock::now();
         m_isMatchDemoRecording = true;
@@ -87,7 +87,7 @@ namespace nextclient::client_mini
 
 #ifdef _WIN32
         WIN32_FIND_DATAA fd{};
-        HANDLE hFind = FindFirstFileA("cstrike\\demos\\*.dem", &fd);
+        HANDLE hFind = FindFirstFileA("demos\\*.dem", &fd);
         if (hFind != INVALID_HANDLE_VALUE)
         {
             do

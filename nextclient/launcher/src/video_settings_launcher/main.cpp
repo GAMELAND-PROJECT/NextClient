@@ -1,4 +1,4 @@
-#include <Windows.h>
+﻿#include <Windows.h>
 #include <CommCtrl.h>
 #include <WinInet.h>
 #include <windowsx.h>
@@ -2117,7 +2117,7 @@ void ShowOtpRegisterDialog(HWND parent)
 
 bool IsActionButtonId(UINT id)
 {
-    return id == IdLaunch || id == IdDemoManager || id == IdRestore || id == IdCancel || id == IdUserLogin || id == IdUserRegister;
+    return id == IdLaunch || id == IdRestore || id == IdCancel || id == IdUserLogin || id == IdUserRegister;
 }
 
 void DrawActionButton(const DRAWITEMSTRUCT& item)
@@ -2225,7 +2225,6 @@ void CreateControls(HWND window)
     };
 
     // ─── Header (Width = 660) ───
-    AddActionButton(window, L"Demo Manager", 28, 17, 136, 48, IdDemoManager);
 
     // Subscription Pill Badge in Header - Dual line with Subscription Name + Remaining Days
     int remainingDays = 0;
@@ -2527,9 +2526,6 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
         case IdEnhancePointer:
             if (HIWORD(wParam) == BN_CLICKED)
                 ApplyMousePreview();
-            return 0;
-        case IdDemoManager:
-            ShowDemoManager(window);
             return 0;
         case IdUserLogin:
             if (!g_activeUserToken.empty())
