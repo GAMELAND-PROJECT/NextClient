@@ -87,7 +87,7 @@ namespace nextclient::client_mini
         // In-Lobby Demo Studio & Background MP4 Converter
         std::vector<DemoFileItem> RefreshDemoList();
         const std::vector<DemoFileItem>& GetCachedDemos() const { return m_cachedDemos; }
-        bool StartDemoConversion(const std::string& demoFileName, int targetWidth = 1280, int targetHeight = 720, int fps = 60);
+        bool StartDemoConversion(const std::string& demoFileName, int targetWidth = 1280, int targetHeight = 720, int fps = 100);
         void CancelConversion();
         bool IsConverting() const { return m_isConverting.load(); }
         int GetConversionPercent() const { return m_convertPercent.load(); }
@@ -95,7 +95,7 @@ namespace nextclient::client_mini
         std::string GetLastConvertedVideoPath() const { return m_lastConvertedVideoPath; }
 
         // Dedicated Headless Conversion Engine (Invoked by background worker)
-        bool StartWorkerCapture(const std::string& outputBaseName, int width, int height, int fps = 60);
+        bool StartWorkerCapture(const std::string& outputBaseName, int width, int height, int fps = 100);
         void WorkerCaptureFrame(int width, int height);
         void StopWorkerCapture();
 
@@ -109,6 +109,7 @@ namespace nextclient::client_mini
         void MasterWorkerThread(std::string ffmpegPath, std::string outputPath, std::string videoPipeName, std::string audioPipeName, int width, int height, int fps);
         void AudioWorkerThread(HANDLE hPipe, int sampleRate);
         void AudioRecordingThread(std::string wavPath, int sampleRate);
+        std::string BuildStudioVideoFilter() const;
         std::string FindFfmpegExecutable() const;
         int QuerySystemAudioSampleRate() const;
         void MonitorConversionThread(HANDLE hProcess, std::string outputPath);
@@ -159,7 +160,7 @@ namespace nextclient::client_mini
 
         int m_recordWidth{1280};
         int m_recordHeight{720};
-        int m_targetFps{60};
+        int m_targetFps{100};
 
 #ifdef _WIN32
         HANDLE m_hFfmpegProcess{nullptr};

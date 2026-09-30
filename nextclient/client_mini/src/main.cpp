@@ -1337,7 +1337,7 @@ static int HUD_RedrawHandler(float flTime, int iIntermission, HUD_RedrawNext nex
                 gEngfuncs.pfnClientCmd("fps_override 1\n");
                 gEngfuncs.pfnClientCmd("fps_max 0\n");
                 gEngfuncs.pfnClientCmd("gl_vsync 0\n");
-                gEngfuncs.pfnClientCmd("host_framerate 0.01666667\n");
+                gEngfuncs.pfnClientCmd("host_framerate 0.01\n");
             }
             else
             {

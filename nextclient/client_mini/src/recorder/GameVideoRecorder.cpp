@@ -1,4 +1,5 @@
 #include "GameVideoRecorder.h"
+#include "../main.h"
 
 #include <iostream>
 #include <fstream>
@@ -413,7 +414,7 @@ namespace nextclient::client_mini
 
         m_recordWidth = width;
         m_recordHeight = height;
-        const int fps = 60;
+        const int fps = 100;
         m_targetFps = fps;
         m_renderTargetFrames = static_cast<uint64_t>(std::ceil(dur * static_cast<float>(fps)));
         m_renderFramesPushed = 0;
@@ -469,12 +470,13 @@ namespace nextclient::client_mini
 
         // 1:1 Pixel-Perfect Native capture (Zero scaling blur, 3x faster encode)
         // Studio-Grade Post-Processing: Depth Contrast, Vibrant Colors & Crystal Sharpening (Zero Scaling Blur, CRT/LCD 4:3 & 16:9 100% Safe)
-        std::string videoFilter = "vflip,eq=contrast=1.14:brightness=-0.02:saturation=1.22,unsharp=5:5:0.8:3:3:0.4";
+        // Dynamic In-Game Gamma & 100 FPS Studio Filter
+        std::string videoFilter = BuildStudioVideoFilter();
 
         std::ostringstream cmd;
         cmd << "\"" << ffmpegPath << "\" -y -hide_banner -loglevel error"
             << " -f rawvideo -pix_fmt rgb24 -s " << width << "x" << height
-            << " -r 60 -i \"" << videoPipeName << "\""
+            << " -r 100 -i \"" << videoPipeName << "\""
             << " -vf " << videoFilter
             << " -c:v libx264 -preset superfast -crf 18 -profile:v high -pix_fmt yuv420p -threads 0"
             << " -movflags +faststart \"" << m_tempVideoPath << "\"";
@@ -982,6 +984,41 @@ namespace nextclient::client_mini
         return m_cachedDemos;
     }
 
+    std::string GameVideoRecorder::BuildStudioVideoFilter() const
+    {
+        float gameGamma = 2.5f;
+        float gameBrightness = 1.0f;
+#ifdef _WIN32
+        if (gEngfuncs.pfnGetCvarPointer != nullptr)
+        {
+            cvar_t* pG = gEngfuncs.pfnGetCvarPointer("gamma");
+            if (pG && pG->value > 0.05f)
+                gameGamma = pG->value;
+
+            cvar_t* pB = gEngfuncs.pfnGetCvarPointer("brightness");
+            if (pB)
+                gameBrightness = pB->value;
+        }
+#endif
+
+        // Dynamic Hardware Gamma Ramp Compensation:
+        // In GoldSrc OpenGL backbuffer, raw unramped pixels are dark linear.
+        // We lift gamma matching player's in-game cvar (typical 2.5 -> ffmpeg 1.55)
+        float ffmpegGamma = 1.20f + (gameGamma - 1.5f) * 0.35f;
+        ffmpegGamma = std::clamp(ffmpegGamma, 1.35f, 1.85f);
+
+        // Ambient brightness offset (+0.03 to +0.08) to open up dark shadows and corners
+        float ffmpegBrightness = 0.02f + (gameBrightness * 0.018f);
+        ffmpegBrightness = std::clamp(ffmpegBrightness, 0.03f, 0.08f);
+
+        std::ostringstream ss;
+        ss << std::fixed << std::setprecision(2);
+        ss << "vflip,eq=gamma=" << ffmpegGamma
+           << ":contrast=1.04:brightness=" << ffmpegBrightness
+           << ":saturation=1.20,unsharp=5:5:0.8:3:3:0.4";
+        return ss.str();
+    }
+
     std::string GameVideoRecorder::FindFfmpegExecutable() const
     {
 #ifdef _WIN32
@@ -1285,7 +1322,7 @@ namespace nextclient::client_mini
         const int audioRate = QuerySystemAudioSampleRate();
 
         // Studio-Grade Post-Processing: Depth Contrast, Vibrant Colors & Crystal Sharpening (Zero Scaling Blur, CRT/LCD 4:3 & 16:9 100% Safe)
-        std::string videoFilter = "vflip,eq=contrast=1.14:brightness=-0.02:saturation=1.22,unsharp=5:5:0.8:3:3:0.4";
+        std::string videoFilter = BuildStudioVideoFilter();
 
         std::ostringstream cmd;
         cmd << "\"" << ffmpegPath << "\" -y -hide_banner -loglevel error"
