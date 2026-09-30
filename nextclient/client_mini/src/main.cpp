@@ -957,7 +957,7 @@ static std::string GetActiveDemoOrMapName()
                 {
                     GameVideoRecorder::Instance().DiscardHighlight();
                     GameVideoRecorder::Instance().SetDemoPaused(false);
-                    gEngfuncs.pfnClientCmd("dem_start\n"); // resume playback
+                    gEngfuncs.pfnClientCmd("dem_pause 0\n"); // resume playback
                     g_HighlightToastText = "Highlight discarded";
                     g_HighlightToastSuccess = false;
                     g_HighlightToastTimer = gEngfuncs.GetClientTime() + 3.0;
@@ -989,6 +989,8 @@ static std::string GetActiveDemoOrMapName()
                 if (keynum == 27 || keynum == '0') // Cancel
                 {
                     GameVideoRecorder::Instance().DiscardHighlight();
+                    GameVideoRecorder::Instance().SetDemoPaused(false);
+                    gEngfuncs.pfnClientCmd("dem_pause 0\n");
                     g_HighlightToastText = "Highlight cancelled";
                     g_HighlightToastSuccess = false;
                     g_HighlightToastTimer = gEngfuncs.GetClientTime() + 2.0;
@@ -1001,8 +1003,9 @@ static std::string GetActiveDemoOrMapName()
                 {
                     const double curDemo = GameVideoRecorder::Instance().GetExactDemoTime();
                     GameVideoRecorder::Instance().MarkIn(static_cast<float>(curDemo));
+                    GameVideoRecorder::Instance().SetDemoPaused(false);
                     gEngfuncs.pfnClientCmd("dem_speed 1.0\n");
-                    gEngfuncs.pfnClientCmd("dem_start\n");
+                    gEngfuncs.pfnClientCmd("dem_pause 0\n");
                     return 0;
                 }
             }
@@ -1278,21 +1281,24 @@ static int HUD_RedrawHandler(float flTime, int iIntermission, HUD_RedrawNext nex
     {
         g_seekFrameCounter++;
 
-        // Allow 8 frames for engine to decompress delta packets and reconstruct entities at markIn
-        if (g_seekFrameCounter >= 8)
+        // Allow 6 frames for engine to decompress delta packets and reconstruct entities at markIn
+        if (g_seekFrameCounter >= 6)
         {
             const std::string name = GetActiveDemoOrMapName();
             if (GameVideoRecorder::Instance().StartStudioRender(name, scrW, scrH))
             {
                 GameVideoRecorder::Instance().SetDemoPaused(false);
                 gEngfuncs.pfnClientCmd("dem_pause 0\n");
+                gEngfuncs.pfnClientCmd("fps_override 1\n");
+                gEngfuncs.pfnClientCmd("fps_max 0\n");
+                gEngfuncs.pfnClientCmd("gl_vsync 0\n");
                 gEngfuncs.pfnClientCmd("host_framerate 0.01666667\n");
             }
             else
             {
                 GameVideoRecorder::Instance().DiscardHighlight();
                 GameVideoRecorder::Instance().SetDemoPaused(false);
-                gEngfuncs.pfnClientCmd("dem_start\n");
+                gEngfuncs.pfnClientCmd("dem_pause 0\n");
             }
         }
     }
@@ -1304,6 +1310,9 @@ static int HUD_RedrawHandler(float flTime, int iIntermission, HUD_RedrawNext nex
         {
             GameVideoRecorder::Instance().FinishStudioRender();
             gEngfuncs.pfnClientCmd("host_framerate 0\n");
+            gEngfuncs.pfnClientCmd("fps_override 0\n");
+            gEngfuncs.pfnClientCmd("fps_max 100\n");
+            gEngfuncs.pfnClientCmd("gl_vsync 1\n");
             GameVideoRecorder::Instance().SetDemoPaused(true);
             gEngfuncs.pfnClientCmd("dem_pause 1\n");
 
@@ -1370,7 +1379,14 @@ static void HUD_ResetHandler(HUD_ResetNext next)
         GameVideoRecorder::Instance().IsHighlightAwaitingConfirm() ||
         GameVideoRecorder::Instance().IsHighlightSeeking() ||
         GameVideoRecorder::Instance().IsHighlightRendering())
+    {
         GameVideoRecorder::Instance().DiscardHighlight();
+        GameVideoRecorder::Instance().SetDemoPaused(false);
+        gEngfuncs.pfnClientCmd("host_framerate 0\n");
+        gEngfuncs.pfnClientCmd("fps_override 0\n");
+        gEngfuncs.pfnClientCmd("fps_max 100\n");
+        gEngfuncs.pfnClientCmd("gl_vsync 1\n");
+    }
 }
 
 static int HUD_VidInitHandler(HUD_VidInitNext next)

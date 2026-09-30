@@ -450,7 +450,7 @@ namespace nextclient::client_mini
         std::string videoFilter = "vflip";
         if (height < 1080)
         {
-            videoFilter = "vflip,scale=-2:1080:flags=lanczos";
+            videoFilter = "vflip,scale=-2:1080:flags=bicubic";
         }
 
         std::ostringstream cmd;
@@ -458,7 +458,7 @@ namespace nextclient::client_mini
             << " -f rawvideo -pix_fmt rgb24 -s " << width << "x" << height
             << " -r 60 -i \"" << videoPipeName << "\""
             << " -vf " << videoFilter
-            << " -c:v libx264 -preset veryfast -crf 16 -pix_fmt yuv420p"
+            << " -c:v libx264 -preset ultrafast -tune zerolatency -crf 18 -pix_fmt yuv420p -threads 0"
             << " -colorspace bt709 -color_primaries bt709 -color_trc bt709 -color_range tv"
             << " -movflags +faststart \"" << m_tempVideoPath << "\"";
 
@@ -476,7 +476,7 @@ namespace nextclient::client_mini
             nullptr,
             nullptr,
             FALSE,
-            CREATE_NO_WINDOW | BELOW_NORMAL_PRIORITY_CLASS,
+            CREATE_NO_WINDOW | NORMAL_PRIORITY_CLASS,
             nullptr,
             nullptr,
             &si,
@@ -624,7 +624,7 @@ namespace nextclient::client_mini
         std::string cmdStr = muxCmd.str();
 
         if (CreateProcessA(nullptr, cmdStr.data(), nullptr, nullptr, FALSE,
-                           CREATE_NO_WINDOW | BELOW_NORMAL_PRIORITY_CLASS, nullptr, nullptr, &si, &pi))
+                           CREATE_NO_WINDOW | NORMAL_PRIORITY_CLASS, nullptr, nullptr, &si, &pi))
         {
             WaitForSingleObject(pi.hProcess, 15000);
             CloseHandle(pi.hProcess);
@@ -694,9 +694,12 @@ namespace nextclient::client_mini
 
         std::ofstream wav(wavPath, std::ios::binary);
         WavHeader hdr;
-        hdr.sampleRate = static_cast<uint32_t>(sampleRate);
-        hdr.byteRate = hdr.sampleRate * 2 * sizeof(int16_t);
-        hdr.blockAlign = 2 * sizeof(int16_t);
+        const uint32_t finalSampleRate = static_cast<uint32_t>((pwfx != nullptr && pwfx->nSamplesPerSec > 0) ? pwfx->nSamplesPerSec : sampleRate);
+        const uint16_t finalChannels = static_cast<uint16_t>((pwfx != nullptr && pwfx->nChannels > 0) ? pwfx->nChannels : 2);
+        hdr.sampleRate = finalSampleRate;
+        hdr.numChannels = finalChannels;
+        hdr.byteRate = finalSampleRate * finalChannels * sizeof(int16_t);
+        hdr.blockAlign = static_cast<uint16_t>(finalChannels * sizeof(int16_t));
         wav.write(reinterpret_cast<const char*>(&hdr), sizeof(hdr));
 
         uint32_t totalBytesWritten = 0;
@@ -1006,7 +1009,7 @@ namespace nextclient::client_mini
             nullptr,
             nullptr,
             FALSE,
-            CREATE_NO_WINDOW | BELOW_NORMAL_PRIORITY_CLASS,
+            CREATE_NO_WINDOW | NORMAL_PRIORITY_CLASS,
             nullptr,
             nullptr,
             &si,
@@ -1185,7 +1188,7 @@ namespace nextclient::client_mini
         std::string videoFilter = "vflip";
         if (height < 1080)
         {
-            videoFilter = "vflip,scale=-2:1080:flags=lanczos";
+            videoFilter = "vflip,scale=-2:1080:flags=bicubic";
         }
 
         std::ostringstream cmd;
@@ -1194,7 +1197,7 @@ namespace nextclient::client_mini
             << " -r " << fps << " -i \"" << videoPipeName << "\""
             << " -f s16le -ar " << audioRate << " -ac 2 -i \"" << audioPipeName << "\""
             << " -vf " << videoFilter
-            << " -c:v libx264 -preset veryfast -crf 16 -pix_fmt yuv420p"
+            << " -c:v libx264 -preset ultrafast -tune zerolatency -crf 18 -pix_fmt yuv420p -threads 0"
             << " -colorspace bt709 -color_primaries bt709 -color_trc bt709 -color_range tv"
             << " -af aresample=async=1000:min_hard_comp=0.100000:first_pts=0"
             << " -c:a aac -b:a 192k"
@@ -1215,7 +1218,7 @@ namespace nextclient::client_mini
             nullptr,
             nullptr,
             FALSE,
-            CREATE_NO_WINDOW | BELOW_NORMAL_PRIORITY_CLASS,
+            CREATE_NO_WINDOW | NORMAL_PRIORITY_CLASS,
             nullptr,
             nullptr,
             &si,
