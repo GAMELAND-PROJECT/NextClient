@@ -478,7 +478,7 @@ namespace nextclient::client_mini
             << " -f rawvideo -pix_fmt rgb24 -s " << width << "x" << height
             << " -r 100 -i \"" << videoPipeName << "\""
             << " -vf " << videoFilter
-            << " -c:v libx264 -preset superfast -crf 18 -profile:v high -pix_fmt yuv420p -threads 0"
+            << " -c:v libx264 -preset ultrafast -tune fastdecode -crf 18 -profile:v high -pix_fmt yuv420p -threads 0"
             << " -movflags +faststart \"" << m_tempVideoPath << "\"";
 
         STARTUPINFOA si{};
@@ -594,7 +594,7 @@ namespace nextclient::client_mini
         {
             std::unique_lock<std::mutex> lock(m_queueMutex);
             m_queueSpaceCv.wait(lock, [this]() {
-                return m_frameQueue.size() < 35 || m_stopWriterThread.load() || m_highlightState.load() != HighlightState::Rendering;
+                return m_frameQueue.size() < 100 || m_stopWriterThread.load() || m_highlightState.load() != HighlightState::Rendering;
             });
 
             if (m_highlightState.load() != HighlightState::Rendering || m_stopWriterThread.load())
@@ -650,7 +650,7 @@ namespace nextclient::client_mini
                 WriteFile(m_hVideoPipe, frame.data(), static_cast<DWORD>(frame.size()), &written, nullptr);
 
                 std::lock_guard<std::mutex> lock(m_queueMutex);
-                if (m_frameBufferPool.size() < 40)
+                if (m_frameBufferPool.size() < 120)
                 {
                     m_frameBufferPool.push_back(std::move(frame));
                 }
@@ -1013,7 +1013,7 @@ namespace nextclient::client_mini
         ss << std::fixed << std::setprecision(2);
         ss << "vflip,eq=gamma=" << ffmpegGamma
            << ":contrast=1.08:brightness=" << ffmpegBrightness
-           << ":saturation=1.15,unsharp=5:5:0.7:3:3:0.35";
+           << ":saturation=1.15,unsharp=3:3:0.6:3:3:0.3";
         return ss.str();
     }
 
@@ -1328,7 +1328,7 @@ namespace nextclient::client_mini
             << " -r " << fps << " -i \"" << videoPipeName << "\""
             << " -f s16le -ar " << audioRate << " -ac 2 -i \"" << audioPipeName << "\""
             << " -vf " << videoFilter
-            << " -c:v libx264 -preset superfast -crf 18 -profile:v high -pix_fmt yuv420p -threads 0"
+            << " -c:v libx264 -preset ultrafast -tune fastdecode -crf 18 -profile:v high -pix_fmt yuv420p -threads 0"
             << " -af aresample=async=1000:min_hard_comp=0.100000:first_pts=0"
             << " -c:a aac -b:a 160k"
             << " -movflags +faststart+frag_keyframe+empty_moov"
