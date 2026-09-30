@@ -236,7 +236,7 @@ namespace nextclient::client_mini
         if (m_isConverting.load())
             return false;
 
-        _mkdir("cstrike\\videos");
+        _mkdir("videos");
 
         std::string baseName = demoFileName;
         const size_t dot = baseName.find_last_of('.');
@@ -244,7 +244,7 @@ namespace nextclient::client_mini
             baseName = baseName.substr(0, dot);
 
         m_convertingDemoName = demoFileName;
-        m_lastConvertedVideoPath = "cstrike/videos/" + baseName + ".mp4";
+        m_lastConvertedVideoPath = "videos/" + baseName + ".mp4";
         m_convertPercent = 5;
         m_isConverting = true;
 
@@ -355,7 +355,7 @@ namespace nextclient::client_mini
         if (m_isWorkerCapturing.load())
             return false;
 
-        _mkdir("cstrike\\videos");
+        _mkdir("videos");
 
         m_recordWidth = width;
         m_recordHeight = height;
@@ -363,7 +363,7 @@ namespace nextclient::client_mini
         m_framesPushed = 0;
 
         const std::string ffmpegPath = FindFfmpegExecutable();
-        std::string outputPath = "cstrike/videos/" + outputBaseName + ".mp4";
+        std::string outputPath = "videos/" + outputBaseName + ".mp4";
 
 #ifdef _WIN32
         const DWORD pid = GetCurrentProcessId();
@@ -454,7 +454,7 @@ namespace nextclient::client_mini
             << " -r " << fps << " -i \"" << videoPipeName << "\""
             << " -f s16le -ar " << audioRate << " -ac 2 -i \"" << audioPipeName << "\""
             << " -vf vflip"
-            << " -c:v libx264 -preset ultrafast -tune zerolatency -pix_fmt yuv420p -b:v 4500k"
+            << " -c:v libx264 -preset ultrafast -tune zerolatency -crf 18 -pix_fmt yuv420p -b:v 8000k -maxrate 12000k -bufsize 16000k"
             << " -af aresample=async=1000:min_hard_comp=0.100000:first_pts=0"
             << " -c:a aac -b:a 160k"
             << " -movflags +faststart+frag_keyframe+empty_moov"
@@ -764,5 +764,167 @@ namespace nextclient::client_mini
         if (m_masterThread.joinable())
             m_masterThread.detach();
 #endif
+    }
+
+    // -------------------------------------------------------------
+    // Live Demo Highlight Clip Capture (Keys 1 & 2 during viewdemo)
+    // -------------------------------------------------------------
+    bool GameVideoRecorder::StartHighlightClip(const std::string& demoOrMapName, int width, int height, int fps)
+    {
+        if (m_isHighlightRecording.load() || m_isWorkerCapturing.load())
+            return false;
+
+        _mkdir("videos");
+
+        const DWORD pid = GetCurrentProcessId();
+        const DWORD randId = GetTickCount();
+        m_tempHighlightPath = "videos/temp_highlight_" + std::to_string(pid) + "_" + std::to_string(randId) + ".mp4";
+        m_currentHighlightDemoName = demoOrMapName;
+        m_highlightStartTime = std::chrono::steady_clock::now();
+        m_highlightDurationSec = 0;
+        m_highlightClipInfo.clear();
+
+        m_recordWidth = width;
+        m_recordHeight = height;
+        m_targetFps = (fps > 0) ? fps : 60;
+        m_framesPushed = 0;
+
+        const std::string ffmpegPath = FindFfmpegExecutable();
+        const std::string videoPipeName = "\\\\.\\pipe\\gl_hvid_" + std::to_string(pid) + "_" + std::to_string(randId);
+        const std::string audioPipeName = "\\\\.\\pipe\\gl_haud_" + std::to_string(pid) + "_" + std::to_string(randId);
+
+        const size_t frameBytes = static_cast<size_t>(width) * height * 3;
+        m_preallocatedCaptureBuffer.resize(frameBytes, 0);
+
+        m_stopRequested = false;
+        m_readyForFrames = false;
+        m_isWorkerCapturing = true;
+        m_isHighlightRecording = true;
+        m_isAwaitingConfirm = false;
+
+        {
+            std::lock_guard<std::mutex> lock(m_queueMutex);
+            std::queue<std::vector<uint8_t>> emptyQueue;
+            std::swap(m_frameQueue, emptyQueue);
+        }
+
+        m_masterThread = std::thread(
+            &GameVideoRecorder::MasterWorkerThread,
+            this,
+            ffmpegPath,
+            m_tempHighlightPath,
+            videoPipeName,
+            audioPipeName,
+            width,
+            height,
+            m_targetFps
+        );
+
+        return true;
+    }
+
+    void GameVideoRecorder::CaptureHighlightFrame(int width, int height)
+    {
+        if (!m_isHighlightRecording.load())
+            return;
+
+        WorkerCaptureFrame(width, height);
+    }
+
+    bool GameVideoRecorder::StopHighlightClip()
+    {
+        if (!m_isHighlightRecording.load())
+            return false;
+
+        const auto now = std::chrono::steady_clock::now();
+        m_highlightDurationSec = static_cast<int>(std::chrono::duration<double>(now - m_highlightStartTime).count());
+
+        m_readyForFrames = false;
+        m_stopRequested = true;
+        m_queueCv.notify_all();
+
+        if (m_masterThread.joinable())
+            m_masterThread.join();
+
+        m_isHighlightRecording = false;
+
+        // Query file size of the generated temporary MP4 file
+        uint64_t fileSize = 0;
+        WIN32_FILE_ATTRIBUTE_DATA fad{};
+        if (GetFileAttributesExA(m_tempHighlightPath.c_str(), GetFileExInfoStandard, &fad))
+        {
+            fileSize = (static_cast<uint64_t>(fad.nFileSizeHigh) << 32) | fad.nFileSizeLow;
+        }
+
+        const int minutes = m_highlightDurationSec / 60;
+        const int seconds = m_highlightDurationSec % 60;
+        char infoBuf[128]{};
+        if (fileSize >= 1024 * 1024)
+        {
+            const double mb = static_cast<double>(fileSize) / (1024.0 * 1024.0);
+            std::snprintf(infoBuf, sizeof(infoBuf), "Duration: %02d:%02d  |  %dx%d @ %d FPS  |  %.1f MB",
+                minutes, seconds, m_recordWidth, m_recordHeight, m_targetFps, mb);
+        }
+        else
+        {
+            const double kb = static_cast<double>(fileSize) / 1024.0;
+            std::snprintf(infoBuf, sizeof(infoBuf), "Duration: %02d:%02d  |  %dx%d @ %d FPS  |  %.0f KB",
+                minutes, seconds, m_recordWidth, m_recordHeight, m_targetFps, kb);
+        }
+        m_highlightClipInfo = infoBuf;
+        m_isAwaitingConfirm = true;
+
+        return true;
+    }
+
+    std::string GameVideoRecorder::GetFormattedHighlightTime() const
+    {
+        if (!m_isHighlightRecording.load())
+            return "00:00";
+
+        const auto now = std::chrono::steady_clock::now();
+        const int totalSeconds = static_cast<int>(std::chrono::duration<double>(now - m_highlightStartTime).count());
+        const int minutes = totalSeconds / 60;
+        const int seconds = totalSeconds % 60;
+
+        char buf[16]{};
+        std::snprintf(buf, sizeof(buf), "%02d:%02d", minutes, seconds);
+        return buf;
+    }
+
+    bool GameVideoRecorder::ConfirmSaveHighlight(bool save)
+    {
+        if (!m_isAwaitingConfirm.load())
+            return false;
+
+        if (save && !m_tempHighlightPath.empty())
+        {
+            _mkdir("videos");
+            auto now = std::chrono::system_clock::now();
+            std::time_t tt = std::chrono::system_clock::to_time_t(now);
+            std::tm tm{};
+            localtime_s(&tm, &tt);
+
+            char timeBuf[64]{};
+            std::strftime(timeBuf, sizeof(timeBuf), "%Y-%m-%d_%H-%M-%S", &tm);
+
+            std::string cleanDemo = m_currentHighlightDemoName;
+            if (cleanDemo.empty()) cleanDemo = "Highlight";
+            const size_t dot = cleanDemo.find_last_of('.');
+            if (dot != std::string::npos) cleanDemo = cleanDemo.substr(0, dot);
+
+            std::string finalPath = "videos/Highlight_" + cleanDemo + "_" + timeBuf + ".mp4";
+            MoveFileA(m_tempHighlightPath.c_str(), finalPath.c_str());
+            m_lastSavedHighlightPath = finalPath;
+        }
+        else if (!m_tempHighlightPath.empty())
+        {
+            DeleteFileA(m_tempHighlightPath.c_str());
+            m_lastSavedHighlightPath.clear();
+        }
+
+        m_tempHighlightPath.clear();
+        m_isAwaitingConfirm = false;
+        return true;
     }
 }

@@ -37,6 +37,19 @@ namespace nextclient::client_mini
         std::string GetFormattedDemoTime() const;
         std::string GetCurrentDemoFileName() const { return m_currentDemoFileName; }
 
+        // Live Demo Highlight Clip Capture (Keys 1 & 2 during viewdemo)
+        bool StartHighlightClip(const std::string& demoOrMapName, int width, int height, int fps = 60);
+        void CaptureHighlightFrame(int width, int height);
+        bool StopHighlightClip();
+        bool IsHighlightRecording() const { return m_isHighlightRecording.load(); }
+        bool IsAwaitingHighlightConfirm() const { return m_isAwaitingConfirm.load(); }
+        std::string GetFormattedHighlightTime() const;
+        std::string GetHighlightClipInfo() const { return m_highlightClipInfo; }
+        bool ConfirmSaveHighlight(bool save);
+        std::string GetLastSavedHighlightPath() const { return m_lastSavedHighlightPath; }
+        void SetCurrentPlayingDemoName(const std::string& name) { m_currentPlayingDemoName = name; }
+        std::string GetCurrentPlayingDemoName() const { return m_currentPlayingDemoName; }
+
         // In-Lobby Demo Studio & Background MP4 Converter
         std::vector<DemoFileItem> RefreshDemoList();
         const std::vector<DemoFileItem>& GetCachedDemos() const { return m_cachedDemos; }
@@ -70,6 +83,17 @@ namespace nextclient::client_mini
         std::atomic<bool> m_isMatchDemoRecording{false};
         std::string m_currentDemoFileName;
         std::chrono::steady_clock::time_point m_matchDemoStartTime;
+
+        // Live Demo Highlight State
+        std::atomic<bool> m_isHighlightRecording{false};
+        std::atomic<bool> m_isAwaitingConfirm{false};
+        std::string m_currentHighlightDemoName;
+        std::string m_currentPlayingDemoName{"Demo"};
+        std::string m_tempHighlightPath;
+        std::string m_lastSavedHighlightPath;
+        std::chrono::steady_clock::time_point m_highlightStartTime;
+        int m_highlightDurationSec{0};
+        std::string m_highlightClipInfo;
 
         // In-Lobby Studio State
         std::vector<DemoFileItem> m_cachedDemos;
