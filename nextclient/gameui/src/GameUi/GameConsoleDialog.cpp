@@ -259,10 +259,6 @@ CGameConsoleDialog::CGameConsoleDialog() : BaseClass(NULL, "GameConsole", false)
     m_pEntry->SendNewLine(true);
     m_pEntry->SetTabPosition(1);
 
-    m_pToggleGuide = new vgui2::Button(this, "ToggleGuide", "Console");
-    m_pToggleGuide->SetCommand("ToggleGuide");
-    m_pToggleGuide->SetVisible(false);
-
     m_bLanHostGuideVisible = false;
     m_bIsListenHost = false;
 
@@ -304,22 +300,16 @@ void CGameConsoleDialog::Activate()
 void CGameConsoleDialog::Clear()
 {
     m_pHistory->SetText("");
-    m_pLanHostGuide->SetVisible(false);
+    if (!m_bLanHostGuideVisible)
+    {
+        m_pLanHostGuide->SetVisible(false);
+    }
 }
 
 void CGameConsoleDialog::UpdateLanHostStatus(bool isListenHost)
 {
     m_bIsListenHost = isListenHost;
-    if (isListenHost)
-    {
-        ShowLanHostGuide(true);
-    }
-    else
-    {
-        if (m_pToggleGuide)
-            m_pToggleGuide->SetVisible(false);
-        ShowLanHostGuide(false);
-    }
+    ShowLanHostGuide(isListenHost);
 }
 
 void CGameConsoleDialog::ShowLanHostGuide(bool show)
@@ -328,16 +318,6 @@ void CGameConsoleDialog::ShowLanHostGuide(bool show)
     m_pLanHostGuide->SetVisible(show);
     m_pHistory->SetVisible(!show);
     m_pHistory->SetVerticalScrollbar(!show);
-
-    if (m_bIsListenHost && m_pToggleGuide)
-    {
-        m_pToggleGuide->SetVisible(true);
-        m_pToggleGuide->SetText(show ? "Console" : "Host Guide");
-    }
-    else if (m_pToggleGuide)
-    {
-        m_pToggleGuide->SetVisible(false);
-    }
 
     if (show)
     {
@@ -819,11 +799,6 @@ void CGameConsoleDialog::OnCommand(const char *command)
             return;
         }
 
-        if (m_bIsListenHost && m_bLanHostGuideVisible)
-        {
-            ShowLanHostGuide(false);
-        }
-
         engine->pfnClientCmd(szText);    
 
         char szMessage[262];
@@ -852,10 +827,7 @@ void CGameConsoleDialog::OnCommand(const char *command)
         m_pCompletionList->SetVisible(false);
 
     }
-    else if (!stricmp(command, "ToggleGuide"))
-    {
-        ShowLanHostGuide(!m_bLanHostGuideVisible);
-    }
+
     else
     {
         BaseClass::OnCommand(command);
@@ -973,26 +945,14 @@ void CGameConsoleDialog::PerformLayout()
     const int topHeight = 28;
     const int entryInset = 4;
     const int submitWide = 64;
-    const int toggleWide = (m_pToggleGuide && m_pToggleGuide->IsVisible()) ? 86 : 0;
 
     m_pHistory->SetPos(inset, inset + topHeight);
     m_pHistory->SetSize(wide - (inset * 2), tall - (entryInset * 2 + inset * 2 + topHeight + entryHeight));
     m_pLanHostGuide->SetBounds(inset, inset + topHeight, wide - inset * 2,
         tall - (entryInset * 2 + inset * 2 + topHeight + entryHeight));
 
-    if (toggleWide > 0)
-    {
-        m_pToggleGuide->SetPos(wide - (inset + submitWide + 4 + toggleWide), tall - (entryInset * 2 + entryHeight));
-        m_pToggleGuide->SetSize(toggleWide, entryHeight);
-
-        m_pEntry->SetPos(inset, tall - (entryInset * 2 + entryHeight));
-        m_pEntry->SetSize(wide - (inset * 2 + submitWide + 4 + toggleWide + 4), entryHeight);
-    }
-    else
-    {
-        m_pEntry->SetPos(inset, tall - (entryInset * 2 + entryHeight));
-        m_pEntry->SetSize(wide - (inset * 3 + submitWide), entryHeight);
-    }
+    m_pEntry->SetPos(inset, tall - (entryInset * 2 + entryHeight));
+    m_pEntry->SetSize(wide - (inset * 3 + submitWide), entryHeight);
 
     m_pSubmit->SetPos(wide - (inset + submitWide), tall - (entryInset * 2 + entryHeight));
     m_pSubmit->SetSize(submitWide, entryHeight);

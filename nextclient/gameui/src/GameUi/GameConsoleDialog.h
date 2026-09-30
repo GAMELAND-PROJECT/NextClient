@@ -112,7 +112,6 @@ private:
     vgui2::Panel *m_pLanHostGuide;
     TabCatchingTextEntry *m_pEntry;
     vgui2::Button *m_pSubmit;
-    vgui2::Button *m_pToggleGuide;
     vgui2::Menu *m_pCompletionList;
     Color m_PrintColor;
     Color m_DPrintColor;
