@@ -227,6 +227,7 @@ void CDemoUploaderDialog::PlaySelectedDemo()
     int itemID = m_pDemoList->GetSelectedItem(0);
     KeyValues *kv = m_pDemoList->GetItem(itemID);
     const char *szDemoName = kv->GetString("demoname", "");
+    const char *szRelPath = kv->GetString("relpath", "");
     const char *szFullPath = kv->GetString("fullpath", "");
 
     if (!szDemoName[0]) return;
@@ -241,7 +242,8 @@ void CDemoUploaderDialog::PlaySelectedDemo()
             } catch (...) {}
         }
 
-        std::string cmd = std::format("viewdemo \"{}\"\n", szDemoName);
+        const char *szTarget = (szRelPath && szRelPath[0]) ? szRelPath : szDemoName;
+        std::string cmd = std::format("viewdemo \"{}\"\n", szTarget);
         engine->pfnClientCmd(cmd.c_str());
         OnClose();
     }
