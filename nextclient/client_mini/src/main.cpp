@@ -21,6 +21,9 @@
 #include "turn_speed_patch.h"
 #include "inspect.h"
 #include "invert_mouse.h"
+#include "recorder/GameVideoRecorder.h"
+
+using nextclient::client_mini::GameVideoRecorder;
 
 nitroapi::NitroApiInterface* g_NitroApi;
 
@@ -53,6 +56,25 @@ static dlight_t* (*g_OriginalAllocElight)(int) = nullptr;
 
 namespace
 {
+static void GetGameScreenResolution(int& outWidth, int& outHeight)
+{
+    outWidth = 1024;
+    outHeight = 768;
+    if (gEngfuncs.pfnGetScreenInfo != nullptr)
+    {
+        SCREENINFO scr{};
+        scr.iSize = sizeof(scr);
+        if (gEngfuncs.pfnGetScreenInfo(&scr))
+        {
+            if (scr.iWidth > 0 && scr.iHeight > 0)
+            {
+                outWidth = scr.iWidth;
+                outHeight = scr.iHeight;
+            }
+        }
+    }
+}
+
     bool g_InputBackground = false;
     bool g_DemoMenuVisible = false;
     enum class DemoMenuAction
@@ -170,6 +192,9 @@ namespace
 
     bool IsClientDemoRecording()
     {
+        if (GameVideoRecorder::Instance().IsRecording())
+            return true;
+
         if (gEngfuncs.pDemoAPI != nullptr && gEngfuncs.pDemoAPI->IsRecording != nullptr)
         {
             if (gEngfuncs.pDemoAPI->IsRecording())
@@ -187,6 +212,15 @@ namespace
 
     std::string GetCurrentRecordingDemoName()
     {
+        if (GameVideoRecorder::Instance().IsRecording())
+        {
+            std::string fname = GameVideoRecorder::Instance().GetCurrentVideoPath();
+            const size_t slash = fname.find_last_of("/\\");
+            if (slash != std::string::npos)
+                fname.erase(0, slash + 1);
+            return fname;
+        }
+
         if (eng() != nullptr && eng()->client_static != nullptr && eng()->client_static->demorecording)
         {
             if (eng()->client_static->demofilename[0] != '\0')
@@ -236,7 +270,7 @@ namespace
 
         // Header Title
         gEngfuncs.pfnDrawSetTextColor(1.0f, 0.78f, 0.12f);
-        DrawHudString(menuX + 16, menuY + 12, "GAMELAND DEMO RECORDER");
+        DrawHudString(menuX + 16, menuY + 12, "GAMELAND DEMO & RECORDER");
 
         // Separator line
         DrawHudBox(menuX + 12, menuY + 34, menuW - 24, 1, 70, 85, 100, 120);
@@ -245,17 +279,31 @@ namespace
         gEngfuncs.pfnDrawSetTextColor(0.70f, 0.75f, 0.80f);
         DrawHudString(menuX + 16, menuY + 44, "STATUS:");
 
+        const bool isFinalizing = GameVideoRecorder::Instance().IsFinalizing();
+
         if (isRecording)
         {
             // Vivid green pulse indicator
             gEngfuncs.pfnDrawSetTextColor(0.15f, 1.0f, 0.25f);
-            DrawHudString(menuX + 75, menuY + 44, "[*] RECORDING IN PROGRESS");
+            char recStatus[64]{};
+            const std::string timeStr = GameVideoRecorder::Instance().GetFormattedTime();
+            std::snprintf(recStatus, sizeof(recStatus), "[*] RECORDING [%s]", timeStr.c_str());
+            DrawHudString(menuX + 75, menuY + 44, recStatus);
 
             const std::string curDemo = GetCurrentRecordingDemoName();
             char demoInfo[96]{};
             std::snprintf(demoInfo, sizeof(demoInfo), "File: %s", curDemo.c_str());
             gEngfuncs.pfnDrawSetTextColor(0.55f, 0.80f, 0.60f);
             DrawHudString(menuX + 16, menuY + 62, demoInfo);
+        }
+        else if (isFinalizing)
+        {
+            // Amber finalizing indicator
+            gEngfuncs.pfnDrawSetTextColor(1.0f, 0.70f, 0.10f);
+            DrawHudString(menuX + 75, menuY + 44, "[~] FINALIZING & SAVING MP4...");
+
+            gEngfuncs.pfnDrawSetTextColor(0.85f, 0.85f, 0.85f);
+            DrawHudString(menuX + 16, menuY + 62, "Encoding MP4 video in background...");
         }
         else
         {
@@ -264,34 +312,37 @@ namespace
             DrawHudString(menuX + 75, menuY + 44, "[o] STANDBY / IDLE");
 
             gEngfuncs.pfnDrawSetTextColor(0.55f, 0.60f, 0.65f);
-            DrawHudString(menuX + 16, menuY + 62, "Ready to capture current match.");
+            DrawHudString(menuX + 16, menuY + 62, "Ready to capture match (Demo + MP4)");
         }
 
         // Sub separator
         DrawHudBox(menuX + 12, menuY + 84, menuW - 24, 1, 55, 65, 75, 100);
 
         // Menu Option 1
-        if (isRecording)
+        if (isRecording || isFinalizing)
         {
             gEngfuncs.pfnDrawSetTextColor(0.55f, 0.55f, 0.55f);
-            DrawHudString(menuX + 16, menuY + 95, "1. Start New Demo");
+            if (isFinalizing)
+                DrawHudString(menuX + 16, menuY + 95, "1. Start Recording (Saving...)");
+            else
+                DrawHudString(menuX + 16, menuY + 95, "1. Start Recording (Active)");
         }
         else
         {
             gEngfuncs.pfnDrawSetTextColor(1.0f, 0.82f, 0.20f);
-            DrawHudString(menuX + 16, menuY + 95, "1. Start Demo Recording");
+            DrawHudString(menuX + 16, menuY + 95, "1. Start Recording (Demo + MP4)");
         }
 
         // Menu Option 2
         if (isRecording)
         {
             gEngfuncs.pfnDrawSetTextColor(1.0f, 0.30f, 0.30f);
-            DrawHudString(menuX + 16, menuY + 118, "2. Stop Demo Recording");
+            DrawHudString(menuX + 16, menuY + 118, "2. Stop Recording & Save MP4");
         }
         else
         {
             gEngfuncs.pfnDrawSetTextColor(0.55f, 0.55f, 0.55f);
-            DrawHudString(menuX + 16, menuY + 118, "2. Stop Demo (Inactive)");
+            DrawHudString(menuX + 16, menuY + 118, "2. Stop Recording (Inactive)");
         }
 
         // Bottom separator
@@ -430,8 +481,10 @@ namespace
     {
 #ifdef _WIN32
         _mkdir("cstrike\\demos");
+        _mkdir("cstrike\\videos");
 #else
         mkdir("cstrike/demos", 0755);
+        mkdir("cstrike/videos", 0755);
 #endif
     }
 
@@ -443,12 +496,38 @@ namespace
         if (action == DemoMenuAction::Start)
         {
             EnsureDemoDirectory();
-            const std::string command = "record \"demos/" + BuildDemoFileName() + "\"\n";
+            const std::string baseName = BuildDemoFileName();
+
+            // 1. Start GoldSrc engine demo
+            const std::string command = "record \"demos/" + baseName + "\"\n";
             gEngfuncs.pfnClientCmd(command.c_str());
+
+            // 2. Start direct MP4 hardware video recorder
+            int scrW = 1024, scrH = 768;
+            GetGameScreenResolution(scrW, scrH);
+            const bool started = GameVideoRecorder::Instance().Start(baseName, scrW, scrH, 60);
+
+            if (started)
+            {
+                gEngfuncs.pfnConsolePrint("\n^2[Gameland Recorder] Started recording: demos/ & videos/\n\n");
+            }
         }
         else if (action == DemoMenuAction::Stop)
         {
+            // 1. Stop GoldSrc demo
             gEngfuncs.pfnClientCmd("stop\n");
+
+            // 2. Stop MP4 recorder & finalize
+            if (GameVideoRecorder::Instance().IsRecording())
+            {
+                const std::string duration = GameVideoRecorder::Instance().GetFormattedTime();
+                const std::string videoPath = GameVideoRecorder::Instance().GetCurrentVideoPath();
+                GameVideoRecorder::Instance().Stop();
+
+                char msg[160]{};
+                std::snprintf(msg, sizeof(msg), "\n^2[Gameland Recorder] Finalizing video: %s (Duration: %s)...\n\n", videoPath.c_str(), duration.c_str());
+                gEngfuncs.pfnConsolePrint(msg);
+            }
         }
     }
 
@@ -589,6 +668,28 @@ static int HUD_RedrawHandler(float flTime, int iIntermission, HUD_RedrawNext nex
     if (hud_draw_value != 0.0f && !overlay_visible && g_DemoMenuVisible)
         DrawDemoMenu();
 
+    if (GameVideoRecorder::Instance().IsRecording())
+    {
+        int scrW = 1024, scrH = 768;
+        GetGameScreenResolution(scrW, scrH);
+        GameVideoRecorder::Instance().CaptureFrame(scrW, scrH);
+
+        if (!g_DemoMenuVisible)
+        {
+            char recBadge[32]{};
+            std::snprintf(recBadge, sizeof(recBadge), "REC %s", GameVideoRecorder::Instance().GetFormattedTime().c_str());
+            gEngfuncs.pfnDrawSetTextColor(1.0f, 0.25f, 0.25f);
+            DrawHudString(scrW - 90, 12, recBadge);
+        }
+    }
+    else if (GameVideoRecorder::Instance().IsFinalizing() && !g_DemoMenuVisible)
+    {
+        int scrW = 1024, scrH = 768;
+        GetGameScreenResolution(scrW, scrH);
+        gEngfuncs.pfnDrawSetTextColor(1.0f, 0.75f, 0.15f);
+        DrawHudString(scrW - 130, 12, "SAVING VIDEO...");
+    }
+
     if (g_PendingDemoAction != DemoMenuAction::None)
         RunPendingDemoAction();
 
@@ -603,6 +704,9 @@ static void HUD_ResetHandler(HUD_ResetNext next)
 
     g_GameHud->Reset();
     ResetInvertMouse();
+
+    if (GameVideoRecorder::Instance().IsRecording())
+        GameVideoRecorder::Instance().Stop();
 }
 
 static int HUD_VidInitHandler(HUD_VidInitNext next)
