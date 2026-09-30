@@ -256,6 +256,7 @@ static void GetGameScreenResolution(int& outWidth, int& outHeight)
     std::string g_HighlightToastText;
     bool g_HighlightToastSuccess = false;
     double g_HighlightToastTimer = 0.0;
+    int g_seekFrameCounter = 0;
 
 static std::string GetActiveDemoOrMapName()
     {
@@ -280,9 +281,9 @@ static std::string GetActiveDemoOrMapName()
         return demoName;
     }
 
-    void DrawHighlightFilmingWidget(int scrW)
+    void DrawHighlightMarkingWidget(int scrW)
     {
-        const int w = 240;
+        const int w = 250;
         const int h = 44;
         const int x = scrW - w - 16;
         const int y = 14;
@@ -301,17 +302,18 @@ static std::string GetActiveDemoOrMapName()
         DrawHudBox(x + 10, y + 9, 10, 10, static_cast<int>(255 * pulse), 30, 30, 255);
         DrawHudBox(x + 13, y + 12, 4, 4, 255, 255, 255, 230);
 
-        const float dur = GameVideoRecorder::Instance().GetFilmingDuration();
-        const uint64_t frames = GameVideoRecorder::Instance().GetFilmingFramesPushed();
+        const double curDemo = GameVideoRecorder::Instance().GetExactDemoTime();
+        const float inTime = GameVideoRecorder::Instance().GetMarkInTime();
+        const float dur = (curDemo > inTime) ? static_cast<float>(curDemo - inTime) : 0.0f;
 
         char badge[64]{};
-        std::snprintf(badge, sizeof(badge), "HLAE FILMING: %s", GameVideoRecorder::Instance().GetFormattedTime(dur).c_str());
+        std::snprintf(badge, sizeof(badge), "MARKING HIGHLIGHT: %s", GameVideoRecorder::Instance().GetFormattedTime(dur).c_str());
 
         gEngfuncs.pfnDrawSetTextColor(1.0f, 0.95f, 0.95f);
         DrawHudString(x + 28, y + 7, badge);
 
         char sub[64]{};
-        std::snprintf(sub, sizeof(sub), "[F3]/[2] Stop  |  %llu frames (1080p)", frames);
+        std::snprintf(sub, sizeof(sub), "[2] Mark Out & Preview");
         gEngfuncs.pfnDrawSetTextColor(0.95f, 0.82f, 0.20f);
         DrawHudString(x + 10, y + 26, sub);
     }
@@ -397,7 +399,7 @@ static std::string GetActiveDemoOrMapName()
         DrawHudString(x + 20, y + 48, clipInfo.c_str());
 
         gEngfuncs.pfnDrawSetTextColor(0.65f, 0.78f, 0.90f);
-        DrawHudString(x + 20, y + 70, "Quality: 1080p Full HD (Lanczos) | 60 FPS Locked | 1.000x Speed");
+        DrawHudString(x + 20, y + 70, "Quality: 1080p Full HD (Lanczos) | 60 FPS Locked | HLAE Lockstep");
 
         DrawHudBox(x + 16, y + 94, w - 32, 1, 50, 70, 90, 120);
 
@@ -930,29 +932,9 @@ static std::string GetActiveDemoOrMapName()
         const bool isViewingDemo = (gEngfuncs.pDemoAPI && gEngfuncs.pDemoAPI->IsPlayingback());
         if (isViewingDemo)
         {
-            // One-Touch F3 HLAE Filming Hotkey (Toggle Record)
-            if (keynum == 137 || BindingEquals(pszCurrentBinding, "allclient_hlae_film")) // F3
+            // Block inputs while seeking or rendering lockstep frames
+            if (GameVideoRecorder::Instance().IsHighlightSeeking() || GameVideoRecorder::Instance().IsHighlightRendering())
             {
-                int curW = 1024, curH = 768;
-                GetGameScreenResolution(curW, curH);
-                const std::string name = GetActiveDemoOrMapName();
-
-                if (GameVideoRecorder::Instance().IsHighlightFilming())
-                {
-                    GameVideoRecorder::Instance().StopFilming(false);
-                    g_HighlightToastText = "HLAE Highlight saved: " + GameVideoRecorder::Instance().GetLastSavedHighlightPath();
-                    g_HighlightToastSuccess = true;
-                    g_HighlightToastTimer = gEngfuncs.GetClientTime() + 6.0;
-                }
-                else
-                {
-                    if (GameVideoRecorder::Instance().StartFilming(name, curW, curH, false))
-                    {
-                        g_HighlightToastText = "HLAE Filming started (1080p 60 FPS) - Press F3 to Stop";
-                        g_HighlightToastSuccess = true;
-                        g_HighlightToastTimer = gEngfuncs.GetClientTime() + 4.0;
-                    }
-                }
                 return 0;
             }
 
@@ -960,11 +942,13 @@ static std::string GetActiveDemoOrMapName()
             {
                 if (BindingEquals(pszCurrentBinding, "slot1") || keynum == '1' || keynum == 13) // 1 or Enter
                 {
-                    GameVideoRecorder::Instance().ConfirmBookmarkSave();
-                    gEngfuncs.pfnClientCmd("dem_start\n"); // resume playback
-                    g_HighlightToastText = "Highlight saved: " + GameVideoRecorder::Instance().GetLastSavedHighlightPath();
-                    g_HighlightToastSuccess = true;
-                    g_HighlightToastTimer = gEngfuncs.GetClientTime() + 6.0;
+                    char cmd[64]{};
+                    std::snprintf(cmd, sizeof(cmd), "dem_jump %.2f\n", GameVideoRecorder::Instance().GetMarkInTime());
+                    gEngfuncs.pfnClientCmd(cmd);
+                    gEngfuncs.pfnClientCmd("dem_speed 1.0\n");
+
+                    GameVideoRecorder::Instance().SetHighlightSeeking();
+                    g_seekFrameCounter = 0;
                     return 0;
                 }
 
@@ -981,11 +965,12 @@ static std::string GetActiveDemoOrMapName()
                 return 0;
             }
 
-            if (GameVideoRecorder::Instance().IsHighlightFilming())
+            if (GameVideoRecorder::Instance().IsHighlightMarking())
             {
                 if (BindingEquals(pszCurrentBinding, "slot2") || keynum == '2') // 2 = Mark Out
                 {
-                    if (GameVideoRecorder::Instance().MarkOut())
+                    const double curDemo = GameVideoRecorder::Instance().GetExactDemoTime();
+                    if (GameVideoRecorder::Instance().MarkOut(static_cast<float>(curDemo)))
                     {
                         gEngfuncs.pfnClientCmd("dem_pause 1\n"); // pause on mark out
                     }
@@ -1001,17 +986,18 @@ static std::string GetActiveDemoOrMapName()
                 if (keynum == 27 || keynum == '0') // Cancel
                 {
                     GameVideoRecorder::Instance().DiscardHighlight();
+                    g_HighlightToastText = "Highlight cancelled";
+                    g_HighlightToastSuccess = false;
+                    g_HighlightToastTimer = gEngfuncs.GetClientTime() + 2.0;
                     return 0;
                 }
             }
-            else
+            else // HighlightState::Idle
             {
                 if (BindingEquals(pszCurrentBinding, "slot1") || keynum == '1') // 1 = Mark In
                 {
-                    int curW = 1024, curH = 768;
-                    GetGameScreenResolution(curW, curH);
-                    const std::string name = GetActiveDemoOrMapName();
-                    GameVideoRecorder::Instance().MarkIn(name, curW, curH);
+                    const double curDemo = GameVideoRecorder::Instance().GetExactDemoTime();
+                    GameVideoRecorder::Instance().MarkIn(static_cast<float>(curDemo));
                     gEngfuncs.pfnClientCmd("dem_speed 1.0\n");
                     gEngfuncs.pfnClientCmd("dem_start\n");
                     return 0;
@@ -1284,10 +1270,58 @@ static int HUD_RedrawHandler(float flTime, int iIntermission, HUD_RedrawNext nex
     int scrW = 1024, scrH = 768;
     GetGameScreenResolution(scrW, scrH);
 
-    // HLAE Filming Frame Capture: Occurs BEFORE custom HUD drawing so video is 100% clean of UI overlays!
-    if (GameVideoRecorder::Instance().IsHighlightFilming())
+    // HLAE Studio Lockstep Seek & Capture
+    if (GameVideoRecorder::Instance().IsHighlightSeeking())
     {
-        GameVideoRecorder::Instance().CaptureFilmingFrame(scrW, scrH);
+        g_seekFrameCounter++;
+        const double curDemoTime = GameVideoRecorder::Instance().GetExactDemoTime();
+        const float markIn = GameVideoRecorder::Instance().GetMarkInTime();
+
+        // dem_jump pauses and positions timeline. Allow demoplayer 8+ frames to stabilize
+        if (g_seekFrameCounter >= 8 && std::abs(curDemoTime - markIn) < 1.0)
+        {
+            const std::string name = GetActiveDemoOrMapName();
+            if (GameVideoRecorder::Instance().StartStudioRender(name, scrW, scrH))
+            {
+                gEngfuncs.pfnClientCmd("dem_pause 0\n");
+                gEngfuncs.pfnClientCmd("host_framerate 0.01666667\n");
+            }
+            else
+            {
+                GameVideoRecorder::Instance().DiscardHighlight();
+                gEngfuncs.pfnClientCmd("dem_start\n");
+            }
+        }
+        else if (g_seekFrameCounter > 60)
+        {
+            // Timeout fallback
+            const std::string name = GetActiveDemoOrMapName();
+            if (GameVideoRecorder::Instance().StartStudioRender(name, scrW, scrH))
+            {
+                gEngfuncs.pfnClientCmd("dem_pause 0\n");
+                gEngfuncs.pfnClientCmd("host_framerate 0.01666667\n");
+            }
+            else
+            {
+                GameVideoRecorder::Instance().DiscardHighlight();
+                gEngfuncs.pfnClientCmd("dem_start\n");
+            }
+        }
+    }
+    else if (GameVideoRecorder::Instance().IsHighlightRendering())
+    {
+        GameVideoRecorder::Instance().CaptureStudioFrame(scrW, scrH);
+
+        if (GameVideoRecorder::Instance().GetRenderFramesPushed() >= GameVideoRecorder::Instance().GetRenderTargetFrames())
+        {
+            GameVideoRecorder::Instance().FinishStudioRender();
+            gEngfuncs.pfnClientCmd("host_framerate 0\n");
+            gEngfuncs.pfnClientCmd("dem_pause 1\n");
+
+            g_HighlightToastText = "Studio Highlight saved: " + GameVideoRecorder::Instance().GetLastSavedHighlightPath();
+            g_HighlightToastSuccess = true;
+            g_HighlightToastTimer = gEngfuncs.GetClientTime() + 6.0;
+        }
     }
 
     if (hud_draw_value != 0.0f && !overlay_visible && g_DemoMenuVisible)
@@ -1303,13 +1337,17 @@ static int HUD_RedrawHandler(float flTime, int iIntermission, HUD_RedrawNext nex
     const bool isViewingDemo = (gEngfuncs.pDemoAPI && gEngfuncs.pDemoAPI->IsPlayingback());
     if (isViewingDemo && !overlay_visible)
     {
-        if (GameVideoRecorder::Instance().IsHighlightFilming())
+        if (GameVideoRecorder::Instance().IsHighlightSeeking() || GameVideoRecorder::Instance().IsHighlightRendering())
         {
-            DrawHighlightFilmingWidget(scrW);
+            DrawHighlightRenderingModal(scrW, scrH);
         }
         else if (GameVideoRecorder::Instance().IsHighlightAwaitingConfirm())
         {
             DrawHighlightConfirmDialog(scrW, scrH);
+        }
+        else if (GameVideoRecorder::Instance().IsHighlightMarking())
+        {
+            DrawHighlightMarkingWidget(scrW);
         }
         else if (g_HighlightToastTimer > gEngfuncs.GetClientTime())
         {
@@ -1339,7 +1377,10 @@ static void HUD_ResetHandler(HUD_ResetNext next)
     if (GameVideoRecorder::Instance().IsMatchDemoRecording())
         GameVideoRecorder::Instance().StopMatchDemo();
 
-    if (GameVideoRecorder::Instance().IsHighlightFilming() || GameVideoRecorder::Instance().IsHighlightAwaitingConfirm())
+    if (GameVideoRecorder::Instance().IsHighlightMarking() || 
+        GameVideoRecorder::Instance().IsHighlightAwaitingConfirm() ||
+        GameVideoRecorder::Instance().IsHighlightSeeking() ||
+        GameVideoRecorder::Instance().IsHighlightRendering())
         GameVideoRecorder::Instance().DiscardHighlight();
 }
 
