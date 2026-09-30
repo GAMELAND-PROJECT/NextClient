@@ -215,6 +215,11 @@ public:
 
     virtual void OnKeyCodePressed(vgui2::KeyCode code)
     {
+        if (code == vgui2::KEY_F4)
+        {
+            BasePanel()->OnOpenDemoUploaderDialog();
+            return;
+        }
         m_KeyRepeat.KeyDown(code);
         BaseClass::OnKeyCodePressed(code);
     }
@@ -995,7 +1000,7 @@ void CBasePanel::RunMenuCommand(const char *command)
     {
         OnOpenPlayerListDialog();
     }
-    else if (!Q_stricmp(command, "OpenDemoUploader"))
+    else if (!Q_stricmp(command, "OpenDemoUploader") || !Q_stricmp(command, "OpenDemoStudio"))
     {
         OnOpenDemoUploaderDialog();
     }
@@ -1022,6 +1027,16 @@ void CBasePanel::RunMenuCommand(const char *command)
     {
         BaseClass::OnCommand(command);
     }
+}
+
+void CBasePanel::OnKeyCodePressed(vgui2::KeyCode code)
+{
+    if (code == vgui2::KEY_F4)
+    {
+        OnOpenDemoUploaderDialog();
+        return;
+    }
+    BaseClass::OnKeyCodePressed(code);
 }
 
 void CBasePanel::OnCommand(const char *command)

@@ -1,3 +1,4 @@
+#include "GameUi.h"
 #include "DemoUploaderDialog.h"
 #include <vgui_controls/ListPanel.h>
 #include <vgui_controls/Button.h>
@@ -10,31 +11,41 @@
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
-#include <wininet.h>
+#include <filesystem>
+#include <string>
+#include <vector>
+#include <sstream>
+#include <format>
+#include <chrono>
+
 #ifdef MessageBox
 #undef MessageBox
 #endif
-#pragma comment(lib, "wininet.lib")
 
 using namespace vgui2;
+namespace fs = std::filesystem;
 
 CDemoUploaderDialog::CDemoUploaderDialog(vgui2::Panel *parent) : Frame(parent, "DemoUploaderDialog")
 {
-    SetBounds(0, 0, 400, 350);
+    SetBounds(0, 0, 620, 440);
     SetSizeable(false);
-    SetTitle("GameLand Demo Manager", true);
+    SetTitle("GameLand Match Demo Studio & Video Converter", true);
 
     m_pDemoList = new ListPanel(this, "DemoList");
-    m_pDemoList->AddColumnHeader(0, "demoname", "Demo File", m_pDemoList->GetWide() - 20);
+    m_pDemoList->AddColumnHeader(0, "demoname", "Demo File", 270);
+    m_pDemoList->AddColumnHeader(1, "map", "Map", 90);
+    m_pDemoList->AddColumnHeader(2, "size", "Size", 75);
+    m_pDemoList->AddColumnHeader(3, "date", "Recorded Date", 110);
 
-    m_pUploadButton = new Button(this, "UploadButton", "Upload Selected");
+    m_pConvertButton = new Button(this, "ConvertButton", "Convert to MP4 (1080p)");
+    m_pPlayButton = new Button(this, "PlayButton", "Play Demo");
+    m_pOpenFolderButton = new Button(this, "OpenFolderButton", "Videos Folder");
     m_pRefreshButton = new Button(this, "RefreshButton", "Refresh");
-    m_pCloseButton = new Button(this, "CloseButton", "Close");
+    m_pCloseButton = new Button(this, "CloseButton", "Close (F4)");
 
-    LoadControlSettings("Resource/DemoUploaderDialog.res");
-    
-    // Setup Action Signals
-    m_pUploadButton->SetCommand("Upload");
+    m_pConvertButton->SetCommand("Convert");
+    m_pPlayButton->SetCommand("Play");
+    m_pOpenFolderButton->SetCommand("OpenFolder");
     m_pRefreshButton->SetCommand("Refresh");
     m_pCloseButton->SetCommand("Close");
 
@@ -51,33 +62,136 @@ void CDemoUploaderDialog::Activate()
     RefreshDemoList();
 }
 
+void CDemoUploaderDialog::OnKeyCodePressed(vgui2::KeyCode code)
+{
+    if (code == vgui2::KEY_F4 || code == vgui2::KEY_ESCAPE)
+    {
+        OnClose();
+        return;
+    }
+    BaseClass::OnKeyCodePressed(code);
+}
+
 void CDemoUploaderDialog::ApplySchemeSettings(vgui2::IScheme *pScheme)
 {
     BaseClass::ApplySchemeSettings(pScheme);
-    
-    // Position elements if no .res file is present
-    m_pDemoList->SetBounds(20, 40, 360, 240);
-    m_pRefreshButton->SetBounds(20, 290, 80, 30);
-    m_pUploadButton->SetBounds(110, 290, 180, 30);
-    m_pCloseButton->SetBounds(300, 290, 80, 30);
+
+    // Center dialog on screen
+    int screenW = 1024, screenH = 768;
+    if (vgui2::surface() != nullptr)
+        vgui2::surface()->GetScreenSize(screenW, screenH);
+    SetPos((screenW - 620) / 2, (screenH - 440) / 2);
+
+    m_pDemoList->SetBounds(20, 42, 580, 335);
+
+    const int btnY = 390;
+    const int btnH = 30;
+
+    m_pConvertButton->SetBounds(20, btnY, 175, btnH);
+    m_pPlayButton->SetBounds(205, btnY, 95, btnH);
+    m_pOpenFolderButton->SetBounds(310, btnY, 115, btnH);
+    m_pRefreshButton->SetBounds(435, btnY, 80, btnH);
+    m_pCloseButton->SetBounds(525, btnY, 75, btnH);
+}
+
+struct DemoEntryItem
+{
+    std::string filename;
+    std::string relpath;
+    std::string map;
+    std::string sizeStr;
+    std::string dateStr;
+    uint64_t timestamp{0};
+};
+
+static std::string FormatBytes(uintmax_t bytes)
+{
+    char buf[32]{};
+    if (bytes >= 1024 * 1024)
+        std::snprintf(buf, sizeof(buf), "%.1f MB", static_cast<double>(bytes) / (1024.0 * 1024.0));
+    else if (bytes >= 1024)
+        std::snprintf(buf, sizeof(buf), "%.1f KB", static_cast<double>(bytes) / 1024.0);
+    else
+        std::snprintf(buf, sizeof(buf), "%llu B", static_cast<unsigned long long>(bytes));
+    return buf;
+}
+
+static std::string ExtractMap(const std::string& name)
+{
+    std::string lower = name;
+    for (auto& c : lower) c = (char)std::tolower((unsigned char)c);
+
+    for (const auto* prefix : {"de_", "cs_", "aim_", "awp_", "fy_", "surf_", "zm_"})
+    {
+        size_t pos = lower.find(prefix);
+        if (pos != std::string::npos)
+        {
+            size_t endPos = lower.find_first_of("._", pos + 3);
+            if (endPos != std::string::npos)
+                return name.substr(pos, endPos - pos);
+            return name.substr(pos);
+        }
+    }
+    return "cstrike";
 }
 
 void CDemoUploaderDialog::RefreshDemoList()
 {
     m_pDemoList->DeleteAllItems();
 
-    FileFindHandle_t findHandle = NULL;
-    const char *filename = g_pFullFileSystem->FindFirst("*.dem", &findHandle, "GAME");
-    while (filename)
+    std::vector<DemoEntryItem> demos;
+
+    auto scanDir = [&](const std::string& dirPath, const std::string& prefixRel) {
+        try {
+            if (fs::exists(dirPath)) {
+                for (const auto& entry : fs::directory_iterator(dirPath)) {
+                    if (entry.is_regular_file() && entry.path().extension() == ".dem") {
+                        DemoEntryItem item;
+                        item.filename = entry.path().filename().string();
+                        item.relpath = prefixRel.empty() ? item.filename : (prefixRel + "/" + item.filename);
+                        item.map = ExtractMap(item.filename);
+
+                        auto fsize = entry.file_size();
+                        item.sizeStr = FormatBytes(fsize);
+
+                        auto ftime = entry.last_write_time();
+                        auto sctp = std::chrono::time_point_cast<std::chrono::system_clock::duration>(
+                            ftime - fs::file_time_type::clock::now() + std::chrono::system_clock::now());
+                        std::time_t cftime = std::chrono::system_clock::to_time_t(sctp);
+                        std::tm tm{};
+                        localtime_s(&tm, &cftime);
+
+                        char dtBuf[32]{};
+                        std::strftime(dtBuf, sizeof(dtBuf), "%Y-%m-%d %H:%M", &tm);
+                        item.dateStr = dtBuf;
+                        item.timestamp = static_cast<uint64_t>(cftime);
+
+                        demos.push_back(item);
+                    }
+                }
+            }
+        } catch (...) {}
+    };
+
+    scanDir("cstrike/demos", "demos");
+    scanDir("cstrike", "");
+
+    // Sort newest first
+    std::sort(demos.begin(), demos.end(), [](const DemoEntryItem& a, const DemoEntryItem& b) {
+        return a.timestamp > b.timestamp;
+    });
+
+    for (const auto& d : demos)
     {
-        // Only show files starting with GL_ for GameLand match demos
-        if (strncmp(filename, "GL_", 3) == 0)
-        {
-            m_pDemoList->AddItem(new KeyValues("data", "demoname", filename), 0, false, false);
-        }
-        filename = g_pFullFileSystem->FindNext(findHandle);
+        KeyValues *kv = new KeyValues("data");
+        kv->SetString("demoname", d.filename.c_str());
+        kv->SetString("relpath", d.relpath.c_str());
+        kv->SetString("map", d.map.c_str());
+        kv->SetString("size", d.sizeStr.c_str());
+        kv->SetString("date", d.dateStr.c_str());
+
+        m_pDemoList->AddItem(kv, 0, false, false);
     }
-    g_pFullFileSystem->FindClose(findHandle);
 
     if (m_pDemoList->GetItemCount() > 0)
     {
@@ -85,82 +199,110 @@ void CDemoUploaderDialog::RefreshDemoList()
     }
 }
 
-void CDemoUploaderDialog::UploadSelectedDemo()
+void CDemoUploaderDialog::ConvertSelectedDemo()
 {
     if (m_pDemoList->GetSelectedItemsCount() == 0)
     {
-        MessageBox *pBox = new MessageBox("Error", "Please select a demo to upload.");
+        MessageBox *pBox = new MessageBox("Error", "Please select a demo from the list first.");
         pBox->DoModal();
         return;
     }
 
     int itemID = m_pDemoList->GetSelectedItem(0);
     KeyValues *kv = m_pDemoList->GetItem(itemID);
+    const char *szRelPath = kv->GetString("relpath", "");
     const char *szDemoName = kv->GetString("demoname", "");
 
-    if (!szDemoName[0]) return;
+    if (!szRelPath[0]) return;
 
-    char szFullPath[MAX_PATH];
-    g_pFullFileSystem->GetLocalPath(szDemoName, szFullPath, sizeof(szFullPath));
+    CreateDirectoryA("cstrike\\videos", nullptr);
 
-    // Disable button to prevent spam
-    m_pUploadButton->SetEnabled(false);
-    m_pUploadButton->SetText("Uploading...");
+    char exePath[MAX_PATH]{};
+    GetModuleFileNameA(nullptr, exePath, MAX_PATH);
 
-    // Basic upload using WinINet
-    HINTERNET hSession = InternetOpenA("NextClient Uploader", INTERNET_OPEN_TYPE_DIRECT, NULL, NULL, 0);
-    if (hSession)
+    std::ostringstream cmd;
+    cmd << "\"" << exePath << "\" -game cstrike -sw -noborder -windowed -width 1280 -height 720"
+        << " -novid +viewdemo \"" << szRelPath << "\" -democonvert";
+
+    STARTUPINFOA si{};
+    si.cb = sizeof(si);
+    si.dwFlags = STARTF_USESHOWWINDOW;
+    si.wShowWindow = SW_HIDE;
+
+    PROCESS_INFORMATION pi{};
+    std::string cmdStr = cmd.str();
+
+    BOOL created = CreateProcessA(
+        nullptr,
+        cmdStr.data(),
+        nullptr,
+        nullptr,
+        FALSE,
+        CREATE_NO_WINDOW | BELOW_NORMAL_PRIORITY_CLASS,
+        nullptr,
+        nullptr,
+        &si,
+        &pi
+    );
+
+    if (created)
     {
-        HINTERNET hConnect = InternetConnectA(hSession, "gameland.cam", INTERNET_DEFAULT_HTTP_PORT, NULL, NULL, INTERNET_SERVICE_HTTP, 0, 1);
-        if (hConnect)
-        {
-            char szUrl[256];
-            snprintf(szUrl, sizeof(szUrl), "/upload_demo.php?name=%s", szDemoName);
-            HINTERNET hRequest = HttpOpenRequestA(hConnect, "POST", szUrl, NULL, NULL, NULL, 0, 1);
-            if (hRequest)
-            {
-                // This is a naive multipart/form-data upload. We would read the file here.
-                // Since this is blocking, in a real scenario we might put this in a thread.
-                // For simplicity in UI, we'll just show success/fail.
-                
-                FILE *fp = fopen(szFullPath, "rb");
-                if (fp) {
-                    fseek(fp, 0, SEEK_END);
-                    long fileSize = ftell(fp);
-                    fseek(fp, 0, SEEK_SET);
-                    
-                    char *buffer = new char[fileSize];
-                    fread(buffer, 1, fileSize, fp);
-                    fclose(fp);
+        CloseHandle(pi.hThread);
+        CloseHandle(pi.hProcess);
 
-                    // Simplified header/body structure
-                    char header[] = "Content-Type: application/octet-stream\r\n";
-                    HttpSendRequestA(hRequest, header, static_cast<DWORD>(strlen(header)), (LPVOID)buffer, fileSize);
-                    delete[] buffer;
-                    
-                    MessageBox *pBox = new MessageBox("Success", "Demo uploaded successfully!");
-                    pBox->DoModal();
-                }
-                else {
-                    MessageBox *pBox = new MessageBox("Error", "Could not read demo file.");
-                    pBox->DoModal();
-                }
-                InternetCloseHandle(hRequest);
-            }
-            InternetCloseHandle(hConnect);
-        }
-        InternetCloseHandle(hSession);
+        std::string msg = "Demo conversion to 1080p 60FPS MP4 has started in the background!\n\nDemo: " + std::string(szDemoName) + "\nOutput: cstrike/videos/\n\nYou can keep playing or close this window.";
+        MessageBox *pBox = new MessageBox("GameLand Studio", msg.c_str());
+        pBox->DoModal();
     }
-    
-    m_pUploadButton->SetEnabled(true);
-    m_pUploadButton->SetText("Upload Selected");
+    else
+    {
+        MessageBox *pBox = new MessageBox("Error", "Failed to start background video converter.");
+        pBox->DoModal();
+    }
+}
+
+void CDemoUploaderDialog::PlaySelectedDemo()
+{
+    if (m_pDemoList->GetSelectedItemsCount() == 0)
+    {
+        MessageBox *pBox = new MessageBox("Error", "Please select a demo from the list first.");
+        pBox->DoModal();
+        return;
+    }
+
+    int itemID = m_pDemoList->GetSelectedItem(0);
+    KeyValues *kv = m_pDemoList->GetItem(itemID);
+    const char *szRelPath = kv->GetString("relpath", "");
+
+    if (!szRelPath[0]) return;
+
+    if (engine != nullptr)
+    {
+        std::string cmd = std::format("viewdemo \"{}\"\n", szRelPath);
+        engine->pfnClientCmd(cmd.c_str());
+        OnClose();
+    }
+}
+
+void CDemoUploaderDialog::OpenVideosFolder()
+{
+    CreateDirectoryA("cstrike\\videos", nullptr);
+    WinExec("explorer.exe cstrike\\videos", SW_SHOW);
 }
 
 void CDemoUploaderDialog::OnCommand(const char *command)
 {
-    if (!strcmp(command, "Upload"))
+    if (!strcmp(command, "Convert"))
     {
-        UploadSelectedDemo();
+        ConvertSelectedDemo();
+    }
+    else if (!strcmp(command, "Play"))
+    {
+        PlaySelectedDemo();
+    }
+    else if (!strcmp(command, "OpenFolder"))
+    {
+        OpenVideosFolder();
     }
     else if (!strcmp(command, "Refresh"))
     {

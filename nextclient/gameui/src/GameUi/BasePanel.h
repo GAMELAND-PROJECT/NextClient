@@ -140,6 +140,7 @@ public:
     void OnOpenQuitConfirmationDialog(void);
     void OnOpenOptionsDialog(const char* tabName = nullptr);
     void OnOpenDemoUploaderDialog(void);
+    void OnOpenDemoStudioDialog(void) { OnOpenDemoUploaderDialog(); }
     void OnOpenPlayerListDialog();
     void OnSizeChanged(int newWide, int newTall) override;
     void OnGameUIHidden(void);
@@ -204,6 +205,7 @@ public:
 
 private:
     virtual void OnCommand(const char *command);
+    virtual void OnKeyCodePressed(vgui2::KeyCode code);
     virtual void PerformLayout(void);
 
 private:
