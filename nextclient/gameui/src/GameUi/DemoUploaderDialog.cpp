@@ -215,14 +215,24 @@ void CDemoUploaderDialog::ConvertSelectedDemo()
 
     if (!szRelPath[0]) return;
 
+    // Use current screen resolution dynamically
+    int curW = 1024, curH = 768;
+    if (vgui2::surface() != nullptr)
+        vgui2::surface()->GetScreenSize(curW, curH);
+
     CreateDirectoryA("cstrike\\videos", nullptr);
 
     char exePath[MAX_PATH]{};
     GetModuleFileNameA(nullptr, exePath, MAX_PATH);
 
+    // Resolve cstrike.exe directly so we bypass launcher single-instance check
+    fs::path curPath(exePath);
+    fs::path cstrikePath = curPath.parent_path() / "cstrike.exe";
+    std::string runnerPath = fs::is_regular_file(cstrikePath) ? cstrikePath.string() : curPath.string();
+
     std::ostringstream cmd;
-    cmd << "\"" << exePath << "\" -game cstrike -sw -noborder -windowed -width 1280 -height 720"
-        << " -novid +viewdemo \"" << szRelPath << "\" -democonvert";
+    cmd << "\"" << runnerPath << "\" -game cstrike -sw -noborder -windowed -width " << curW << " -height " << curH
+        << " -novid -novideosettings +viewdemo \"" << szRelPath << "\" -democonvert";
 
     STARTUPINFOA si{};
     si.cb = sizeof(si);
