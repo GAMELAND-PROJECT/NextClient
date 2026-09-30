@@ -73,6 +73,8 @@ add_library(${PROJECT_NAME} SHARED
         src/hud/GameHud.cpp
         src/hud/HudAmmo.h
         src/hud/HudAmmo.cpp
+        src/recorder/GameVideoRecorder.h
+        src/recorder/GameVideoRecorder.cpp
 )
 
 target_include_directories(${PROJECT_NAME} PRIVATE
@@ -84,6 +86,14 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
         NextClient::gameui
         optic::optic
 )
+
+if (WIN32)
+    target_link_libraries(${PROJECT_NAME} PRIVATE
+            opengl32
+            ole32
+            oleaut32
+    )
+endif ()
 
 if (MSVC)
     target_compile_options(${PROJECT_NAME} PRIVATE
