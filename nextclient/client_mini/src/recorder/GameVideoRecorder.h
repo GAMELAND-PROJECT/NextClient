@@ -110,6 +110,7 @@ namespace nextclient::client_mini
         std::atomic<bool> m_stopRequested{false};
         std::atomic<uint64_t> m_framesPushed{0};
         std::chrono::steady_clock::time_point m_syncStartTime;
+        std::chrono::steady_clock::time_point m_lastFrameTime;
 
         int m_recordWidth{1280};
         int m_recordHeight{720};
@@ -126,7 +127,7 @@ namespace nextclient::client_mini
         std::mutex m_queueMutex;
         std::condition_variable m_queueCv;
         std::queue<std::vector<uint8_t>> m_frameQueue;
-        static constexpr size_t kMaxQueueFrames = 15;
+        static constexpr size_t kMaxQueueFrames = 120;
 
         std::vector<uint8_t> m_preallocatedCaptureBuffer;
 #endif

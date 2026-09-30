@@ -19,7 +19,7 @@ static bool SafeGlReadPixels(int width, int height, uint8_t* pDest)
 {
     __try
     {
-        glPixelStorei(GL_PACK_ALIGNMENT, 1);
+        glPixelStorei(GL_PACK_ALIGNMENT, ((width * 3) % 4 == 0) ? 4 : 1);
         glReadPixels(0, 0, width, height, GL_RGB, GL_UNSIGNED_BYTE, pDest);
         return true;
     }
@@ -454,9 +454,10 @@ namespace nextclient::client_mini
             << " -r " << fps << " -i \"" << videoPipeName << "\""
             << " -f s16le -ar " << audioRate << " -ac 2 -i \"" << audioPipeName << "\""
             << " -vf vflip"
-            << " -c:v libx264 -preset ultrafast -tune zerolatency -crf 18 -pix_fmt yuv420p -b:v 8000k -maxrate 12000k -bufsize 16000k"
+            << " -c:v libx264 -preset veryfast -crf 16 -pix_fmt yuv420p"
+            << " -colorspace bt709 -color_primaries bt709 -color_trc bt709 -color_range tv"
             << " -af aresample=async=1000:min_hard_comp=0.100000:first_pts=0"
-            << " -c:a aac -b:a 160k"
+            << " -c:a aac -b:a 192k"
             << " -movflags +faststart+frag_keyframe+empty_moov"
             << " \"" << outputPath << "\"";
 
@@ -517,6 +518,7 @@ namespace nextclient::client_mini
 
         // Step 6: Mark synchronized start time
         m_syncStartTime = std::chrono::steady_clock::now();
+        m_lastFrameTime = m_syncStartTime;
         m_framesPushed = 1;
         m_readyForFrames = true;
 
@@ -589,16 +591,17 @@ namespace nextclient::client_mini
             return;
 
         const auto now = std::chrono::steady_clock::now();
-        const double elapsedSec = std::chrono::duration<double>(now - m_syncStartTime).count();
-        const uint64_t targetFrameCount = static_cast<uint64_t>(elapsedSec * m_targetFps);
+        const double elapsedSinceLast = std::chrono::duration<double>(now - m_lastFrameTime).count();
+        const double frameInterval = 1.0 / static_cast<double>(m_targetFps);
 
-        const uint64_t currentPushed = m_framesPushed.load();
-        if (currentPushed >= targetFrameCount)
+        // Frame pacing: enforce smooth, constant interval with 2ms tolerance for frame timing jitter
+        if (elapsedSinceLast < frameInterval - 0.002)
             return;
 
-        uint64_t framesNeeded = targetFrameCount - currentPushed;
-        if (framesNeeded > 3)
-            framesNeeded = 3;
+        if (elapsedSinceLast > frameInterval * 2.0)
+            m_lastFrameTime = now;
+        else
+            m_lastFrameTime += std::chrono::duration_cast<std::chrono::steady_clock::duration>(std::chrono::duration<double>(frameInterval));
 
         const size_t frameSize = static_cast<size_t>(width) * height * 3;
         if (m_preallocatedCaptureBuffer.size() != frameSize)
@@ -608,14 +611,11 @@ namespace nextclient::client_mini
             return;
 
         {
-            std::unique_lock<std::mutex> lock(m_queueMutex, std::try_to_lock);
-            if (lock.owns_lock())
+            std::lock_guard<std::mutex> lock(m_queueMutex);
+            if (m_frameQueue.size() < kMaxQueueFrames)
             {
-                for (uint64_t i = 0; i < framesNeeded && m_frameQueue.size() < kMaxQueueFrames; ++i)
-                {
-                    m_frameQueue.push(m_preallocatedCaptureBuffer);
-                    m_framesPushed.fetch_add(1);
-                }
+                m_frameQueue.push(m_preallocatedCaptureBuffer);
+                m_framesPushed.fetch_add(1);
                 m_queueCv.notify_one();
             }
         }
