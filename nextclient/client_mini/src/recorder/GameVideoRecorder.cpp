@@ -252,9 +252,20 @@ namespace nextclient::client_mini
         char exePath[MAX_PATH]{};
         GetModuleFileNameA(nullptr, exePath, MAX_PATH);
 
+        std::string runnerPath(exePath);
+        const size_t lastSlash = runnerPath.find_last_of("/\\");
+        if (lastSlash != std::string::npos)
+        {
+            std::string folder = runnerPath.substr(0, lastSlash + 1);
+            std::string csExe = folder + "cstrike.exe";
+            DWORD attr = GetFileAttributesA(csExe.c_str());
+            if (attr != INVALID_FILE_ATTRIBUTES && !(attr & FILE_ATTRIBUTE_DIRECTORY))
+                runnerPath = csExe;
+        }
+
         std::ostringstream cmd;
-        cmd << "\"" << exePath << "\" -game cstrike -sw -noborder -windowed -width " << targetWidth << " -height " << targetHeight
-            << " -novid +viewdemo \"demos/" << demoFileName << "\" -democonvert";
+        cmd << "\"" << runnerPath << "\" -game cstrike -sw -noborder -windowed -width " << targetWidth << " -height " << targetHeight
+            << " -novid -novideosettings +viewdemo \"demos/" << demoFileName << "\" -democonvert";
 
         STARTUPINFOA si{};
         si.cb = sizeof(si);

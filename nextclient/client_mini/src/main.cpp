@@ -812,7 +812,9 @@ static void GetGameScreenResolution(int& outWidth, int& outHeight)
             if (BindingEquals(pszCurrentBinding, "slot1") || keynum == '1' || keynum == 13) // Enter or 1
             {
                 const std::string demoFile = demos[g_SelectedDemoIndex].fileName;
-                GameVideoRecorder::Instance().StartDemoConversion(demoFile, 1280, 720, 60);
+                int curW = 1024, curH = 768;
+                GetGameScreenResolution(curW, curH);
+                GameVideoRecorder::Instance().StartDemoConversion(demoFile, curW, curH, 60);
                 g_SelectedDemoIndex = -1;
                 return 0;
             }

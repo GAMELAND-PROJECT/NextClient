@@ -117,7 +117,10 @@ ClientLauncher::ClientLauncher(HINSTANCE module_instance, const char* cmd_line) 
 
     InitializeCmdLine(cmd_line);
 
-    global_win_mutex_ = CreateMutexA(nullptr, FALSE, "ValveHalfLifeLauncherMutex");
+    if (!cmd_line_->CheckParm("-democonvert"))
+    {
+        global_win_mutex_ = CreateMutexA(nullptr, FALSE, "ValveHalfLifeLauncherMutex");
+    }
     g_SaveFullDumps = cmd_line_->CheckParm("-fulldump");
 }
 
@@ -177,7 +180,7 @@ void ClientLauncher::Run()
 
     // Video-mode changes are applied before the engine starts, avoiding the
     // fragile in-game restart path. Internal engine restarts skip this page.
-    if (!is_relaunch_ && !cmd_line_->CheckParm("-novideosettings") &&
+    if (!is_relaunch_ && !cmd_line_->CheckParm("-novideosettings") && !cmd_line_->CheckParm("-democonvert") &&
         !ShowVideoSettingsDialog(module_instance_, online_access))
         return;
 
@@ -574,6 +577,12 @@ void ClientLauncher::FixScreenResolution()
 
 bool ClientLauncher::GlobalMutexCheck()
 {
+    if (cmd_line_->CheckParm("-democonvert"))
+        return true;
+
+    if (!global_win_mutex_)
+        return true;
+
     DWORD result = WaitForSingleObject(global_win_mutex_, 0);
     if (result != WAIT_OBJECT_0 &&
         result != WAIT_ABANDONED &&
