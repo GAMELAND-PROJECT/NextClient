@@ -204,15 +204,13 @@ namespace nextclient::client_mini
     // -------------------------------------------------------------
     // Bookmark & HLAE Studio Render (Keys 1 & 2 only)
     // -------------------------------------------------------------
-    double GameVideoRecorder::GetExactDemoTime()
+    static void* GetDemoPlayerInterface()
     {
         typedef void* (*CreateInterfaceFn)(const char* pName, int* pReturnCode);
         static void* s_pDemoPlayer = nullptr;
-        static bool s_attempted = false;
 
-        if (!s_attempted || s_pDemoPlayer == nullptr)
+        if (s_pDemoPlayer == nullptr)
         {
-            s_attempted = true;
             HMODULE hModule = GetModuleHandleA("demoplayer.dll");
             if (hModule != nullptr)
             {
@@ -224,20 +222,90 @@ namespace nextclient::client_mini
                 }
             }
         }
+        return s_pDemoPlayer;
+    }
 
-        if (s_pDemoPlayer != nullptr)
+    double GameVideoRecorder::GetExactDemoTime()
+    {
+        void* pDemoPlayer = GetDemoPlayerInterface();
+        if (pDemoPlayer != nullptr)
         {
-            void** vtable = *(void***)s_pDemoPlayer;
+            void** vtable = *(void***)pDemoPlayer;
             if (vtable != nullptr && vtable[34] != nullptr)
             {
                 typedef double (__thiscall *GetDemoTimeFn)(void* thisPtr);
                 GetDemoTimeFn pfnGetDemoTime = (GetDemoTimeFn)vtable[34];
-                const double t = pfnGetDemoTime(s_pDemoPlayer);
+                const double t = pfnGetDemoTime(pDemoPlayer);
                 if (t >= 0.0) return t;
             }
         }
-
         return 0.0;
+    }
+
+    double GameVideoRecorder::GetDemoStartTime()
+    {
+        void* pDemoPlayer = GetDemoPlayerInterface();
+        if (pDemoPlayer != nullptr)
+        {
+            void** vtable = *(void***)pDemoPlayer;
+            if (vtable != nullptr && vtable[35] != nullptr)
+            {
+                typedef double (__thiscall *GetStartTimeFn)(void* thisPtr);
+                GetStartTimeFn pfnGetStartTime = (GetStartTimeFn)vtable[35];
+                return pfnGetStartTime(pDemoPlayer);
+            }
+        }
+        return 0.0;
+    }
+
+    double GameVideoRecorder::GetDemoEndTime()
+    {
+        void* pDemoPlayer = GetDemoPlayerInterface();
+        if (pDemoPlayer != nullptr)
+        {
+            void** vtable = *(void***)pDemoPlayer;
+            if (vtable != nullptr && vtable[36] != nullptr)
+            {
+                typedef double (__thiscall *GetEndTimeFn)(void* thisPtr);
+                GetEndTimeFn pfnGetEndTime = (GetEndTimeFn)vtable[36];
+                return pfnGetEndTime(pDemoPlayer);
+            }
+        }
+        return 0.0;
+    }
+
+    bool GameVideoRecorder::SetDemoWorldTime(double time, bool relative)
+    {
+        void* pDemoPlayer = GetDemoPlayerInterface();
+        if (pDemoPlayer != nullptr)
+        {
+            void** vtable = *(void***)pDemoPlayer;
+            if (vtable != nullptr && vtable[22] != nullptr)
+            {
+                typedef void (__thiscall *SetWorldTimeFn)(void* thisPtr, double timeVal, bool isRelative);
+                SetWorldTimeFn pfnSetWorldTime = (SetWorldTimeFn)vtable[22];
+                pfnSetWorldTime(pDemoPlayer, time, relative);
+                return true;
+            }
+        }
+        return false;
+    }
+
+    bool GameVideoRecorder::SetDemoPaused(bool paused)
+    {
+        void* pDemoPlayer = GetDemoPlayerInterface();
+        if (pDemoPlayer != nullptr)
+        {
+            void** vtable = *(void***)pDemoPlayer;
+            if (vtable != nullptr && vtable[24] != nullptr)
+            {
+                typedef void (__thiscall *SetPausedFn)(void* thisPtr, bool state);
+                SetPausedFn pfnSetPaused = (SetPausedFn)vtable[24];
+                pfnSetPaused(pDemoPlayer, paused);
+                return true;
+            }
+        }
+        return false;
     }
 
     void GameVideoRecorder::MarkIn(float demoTime)

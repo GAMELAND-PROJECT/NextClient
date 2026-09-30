@@ -942,9 +942,10 @@ static std::string GetActiveDemoOrMapName()
             {
                 if (BindingEquals(pszCurrentBinding, "slot1") || keynum == '1' || keynum == 13) // 1 or Enter
                 {
-                    char cmd[64]{};
-                    std::snprintf(cmd, sizeof(cmd), "dem_jump %.2f\n", GameVideoRecorder::Instance().GetMarkInTime());
-                    gEngfuncs.pfnClientCmd(cmd);
+                    // Direct absolute jump to mark in timestamp (NO relative dem_jump offset!)
+                    const float markIn = GameVideoRecorder::Instance().GetMarkInTime();
+                    GameVideoRecorder::Instance().SetDemoWorldTime(static_cast<double>(markIn), false);
+                    GameVideoRecorder::Instance().SetDemoPaused(true);
                     gEngfuncs.pfnClientCmd("dem_speed 1.0\n");
 
                     GameVideoRecorder::Instance().SetHighlightSeeking();
@@ -955,6 +956,7 @@ static std::string GetActiveDemoOrMapName()
                 if (BindingEquals(pszCurrentBinding, "slot2") || keynum == '2' || keynum == 27 || keynum == '0') // 2 or Esc
                 {
                     GameVideoRecorder::Instance().DiscardHighlight();
+                    GameVideoRecorder::Instance().SetDemoPaused(false);
                     gEngfuncs.pfnClientCmd("dem_start\n"); // resume playback
                     g_HighlightToastText = "Highlight discarded";
                     g_HighlightToastSuccess = false;
@@ -972,6 +974,7 @@ static std::string GetActiveDemoOrMapName()
                     const double curDemo = GameVideoRecorder::Instance().GetExactDemoTime();
                     if (GameVideoRecorder::Instance().MarkOut(static_cast<float>(curDemo)))
                     {
+                        GameVideoRecorder::Instance().SetDemoPaused(true);
                         gEngfuncs.pfnClientCmd("dem_pause 1\n"); // pause on mark out
                     }
                     else
@@ -1270,40 +1273,25 @@ static int HUD_RedrawHandler(float flTime, int iIntermission, HUD_RedrawNext nex
     int scrW = 1024, scrH = 768;
     GetGameScreenResolution(scrW, scrH);
 
-    // HLAE Studio Lockstep Seek & Capture
+    // HLAE Studio Lockstep Seek & Capture (Exact Absolute Jump)
     if (GameVideoRecorder::Instance().IsHighlightSeeking())
     {
         g_seekFrameCounter++;
-        const double curDemoTime = GameVideoRecorder::Instance().GetExactDemoTime();
-        const float markIn = GameVideoRecorder::Instance().GetMarkInTime();
 
-        // dem_jump pauses and positions timeline. Allow demoplayer 8+ frames to stabilize
-        if (g_seekFrameCounter >= 8 && std::abs(curDemoTime - markIn) < 1.0)
+        // Allow 8 frames for engine to decompress delta packets and reconstruct entities at markIn
+        if (g_seekFrameCounter >= 8)
         {
             const std::string name = GetActiveDemoOrMapName();
             if (GameVideoRecorder::Instance().StartStudioRender(name, scrW, scrH))
             {
+                GameVideoRecorder::Instance().SetDemoPaused(false);
                 gEngfuncs.pfnClientCmd("dem_pause 0\n");
                 gEngfuncs.pfnClientCmd("host_framerate 0.01666667\n");
             }
             else
             {
                 GameVideoRecorder::Instance().DiscardHighlight();
-                gEngfuncs.pfnClientCmd("dem_start\n");
-            }
-        }
-        else if (g_seekFrameCounter > 60)
-        {
-            // Timeout fallback
-            const std::string name = GetActiveDemoOrMapName();
-            if (GameVideoRecorder::Instance().StartStudioRender(name, scrW, scrH))
-            {
-                gEngfuncs.pfnClientCmd("dem_pause 0\n");
-                gEngfuncs.pfnClientCmd("host_framerate 0.01666667\n");
-            }
-            else
-            {
-                GameVideoRecorder::Instance().DiscardHighlight();
+                GameVideoRecorder::Instance().SetDemoPaused(false);
                 gEngfuncs.pfnClientCmd("dem_start\n");
             }
         }
@@ -1316,6 +1304,7 @@ static int HUD_RedrawHandler(float flTime, int iIntermission, HUD_RedrawNext nex
         {
             GameVideoRecorder::Instance().FinishStudioRender();
             gEngfuncs.pfnClientCmd("host_framerate 0\n");
+            GameVideoRecorder::Instance().SetDemoPaused(true);
             gEngfuncs.pfnClientCmd("dem_pause 1\n");
 
             g_HighlightToastText = "Studio Highlight saved: " + GameVideoRecorder::Instance().GetLastSavedHighlightPath();

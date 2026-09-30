@@ -54,8 +54,12 @@ namespace nextclient::client_mini
         bool IsHighlightSeeking() const { return m_highlightState.load() == HighlightState::Seeking; }
         bool IsHighlightRendering() const { return m_highlightState.load() == HighlightState::Rendering; }
 
-        // Real demo playback time directly from demoplayer.dll (IDemoPlayer001::GetDemoTime)
+        // Real demo playback time directly from demoplayer.dll (IDemoPlayer001)
         double GetExactDemoTime();
+        double GetDemoStartTime();
+        double GetDemoEndTime();
+        bool SetDemoWorldTime(double time, bool relative = false);
+        bool SetDemoPaused(bool paused);
 
         void MarkIn(float demoTime);
         bool MarkOut(float demoTime);
