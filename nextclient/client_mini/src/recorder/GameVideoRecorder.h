@@ -28,10 +28,9 @@ namespace nextclient::client_mini
     enum class HighlightState
     {
         Idle,
-        Marking,
-        AwaitingConfirm,
-        Seeking,
-        Rendering
+        Starting,        // HLAE FS_STARTING: Drop frame 0
+        Active,          // HLAE FS_ACTIVE: Recording frames in real-time lockstep
+        AwaitingConfirm  // Awaiting user confirmation to keep or discard
     };
 
     class GameVideoRecorder
@@ -46,31 +45,43 @@ namespace nextclient::client_mini
         std::string GetFormattedDemoTime() const;
         std::string GetCurrentDemoFileName() const { return m_currentDemoFileName; }
 
-        // Bookmark & Instant Studio Render (Keys 1 & 2 in viewdemo)
+        // HLAE-Grade Filming & Live Highlight System
         HighlightState GetHighlightState() const { return m_highlightState.load(); }
         bool IsHighlightIdle() const { return m_highlightState.load() == HighlightState::Idle; }
-        bool IsHighlightMarking() const { return m_highlightState.load() == HighlightState::Marking; }
+        bool IsHighlightStarting() const { return m_highlightState.load() == HighlightState::Starting; }
+        bool IsHighlightActive() const { return m_highlightState.load() == HighlightState::Active; }
         bool IsHighlightAwaitingConfirm() const { return m_highlightState.load() == HighlightState::AwaitingConfirm; }
-        bool IsHighlightSeeking() const { return m_highlightState.load() == HighlightState::Seeking; }
-        bool IsHighlightRendering() const { return m_highlightState.load() == HighlightState::Rendering; }
-        void SetHighlightSeeking() { m_highlightState = HighlightState::Seeking; }
+        bool IsHighlightFilming() const { return IsHighlightStarting() || IsHighlightActive(); }
 
-        void MarkIn(float clientTime);
-        bool MarkOut(float clientTime);
+        // One-Touch F3 Hotkey HLAE Filming
+        bool ToggleHlaeFilming(const std::string& demoOrMapName, int width, int height);
+        bool StartFilming(const std::string& demoOrMapName, int width, int height, bool isBookmark = false);
+        void CaptureFilmingFrame(int width, int height);
+        bool StopFilming(bool discard = false);
+
+        // Bookmark Flow (Keys 1 & 2 in viewdemo)
+        void MarkIn(const std::string& demoOrMapName, int width, int height);
+        bool MarkOut();
+                // Backward-compat helpers
+        bool IsHighlightSeeking() const { return false; }
+        bool IsHighlightRendering() const { return IsHighlightActive(); }
+        bool IsHighlightMarking() const { return IsHighlightFilming(); }
+        float GetMarkInTime() const { return 0.0f; }
+        float GetMarkOutTime() const { return GetFilmingDuration(); }
+        void SetHighlightSeeking() {}
+        int GetRenderProgressPercent() const { return 0; }
+        uint64_t GetRenderFramesPushed() const { return m_filmingFramesPushed.load(); }
+        uint64_t GetRenderTargetFrames() const { return 0; }
+        void FinishStudioRender() { StopFilming(false); }
+        void CaptureStudioFrame(int width, int height, float clientTime = 0.0f) { CaptureFilmingFrame(width, height); }
+
+        void ConfirmBookmarkSave();
         void DiscardHighlight();
-        bool StartStudioRender(const std::string& demoOrMapName, int width, int height);
-        void CaptureStudioFrame(int width, int height, float clientTime);
-        void FinishStudioRender();
 
-        float GetMarkInTime() const { return m_markInTime; }
-        float GetMarkOutTime() const { return m_markOutTime; }
-        float GetHighlightDuration() const { return (m_markOutTime > m_markInTime) ? (m_markOutTime - m_markInTime) : 0.0f; }
+        float GetFilmingDuration() const;
         std::string GetFormattedTime(float seconds) const;
-        std::string GetHighlightRangeFormatted() const;
         std::string GetHighlightClipInfo() const { return m_highlightClipInfo; }
-        int GetRenderProgressPercent() const;
-        uint64_t GetRenderFramesPushed() const { return m_renderFramesPushed.load(); }
-        uint64_t GetRenderTargetFrames() const { return m_renderTargetFrames; }
+        uint64_t GetFilmingFramesPushed() const { return m_filmingFramesPushed.load(); }
         std::string GetLastSavedHighlightPath() const { return m_lastSavedHighlightPath; }
 
         void SetCurrentPlayingDemoName(const std::string& name) { m_currentPlayingDemoName = name; }
@@ -113,18 +124,19 @@ namespace nextclient::client_mini
         std::string m_currentDemoFileName;
         std::chrono::steady_clock::time_point m_matchDemoStartTime;
 
-        // Bookmark & Instant Studio Render State
+        // HLAE Filming & Highlight State
         std::atomic<HighlightState> m_highlightState{HighlightState::Idle};
-        float m_markInTime{0.0f};
-        float m_markOutTime{0.0f};
+        bool m_isBookmarkMode{false};
+        std::chrono::steady_clock::time_point m_filmingStartTime;
+        std::atomic<uint64_t> m_filmingFramesPushed{0};
         std::string m_currentHighlightDemoName;
         std::string m_currentPlayingDemoName{"Demo"};
         std::string m_tempAudioPath;
+        std::string m_tempVideoPath;
+        std::string m_tempBookmarkMuxPath;
         std::string m_lastSavedHighlightPath;
         std::string m_highlightClipInfo;
 
-        uint64_t m_renderTargetFrames{0};
-        std::atomic<uint64_t> m_renderFramesPushed{0};
         std::atomic<bool> m_stopAudioRequested{false};
         std::thread m_audioRecordThread;
 
