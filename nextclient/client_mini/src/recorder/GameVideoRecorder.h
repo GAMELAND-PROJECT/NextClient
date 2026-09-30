@@ -77,6 +77,8 @@ namespace nextclient::client_mini
         std::string FindFfmpegExecutable() const;
         int QuerySystemAudioSampleRate() const;
         void MonitorConversionThread(HANDLE hProcess, std::string outputPath);
+        void InitPbo(int width, int height);
+        void CleanupPbo();
 
     private:
         // In-Match Demo State
@@ -130,6 +132,12 @@ namespace nextclient::client_mini
         static constexpr size_t kMaxQueueFrames = 120;
 
         std::vector<uint8_t> m_preallocatedCaptureBuffer;
+        unsigned int m_pboIds[2]{0, 0};
+        int m_pboIndex{0};
+        bool m_pboSupported{false};
+        bool m_pboInitialized{false};
+        int m_pboWidth{0};
+        int m_pboHeight{0};
 #endif
     };
 }

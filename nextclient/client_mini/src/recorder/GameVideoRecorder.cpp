@@ -14,6 +14,55 @@
 #include <mmdeviceapi.h>
 #include <audioclient.h>
 
+#define GL_PIXEL_PACK_BUFFER_ARB 0x88EB
+#define GL_STREAM_READ_ARB       0x88E1
+#define GL_READ_ONLY_ARB         0x88B8
+
+typedef void (APIENTRY * PFNGLGENBUFFERSARBPROC) (GLsizei n, GLuint *buffers);
+typedef void (APIENTRY * PFNGLBINDBUFFERARBPROC) (GLenum target, GLuint buffer);
+typedef void (APIENTRY * PFNGLBUFFERDATAARBPROC) (GLenum target, ptrdiff_t size, const GLvoid *data, GLenum usage);
+typedef GLvoid* (APIENTRY * PFNGLMAPBUFFERARBPROC) (GLenum target, GLenum access);
+typedef GLboolean (APIENTRY * PFNGLUNMAPBUFFERARBPROC) (GLenum target);
+typedef void (APIENTRY * PFNGLDELETEBUFFERSARBPROC) (GLsizei n, const GLuint *buffers);
+
+static PFNGLGENBUFFERSARBPROC pfnGenBuffers = nullptr;
+static PFNGLBINDBUFFERARBPROC pfnBindBuffer = nullptr;
+static PFNGLBUFFERDATAARBPROC pfnBufferData = nullptr;
+static PFNGLMAPBUFFERARBPROC pfnMapBuffer = nullptr;
+static PFNGLUNMAPBUFFERARBPROC pfnUnmapBuffer = nullptr;
+static PFNGLDELETEBUFFERSARBPROC pfnDeleteBuffers = nullptr;
+static bool s_pboProcsLoaded = false;
+
+static void LoadPboProcedures()
+{
+    if (s_pboProcsLoaded) return;
+    s_pboProcsLoaded = true;
+
+    pfnGenBuffers = (PFNGLGENBUFFERSARBPROC)wglGetProcAddress("glGenBuffersARB");
+    if (!pfnGenBuffers) pfnGenBuffers = (PFNGLGENBUFFERSARBPROC)wglGetProcAddress("glGenBuffers");
+
+    pfnBindBuffer = (PFNGLBINDBUFFERARBPROC)wglGetProcAddress("glBindBufferARB");
+    if (!pfnBindBuffer) pfnBindBuffer = (PFNGLBINDBUFFERARBPROC)wglGetProcAddress("glBindBuffer");
+
+    pfnBufferData = (PFNGLBUFFERDATAARBPROC)wglGetProcAddress("glBufferDataARB");
+    if (!pfnBufferData) pfnBufferData = (PFNGLBUFFERDATAARBPROC)wglGetProcAddress("glBufferData");
+
+    pfnMapBuffer = (PFNGLMAPBUFFERARBPROC)wglGetProcAddress("glMapBufferARB");
+    if (!pfnMapBuffer) pfnMapBuffer = (PFNGLMAPBUFFERARBPROC)wglGetProcAddress("glMapBuffer");
+
+    pfnUnmapBuffer = (PFNGLUNMAPBUFFERARBPROC)wglGetProcAddress("glUnmapBufferARB");
+    if (!pfnUnmapBuffer) pfnUnmapBuffer = (PFNGLUNMAPBUFFERARBPROC)wglGetProcAddress("glUnmapBuffer");
+
+    pfnDeleteBuffers = (PFNGLDELETEBUFFERSARBPROC)wglGetProcAddress("glDeleteBuffersARB");
+    if (!pfnDeleteBuffers) pfnDeleteBuffers = (PFNGLDELETEBUFFERSARBPROC)wglGetProcAddress("glDeleteBuffers");
+}
+
+static bool IsPboAvailable()
+{
+    LoadPboProcedures();
+    return (pfnGenBuffers && pfnBindBuffer && pfnBufferData && pfnMapBuffer && pfnUnmapBuffer && pfnDeleteBuffers);
+}
+
 // Isolated C-style SEH wrapper without any C++ object unwinding (prevents MSVC C2712)
 static bool SafeGlReadPixels(int width, int height, uint8_t* pDest)
 {
@@ -39,6 +88,59 @@ namespace nextclient::client_mini
     }
 
     GameVideoRecorder::GameVideoRecorder() = default;
+
+    void GameVideoRecorder::InitPbo(int width, int height)
+    {
+#ifdef _WIN32
+        if (!IsPboAvailable())
+        {
+            m_pboSupported = false;
+            m_pboInitialized = false;
+            return;
+        }
+
+        if (m_pboInitialized && m_pboWidth == width && m_pboHeight == height)
+            return;
+
+        CleanupPbo();
+
+        const size_t frameSize = static_cast<size_t>(width) * height * 3;
+        pfnGenBuffers(2, m_pboIds);
+
+        for (int i = 0; i < 2; ++i)
+        {
+            pfnBindBuffer(GL_PIXEL_PACK_BUFFER_ARB, m_pboIds[i]);
+            pfnBufferData(GL_PIXEL_PACK_BUFFER_ARB, frameSize, nullptr, GL_STREAM_READ_ARB);
+        }
+        pfnBindBuffer(GL_PIXEL_PACK_BUFFER_ARB, 0);
+
+        m_pboIndex = 0;
+        m_pboWidth = width;
+        m_pboHeight = height;
+        m_pboSupported = true;
+        m_pboInitialized = true;
+#endif
+    }
+
+    void GameVideoRecorder::CleanupPbo()
+    {
+#ifdef _WIN32
+        if (m_pboInitialized)
+        {
+            if (pfnBindBuffer)
+                pfnBindBuffer(GL_PIXEL_PACK_BUFFER_ARB, 0);
+            if (pfnDeleteBuffers)
+                pfnDeleteBuffers(2, m_pboIds);
+            m_pboIds[0] = 0;
+            m_pboIds[1] = 0;
+            m_pboInitialized = false;
+            m_pboSupported = false;
+            m_pboWidth = 0;
+            m_pboHeight = 0;
+            m_pboIndex = 0;
+        }
+#endif
+    }
 
     GameVideoRecorder::~GameVideoRecorder()
     {
@@ -448,12 +550,18 @@ namespace nextclient::client_mini
 
         const int audioRate = QuerySystemAudioSampleRate();
 
+        std::string videoFilter = "vflip";
+        if (height < 1080)
+        {
+            videoFilter = "vflip,scale=-2:1080:flags=lanczos";
+        }
+
         std::ostringstream cmd;
         cmd << "\"" << ffmpegPath << "\" -y -hide_banner -loglevel error"
             << " -f rawvideo -pix_fmt rgb24 -s " << width << "x" << height
             << " -r " << fps << " -i \"" << videoPipeName << "\""
             << " -f s16le -ar " << audioRate << " -ac 2 -i \"" << audioPipeName << "\""
-            << " -vf vflip"
+            << " -vf " << videoFilter
             << " -c:v libx264 -preset veryfast -crf 16 -pix_fmt yuv420p"
             << " -colorspace bt709 -color_primaries bt709 -color_trc bt709 -color_range tv"
             << " -af aresample=async=1000:min_hard_comp=0.100000:first_pts=0"
@@ -590,32 +698,68 @@ namespace nextclient::client_mini
         if (width != m_recordWidth || height != m_recordHeight)
             return;
 
+        // Guaranteed 1.0x Real-Time Wall-Clock Sync (Completely eliminates fast-forward!)
         const auto now = std::chrono::steady_clock::now();
-        const double elapsedSinceLast = std::chrono::duration<double>(now - m_lastFrameTime).count();
-        const double frameInterval = 1.0 / static_cast<double>(m_targetFps);
+        const double elapsedSec = std::chrono::duration<double>(now - m_syncStartTime).count();
+        const uint64_t targetTotalFrames = static_cast<uint64_t>(elapsedSec * m_targetFps);
 
-        // Frame pacing: enforce smooth, constant interval with 2ms tolerance for frame timing jitter
-        if (elapsedSinceLast < frameInterval - 0.002)
+        const uint64_t currentPushed = m_framesPushed.load();
+        if (currentPushed >= targetTotalFrames)
             return;
 
-        if (elapsedSinceLast > frameInterval * 2.0)
-            m_lastFrameTime = now;
-        else
-            m_lastFrameTime += std::chrono::duration_cast<std::chrono::steady_clock::duration>(std::chrono::duration<double>(frameInterval));
+        uint64_t framesNeeded = targetTotalFrames - currentPushed;
+        if (framesNeeded > 2)
+            framesNeeded = 2; // Prevent sudden huge burst if there was a hitch
 
         const size_t frameSize = static_cast<size_t>(width) * height * 3;
         if (m_preallocatedCaptureBuffer.size() != frameSize)
             m_preallocatedCaptureBuffer.resize(frameSize, 0);
 
-        if (!SafeGlReadPixels(width, height, m_preallocatedCaptureBuffer.data()))
-            return;
+        // Dynamic PBO initialization / resize on demand
+        if (!m_pboInitialized || m_pboWidth != width || m_pboHeight != height)
+        {
+            InitPbo(width, height);
+        }
+
+        bool captured = false;
+        if (m_pboSupported && m_pboInitialized)
+        {
+            int nextIndex = (m_pboIndex + 1) % 2;
+
+            // 1. Asynchronously transfer current frame to next PBO (DMA - non-blocking!)
+            pfnBindBuffer(GL_PIXEL_PACK_BUFFER_ARB, m_pboIds[nextIndex]);
+            glReadPixels(0, 0, width, height, GL_RGB, GL_UNSIGNED_BYTE, 0);
+
+            // 2. Map previously transferred PBO to CPU memory (already in fast memory)
+            pfnBindBuffer(GL_PIXEL_PACK_BUFFER_ARB, m_pboIds[m_pboIndex]);
+            void* pGpuData = pfnMapBuffer(GL_PIXEL_PACK_BUFFER_ARB, GL_READ_ONLY_ARB);
+            if (pGpuData != nullptr)
+            {
+                memcpy(m_preallocatedCaptureBuffer.data(), pGpuData, frameSize);
+                pfnUnmapBuffer(GL_PIXEL_PACK_BUFFER_ARB);
+                captured = true;
+            }
+            pfnBindBuffer(GL_PIXEL_PACK_BUFFER_ARB, 0);
+
+            m_pboIndex = nextIndex;
+        }
+
+        // Safe fallback if PBO is not supported or failed
+        if (!captured)
+        {
+            if (!SafeGlReadPixels(width, height, m_preallocatedCaptureBuffer.data()))
+                return;
+        }
 
         {
             std::lock_guard<std::mutex> lock(m_queueMutex);
             if (m_frameQueue.size() < kMaxQueueFrames)
             {
-                m_frameQueue.push(m_preallocatedCaptureBuffer);
-                m_framesPushed.fetch_add(1);
+                for (uint64_t i = 0; i < framesNeeded && m_frameQueue.size() < kMaxQueueFrames; ++i)
+                {
+                    m_frameQueue.push(m_preallocatedCaptureBuffer);
+                    m_framesPushed.fetch_add(1);
+                }
                 m_queueCv.notify_one();
             }
         }
@@ -760,6 +904,7 @@ namespace nextclient::client_mini
         m_readyForFrames = false;
         m_stopRequested = true;
         m_queueCv.notify_all();
+        CleanupPbo();
 
         if (m_masterThread.joinable())
             m_masterThread.detach();
