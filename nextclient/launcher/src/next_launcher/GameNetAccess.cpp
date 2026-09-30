@@ -1003,10 +1003,12 @@ GameNetAccessStatus QueryGameNetOnlineAccess()
                 }
 
                 status.state = GameNetAccessState::Active;
+                status.lan_allowed = true;
             }
             else
             {
                 status.state = GameNetAccessState::Expired;
+                status.lan_allowed = false;
             }
         }
         else

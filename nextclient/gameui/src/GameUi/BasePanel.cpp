@@ -100,6 +100,19 @@ void CGameMenuItem::ApplySchemeSettings(vgui2::IScheme *pScheme)
 
     if (m_bRightAligned)
         SetContentAlignment(Label::a_east);
+
+    if (GetCommand())
+    {
+        const char *cmd = GetCommand()->GetString("command", "");
+        if (!Q_stricmp(cmd, "OpenDemoStudio") || !Q_stricmp(cmd, "OpenDemoUploader"))
+        {
+            Color demoColor = Color(75, 210, 255, 255);
+            Color demoArmed = Color(255, 255, 255, 255);
+            SetDefaultColor(demoColor, Color(0, 0, 0, 0));
+            SetArmedColor(demoArmed, Color(75, 210, 255, 50));
+            SetFgColor(demoColor);
+        }
+    }
 }
 
 void CGameMenuItem::PaintBackground(void)
@@ -211,6 +224,43 @@ public:
         }
         else
             BaseClass::OnCommand(command);
+    }
+
+    virtual void PerformLayout(void)
+    {
+        BaseClass::PerformLayout();
+
+        bool foundDemoStudio = false;
+        int extraGap = 18;
+
+        for (int i = 0; i < GetChildCount(); i++)
+        {
+            Panel *child = GetChild(i);
+            vgui2::MenuItem *menuItem = dynamic_cast<vgui2::MenuItem *>(child);
+            if (menuItem && menuItem->IsVisible())
+            {
+                const char *cmd = menuItem->GetCommand() ? menuItem->GetCommand()->GetString("command", "") : "";
+                if (!Q_stricmp(cmd, "OpenDemoStudio") || !Q_stricmp(cmd, "OpenDemoUploader"))
+                {
+                    foundDemoStudio = true;
+                    continue;
+                }
+
+                if (foundDemoStudio)
+                {
+                    int x, y;
+                    menuItem->GetPos(x, y);
+                    menuItem->SetPos(x, y + extraGap);
+                }
+            }
+        }
+
+        if (foundDemoStudio)
+        {
+            int w, h;
+            GetSize(w, h);
+            SetSize(w, h + extraGap);
+        }
     }
 
     virtual void OnKeyCodePressed(vgui2::KeyCode code)
