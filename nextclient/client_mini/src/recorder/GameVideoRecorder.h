@@ -16,21 +16,41 @@
 
 namespace nextclient::client_mini
 {
+    struct DemoFileItem
+    {
+        std::string fileName;
+        std::string mapName;
+        std::string dateFormatted;
+        std::string sizeFormatted;
+        uint64_t timestamp{0};
+    };
+
     class GameVideoRecorder
     {
     public:
         static GameVideoRecorder& Instance();
 
-        bool Start(const std::string& baseFileName, int width, int height, int targetFps = 60);
-        void CaptureFrame(int width, int height);
-        void Stop();
+        // In-Match Zero-Lag Demo Recording (0% GPU flush, locked 100 FPS)
+        bool StartMatchDemo(const std::string& baseFileName);
+        void StopMatchDemo();
+        bool IsMatchDemoRecording() const { return m_isMatchDemoRecording.load(); }
+        std::string GetFormattedDemoTime() const;
+        std::string GetCurrentDemoFileName() const { return m_currentDemoFileName; }
 
-        bool IsRecording() const { return m_isRecording.load(); }
-        bool IsFinalizing() const { return m_isFinalizing.load(); }
-        double GetElapsedSeconds() const;
-        std::string GetFormattedTime() const;
-        std::string GetCurrentVideoPath() const;
-        std::string GetLastSavedVideoPath() const;
+        // In-Lobby Demo Studio & Background MP4 Converter
+        std::vector<DemoFileItem> RefreshDemoList();
+        const std::vector<DemoFileItem>& GetCachedDemos() const { return m_cachedDemos; }
+        bool StartDemoConversion(const std::string& demoFileName, int targetWidth = 1280, int targetHeight = 720, int fps = 60);
+        void CancelConversion();
+        bool IsConverting() const { return m_isConverting.load(); }
+        int GetConversionPercent() const { return m_convertPercent.load(); }
+        std::string GetConvertingDemoName() const { return m_convertingDemoName; }
+        std::string GetLastConvertedVideoPath() const { return m_lastConvertedVideoPath; }
+
+        // Dedicated Headless Conversion Engine (Invoked by background worker)
+        bool StartWorkerCapture(const std::string& outputBaseName, int width, int height, int fps = 60);
+        void WorkerCaptureFrame(int width, int height);
+        void StopWorkerCapture();
 
     private:
         GameVideoRecorder();
@@ -43,23 +63,33 @@ namespace nextclient::client_mini
         void AudioWorkerThread(HANDLE hPipe, int sampleRate);
         std::string FindFfmpegExecutable() const;
         int QuerySystemAudioSampleRate() const;
+        void MonitorConversionThread(HANDLE hProcess, std::string outputPath);
 
     private:
-        std::atomic<bool> m_isRecording{false};
-        std::atomic<bool> m_isFinalizing{false};
+        // In-Match Demo State
+        std::atomic<bool> m_isMatchDemoRecording{false};
+        std::string m_currentDemoFileName;
+        std::chrono::steady_clock::time_point m_matchDemoStartTime;
+
+        // In-Lobby Studio State
+        std::vector<DemoFileItem> m_cachedDemos;
+        std::atomic<bool> m_isConverting{false};
+        std::atomic<int> m_convertPercent{0};
+        std::string m_convertingDemoName;
+        std::string m_lastConvertedVideoPath;
+        std::thread m_conversionMonitorThread;
+        HANDLE m_hConversionProcess{nullptr};
+
+        // Worker Capture State (Used inside headless worker instance)
+        std::atomic<bool> m_isWorkerCapturing{false};
         std::atomic<bool> m_readyForFrames{false};
         std::atomic<bool> m_stopRequested{false};
-
-        std::string m_currentVideoPath;
-        std::string m_lastSavedVideoPath;
-        std::chrono::steady_clock::time_point m_startTime;
+        std::atomic<uint64_t> m_framesPushed{0};
         std::chrono::steady_clock::time_point m_syncStartTime;
 
-        int m_recordWidth{0};
-        int m_recordHeight{0};
+        int m_recordWidth{1280};
+        int m_recordHeight{720};
         int m_targetFps{60};
-
-        std::atomic<uint64_t> m_framesPushed{0};
 
 #ifdef _WIN32
         HANDLE m_hFfmpegProcess{nullptr};

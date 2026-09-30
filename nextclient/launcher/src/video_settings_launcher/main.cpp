@@ -173,7 +173,6 @@ int g_otpCooldownSeconds = 0;
 static WNDPROC s_origTrackbarProc = nullptr;
 static WNDPROC s_origPhoneProc = nullptr;
 static WNDPROC s_origPassProc = nullptr;
-bool AttemptLogin(HWND window, const std::wstring& phone, const std::wstring& password, bool silent = false);
 void PerformUserLogin(HWND window);
 
 constexpr wchar_t kDemoWindowClass[] = L"AllclientDemoManagerWindow";
@@ -1198,34 +1197,6 @@ LRESULT CALLBACK DemoManagerProc(HWND window, UINT message, WPARAM wParam, LPARA
         return 0;
     }
     case WM_COMMAND:
-        if (HIWORD(wParam) == EN_CHANGE && reinterpret_cast<HWND>(lParam) == g_userPhone)
-        {
-            wchar_t curPhone[64]{};
-            GetWindowTextW(g_userPhone, curPhone, static_cast<int>(std::size(curPhone)));
-            if (!g_activeUserToken.empty() && std::wstring(curPhone) != g_activeUserPhone)
-            {
-                g_activeUserToken.clear();
-                g_activeUserPhone.clear();
-                RegistryKey regKey(HKEY_CURRENT_USER, kLauncherKey, KEY_SET_VALUE);
-                regKey.WriteString(L"SavedUserToken", L"");
-                regKey.WriteDword(L"AutoLoginEnabled", 0);
-                if (g_userLoginBtn)
-                {
-                    SetWindowTextW(g_userLoginBtn, L"ورود");
-                    InvalidateRect(g_userLoginBtn, nullptr, TRUE);
-                }
-                if (g_userStatusLabel)
-                {
-                    SetWindowTextW(g_userStatusLabel, L"وارد نشده‌اید (مهمان: کانفیگ پیش‌فرض لود می‌شود)");
-                    InvalidateRect(g_userStatusLabel, nullptr, TRUE);
-                }
-                if (g_userRegisterBtn)
-                {
-                    SetWindowTextW(g_userRegisterBtn, L"ثبت‌نام / فراموشی رمز");
-                    InvalidateRect(g_userRegisterBtn, nullptr, TRUE);
-                }
-            }
-        }
         switch (LOWORD(wParam))
         {
         case IDOK:
@@ -1537,19 +1508,23 @@ bool PushUserConfigToCloud(const std::string& token)
     return success == "true";
 }
 
-bool AttemptLogin(HWND window, const std::wstring& phone, const std::wstring& password, bool silent)
+void PerformUserLogin(HWND window)
 {
+    wchar_t phoneBuf[64]{};
+    wchar_t passBuf[64]{};
+    GetWindowTextW(g_userPhone, phoneBuf, static_cast<int>(std::size(phoneBuf)));
+    GetWindowTextW(g_userPassword, passBuf, static_cast<int>(std::size(passBuf)));
+    const std::wstring phone(phoneBuf);
+    const std::wstring password(passBuf);
     if (phone.size() != 11 || phone.substr(0, 2) != L"09")
     {
-        if (!silent)
-            MessageBoxW(window, L"شماره موبایل معتبر نیست (مثال: 09121234567)", L"خطا", MB_OK | MB_ICONWARNING);
-        return false;
+        MessageBoxW(window, L"شماره موبایل معتبر نیست (مثال: 09121234567)", L"خطا", MB_OK | MB_ICONWARNING);
+        return;
     }
     if (password.empty())
     {
-        if (!silent)
-            MessageBoxW(window, L"لطفاً رمز عبور خود را وارد کنید.", L"خطا", MB_OK | MB_ICONWARNING);
-        return false;
+        MessageBoxW(window, L"لطفاً رمز عبور خود را وارد کنید.", L"خطا", MB_OK | MB_ICONWARNING);
+        return;
     }
 
     SetWindowTextW(g_userStatusLabel, L"در حال بررسی ورود...");
@@ -1566,43 +1541,25 @@ bool AttemptLogin(HWND window, const std::wstring& phone, const std::wstring& pa
     {
         g_activeUserPhone = phone;
         g_activeUserToken = token;
-
-        // Persist credentials in Windows Registry for automatic login next time
-        RegistryKey regKey(HKEY_CURRENT_USER, kLauncherKey, KEY_SET_VALUE);
-        regKey.WriteString(L"SavedUserPhone", phone);
-        regKey.WriteString(L"SavedUserPassword", password);
-        regKey.WriteString(L"SavedUserToken", WidenAscii(token));
-        regKey.WriteDword(L"AutoLoginEnabled", 1);
-
-        const std::wstring status = L"وارد شده: ‎" + phone;
+        const std::wstring status = L"وارد شده: \u200e" + phone;
         SetWindowTextW(g_userStatusLabel, status.c_str());
         InvalidateRect(g_userStatusLabel, nullptr, TRUE);
+        if (g_userLoginBtn)
+        {
+            SetWindowTextW(g_userLoginBtn, L"خروج از اکانت");
+            InvalidateRect(g_userLoginBtn, nullptr, TRUE);
+        }
         SetWindowTextW(g_userRegisterBtn, L"ریست کردن کانفیگ");
         InvalidateRect(g_userRegisterBtn, nullptr, TRUE);
-        SetWindowTextW(g_userLoginBtn, L"خروج از اکانت");
-        InvalidateRect(g_userLoginBtn, nullptr, TRUE);
-
         PullUserConfigFromCloud(token);
-        if (!silent)
-        {
-            MessageBoxW(window, L"ورود موفقیت‌آمیز بود و کانفیگ شما همگام‌سازی شد.", L"موفقیت", MB_OK | MB_ICONINFORMATION);
-        }
-        else
-        {
-            SetStatus(L"حساب ابری همگام شد — آماده بازی");
-        }
-        return true;
+        MessageBoxW(window, L"ورود موفقیت‌آمیز بود و کانفیگ شما همگام‌سازی شد.", L"موفقیت", MB_OK | MB_ICONINFORMATION);
     }
     else
     {
         const std::wstring err = message.empty() ? L"شماره موبایل یا رمز عبور اشتباه است." : WidenUtf8(message);
         SetWindowTextW(g_userStatusLabel, err.c_str());
         InvalidateRect(g_userStatusLabel, nullptr, TRUE);
-        if (!silent)
-        {
-            MessageBoxW(window, err.c_str(), L"خطا در ورود", MB_OK | MB_ICONERROR);
-        }
-        return false;
+        MessageBoxW(window, err.c_str(), L"خطا در ورود", MB_OK | MB_ICONERROR);
     }
 }
 
@@ -1621,11 +1578,6 @@ void PerformUserLogout(HWND window)
 
     g_activeUserToken.clear();
     g_activeUserPhone.clear();
-
-    RegistryKey regKey(HKEY_CURRENT_USER, kLauncherKey, KEY_SET_VALUE);
-    regKey.WriteString(L"SavedUserToken", L"");
-    regKey.WriteString(L"SavedUserPassword", L"");
-    regKey.WriteDword(L"AutoLoginEnabled", 0);
 
     if (g_userPassword)
         SetWindowTextW(g_userPassword, L"");
@@ -1650,21 +1602,6 @@ void PerformUserLogout(HWND window)
 
     ResetGuestConfigToDefault();
     SetStatus(L"از حساب کاربری خارج شدید. حالت مهمان فعال شد.");
-}
-
-void PerformUserLogin(HWND window)
-{
-    if (!g_activeUserToken.empty())
-    {
-        PerformUserLogout(window);
-        return;
-    }
-
-    wchar_t phoneBuf[64]{};
-    wchar_t passBuf[64]{};
-    GetWindowTextW(g_userPhone, phoneBuf, static_cast<int>(std::size(phoneBuf)));
-    GetWindowTextW(g_userPassword, passBuf, static_cast<int>(std::size(passBuf)));
-    AttemptLogin(window, phoneBuf, passBuf, false);
 }
 
 void ResetUserConfigToDefault(HWND window)
@@ -2074,36 +2011,24 @@ LRESULT CALLBACK OtpRegisterProc(HWND window, UINT message, WPARAM wParam, LPARA
 
                 g_activeUserPhone = mobile;
                 g_activeUserToken = token;
-
-                RegistryKey regKey(HKEY_CURRENT_USER, kLauncherKey, KEY_SET_VALUE);
-                regKey.WriteString(L"SavedUserPhone", mobile);
-                regKey.WriteString(L"SavedUserPassword", effectivePass);
-                regKey.WriteString(L"SavedUserToken", WidenAscii(token));
-                regKey.WriteDword(L"AutoLoginEnabled", 1);
-
                 if (g_userPhone)
                     SetWindowTextW(g_userPhone, mobile.c_str());
                 if (g_userPassword)
                     SetWindowTextW(g_userPassword, effectivePass.c_str());
-                if (g_userLoginBtn)
-                {
-                    SetWindowTextW(g_userLoginBtn, L"خروج از حساب");
-                    InvalidateRect(g_userLoginBtn, nullptr, TRUE);
-                }
                 if (g_userStatusLabel)
                 {
                     const std::wstring status = L"\u0648\u0627\u0631\u062f \u0634\u062f\u0647: \\u200e" + mobile;
                     SetWindowTextW(g_userStatusLabel, status.c_str());
                     InvalidateRect(g_userStatusLabel, nullptr, TRUE);
                 }
-                if (g_userRegisterBtn)
-                {
-                    SetWindowTextW(g_userRegisterBtn, L"\u0631\u06cc\u0633\u062a \u06a9\u0631\u062f\u0646 \u06a9\u0627\u0646\u0641\u06cc\u06af");
                 if (g_userLoginBtn)
                 {
                     SetWindowTextW(g_userLoginBtn, L"\u062e\u0631\u0648\u062c \u0627\u0632 \u0627\u06a9\u0627\u0646\u062a");
                     InvalidateRect(g_userLoginBtn, nullptr, TRUE);
                 }
+                if (g_userRegisterBtn)
+                {
+                    SetWindowTextW(g_userRegisterBtn, L"\u0631\u06cc\u0633\u062a \u06a9\u0631\u062f\u0646 \u06a9\u0627\u0646\u0641\u06cc\u06af");
                     InvalidateRect(g_userRegisterBtn, nullptr, TRUE);
                 }
 
@@ -2399,26 +2324,6 @@ void CreateControls(HWND window)
     g_mouseAtLastApply = ReadSystemMouseSettings();
     g_mousePreviewChanged = false;
     SetMouseControls(g_mouseAtLastApply);
-
-    // Auto-populate saved phone and password, and perform automatic silent login
-    RegistryKey launcherKey(HKEY_CURRENT_USER, kLauncherKey, KEY_QUERY_VALUE);
-    const std::wstring savedPhone = launcherKey.ReadString(L"SavedUserPhone");
-    const std::wstring savedPassword = launcherKey.ReadString(L"SavedUserPassword");
-    const DWORD autoLoginEnabled = launcherKey.ReadDword(L"AutoLoginEnabled", 1);
-
-    if (!savedPhone.empty() && g_userPhone)
-    {
-        SetWindowTextW(g_userPhone, savedPhone.c_str());
-    }
-    if (!savedPassword.empty() && g_userPassword)
-    {
-        SetWindowTextW(g_userPassword, savedPassword.c_str());
-    }
-
-    if (autoLoginEnabled != 0 && savedPhone.size() == 11 && !savedPassword.empty())
-    {
-        AttemptLogin(window, savedPhone, savedPassword, true);
-    }
 }
 
 void CheckLauncherUpdates(HWND window)
@@ -2575,23 +2480,35 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
         return 0;
 
     case WM_COMMAND:
+        if (HIWORD(wParam) == EN_CHANGE && reinterpret_cast<HWND>(lParam) == g_userPhone)
+        {
+            wchar_t curPhone[64]{};
+            GetWindowTextW(g_userPhone, curPhone, static_cast<int>(std::size(curPhone)));
+            if (!g_activeUserToken.empty() && std::wstring(curPhone) != g_activeUserPhone)
+            {
+                g_activeUserToken.clear();
+                g_activeUserPhone.clear();
+                if (g_userLoginBtn)
+                {
+                    SetWindowTextW(g_userLoginBtn, L"ورود");
+                    InvalidateRect(g_userLoginBtn, nullptr, TRUE);
+                }
+                if (g_userStatusLabel)
+                {
+                    SetWindowTextW(g_userStatusLabel, L"وارد نشده‌اید (مهمان: کانفیگ پیش‌فرض لود می‌شود)");
+                    InvalidateRect(g_userStatusLabel, nullptr, TRUE);
+                }
+                if (g_userRegisterBtn)
+                {
+                    SetWindowTextW(g_userRegisterBtn, L"ثبت‌نام / فراموشی رمز");
+                    InvalidateRect(g_userRegisterBtn, nullptr, TRUE);
+                }
+            }
+        }
         switch (LOWORD(wParam))
         {
         case IDOK:
         case IdLaunch:
-            if (g_activeUserToken.empty() && g_userPhone && g_userPassword)
-            {
-                wchar_t curPhone[64]{};
-                wchar_t curPass[64]{};
-                GetWindowTextW(g_userPhone, curPhone, static_cast<int>(std::size(curPhone)));
-                GetWindowTextW(g_userPassword, curPass, static_cast<int>(std::size(curPass)));
-                const std::wstring pStr(curPhone);
-                const std::wstring passStr(curPass);
-                if (pStr.size() == 11 && !passStr.empty())
-                {
-                    AttemptLogin(window, pStr, passStr, true);
-                }
-            }
             if (ApplySettings())
             {
                 if (!IsUserAuthenticated())

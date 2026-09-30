@@ -153,63 +153,27 @@ void ClientLauncher::Run()
     // Resolve the package entitlement once per launcher start. GameUI reads
     // only this result and never performs network work during gameplay.
     const GameNetAccessStatus online_access = QueryGameNetOnlineAccess();
-
-    if (online_access.is_home_client)
+    if (!online_access.lan_allowed)
     {
-        if (online_access.state == GameNetAccessState::InvalidEntry)
-        {
-            MessageBoxW(nullptr,
-                L"\u06a9\u062f \u0633\u062e\u062a\u200c\u0627\u0641\u0632\u0627\u0631\u06cc \u0627\u06cc\u0646 \u0633\u06cc\u0633\u062a\u0645 \u0628\u0627 \u0644\u0627\u06cc\u0633\u0646\u0633 \u0646\u0635\u0628\u200c\u0634\u062f\u0647 \u0645\u0637\u0627\u0628\u0642\u062a \u0646\u062f\u0627\u0631\u062f.\n"
-                L"\u06a9\u067e\u06cc \u06a9\u0631\u062f\u0646 \u06cc\u0627 \u0627\u0646\u062a\u0642\u0627\u0644 \u067e\u0648\u0634\u0647 \u0628\u0627\u0632\u06cc \u0645\u062c\u0627\u0632 \u0646\u0645\u06cc\u200c\u0628\u0627\u0634\u062f.\n\n"
-                L"\u0644\u0637\u0641\u0627\u064b \u0628\u0627\u0632\u06cc \u0631\u0627 \u0627\u0632 \u0637\u0631\u06cc\u0642 \u0627\u06cc\u0646\u0633\u062a\u0627\u0644\u0631 \u0631\u0633\u0645\u06cc \u0646\u0635\u0628 \u0648 \u0641\u0639\u0627\u0644\u200c\u0633\u0627\u0632\u06cc \u0646\u0645\u0627\u06cc\u06cc\u062f.",
-                L"\u062e\u0637\u0627\u06cc \u0627\u0645\u0646\u06cc\u062a\u06cc Allclient (\u0646\u0633\u062e\u0647 \u062e\u0627\u0646\u06af\u06cc)", MB_OK | MB_ICONERROR | MB_DEFAULT_DESKTOP_ONLY | MB_RIGHT | MB_RTLREADING);
-            return;
-        }
-
-        if (!online_access.allowed())
-        {
-            std::wstring subPhone(online_access.phone_number.begin(), online_access.phone_number.end());
-            if (subPhone.empty()) subPhone = L"-";
-            std::wstring devHash(online_access.device_hash.begin(), online_access.device_hash.end());
-            if (devHash.empty()) devHash = L"-";
-            std::wstring msg = L"\u0645\u062f\u062a \u0632\u0645\u0627\u0646 \u0627\u0634\u062a\u0631\u0627\u06a9 \u06a9\u0644\u0627\u06cc\u0646\u062a \u062e\u0627\u0646\u06af\u06cc \u0634\u0645\u0627 \u0628\u0647 \u067e\u0627\u06cc\u0627\u0646 \u0631\u0633\u06cc\u062f\u0647 \u0627\u0633\u062a.\n\n"
-                               L"\u0634\u0645\u0627\u0631\u0647 \u0627\u0634\u062a\u0631\u0627\u06a9: " + subPhone + L"\n"
-                               L"\u06a9\u062f \u062f\u0633\u062a\u06af\u0627\u0647: " + devHash + L"\n\n"
-                               L"\u062c\u0647\u062a \u062a\u0645\u062f\u06cc\u062f \u0627\u0634\u062a\u0631\u0627\u06a9 \u0628\u0627 \u067e\u0634\u062a\u06cc\u0628\u0627\u0646\u06cc \u06af\u06cc\u0645\u200c\u0644\u0646\u062f \u062a\u0645\u0627\u0633 \u0628\u06af\u06cc\u0631\u06cc\u062f.\nhttps://gameland.cam";
-            MessageBoxW(nullptr, msg.c_str(),
-                L"\u0631\u0627\u0647\u200c\u0627\u0646\u062f\u0627\u0632 Allclient (\u0646\u0633\u062e\u0647 \u062e\u0627\u0646\u06af\u06cc)", MB_OK | MB_ICONERROR | MB_DEFAULT_DESKTOP_ONLY | MB_RIGHT | MB_RTLREADING);
-            return; // STRICT LOCKOUT: Do NOT launch the game!
-        }
-
-        SetEnvironmentVariableA("NEXTCLIENT_ONLINE_ACCESS", "1");
-        SetEnvironmentVariableA("NEXTCLIENT_PLAYER_NAME_TAG", "");
+        MessageBoxW(nullptr,
+            L"\u0645\u0647\u0644\u062a \u062f\u0633\u062a\u0631\u0633\u06cc \u0644\u0646 \u062a\u0645\u0627\u0645 \u0634\u062f\u0647 \u06cc\u0627 \u0647\u0646\u0648\u0632 \u0641\u0639\u0627\u0644 \u0646\u0634\u062f\u0647 \u0627\u0633\u062a.\n"
+            L"\u0628\u0647 \u0627\u06cc\u0646\u062a\u0631\u0646\u062a \u0645\u062a\u0635\u0644 \u0634\u0648\u06cc\u062f \u0648 \u0628\u0627 \u0627\u0634\u062a\u0631\u0627\u06a9 \u0641\u0639\u0627\u0644 \u062f\u0648\u0628\u0627\u0631\u0647 \u0644\u0627\u0646\u0686\u0631 \u0631\u0627 \u0627\u062c\u0631\u0627 \u06a9\u0646\u06cc\u062f.\n"
+            L"\u0627\u06af\u0631 \u0627\u06cc\u0646\u062a\u0631\u0646\u062a \u0645\u062a\u0635\u0644 \u0627\u0633\u062a\u060c \u062a\u0627\u0631\u06cc\u062e \u0648 \u0633\u0627\u0639\u062a \u0648\u06cc\u0646\u062f\u0648\u0632 \u0631\u0627 \u0628\u0631\u0631\u0633\u06cc \u06a9\u0646\u06cc\u062f.",
+            L"\u0631\u0627\u0647\u200c\u0627\u0646\u062f\u0627\u0632 Allclient", MB_OK | MB_ICONWARNING | MB_DEFAULT_DESKTOP_ONLY | MB_RIGHT | MB_RTLREADING);
+        return;
     }
-    else
+    SetEnvironmentVariableA("NEXTCLIENT_ONLINE_ACCESS", online_access.allowed() ? "1" : "0");
+    SetEnvironmentVariableA("NEXTCLIENT_PLAYER_NAME_TAG",
+        online_access.player_name_tag.c_str());
+    if (!online_access.allowed())
     {
-        if (!online_access.lan_allowed)
-        {
-            MessageBoxW(nullptr,
-                L"\u0645\u0647\u0644\u062a \u062f\u0633\u062a\u0631\u0633\u06cc \u0644\u0646 \u062a\u0645\u0627\u0645 \u0634\u062f\u0647 \u06cc\u0627 \u0647\u0646\u0648\u0632 \u0641\u0639\u0627\u0644 \u0646\u0634\u062f\u0647 \u0627\u0633\u062a.\n"
-                L"\u0628\u0647 \u0627\u06cc\u0646\u062a\u0631\u0646\u062a \u0645\u062a\u0635\u0644 \u0634\u0648\u06cc\u062f \u0648 \u0628\u0627 \u0627\u0634\u062a\u0631\u0627\u06a9 \u0641\u0639\u0627\u0644 \u062f\u0648\u0628\u0627\u0631\u0647 \u0644\u0627\u0646\u0686\u0631 \u0631\u0627 \u0627\u062c\u0631\u0627 \u06a9\u0646\u06cc\u062f.\n"
-                L"\u0627\u06af\u0631 \u0627\u06cc\u0646\u062a\u0631\u0646\u062a \u0645\u062a\u0635\u0644 \u0627\u0633\u062a\u060c \u062a\u0627\u0631\u06cc\u062e \u0648 \u0633\u0627\u0639\u062a \u0648\u06cc\u0646\u062f\u0648\u0632 \u0631\u0627 \u0628\u0631\u0631\u0633\u06cc \u06a9\u0646\u06cc\u062f.",
-                L"\u0631\u0627\u0647\u200c\u0627\u0646\u062f\u0627\u0632 Allclient", MB_OK | MB_ICONWARNING | MB_DEFAULT_DESKTOP_ONLY | MB_RIGHT | MB_RTLREADING);
-            return;
-        }
-        SetEnvironmentVariableA("NEXTCLIENT_ONLINE_ACCESS", online_access.allowed() ? "1" : "0");
-        SetEnvironmentVariableA("NEXTCLIENT_PLAYER_NAME_TAG",
-            online_access.player_name_tag.c_str());
-        if (!online_access.allowed())
-        {
-            MessageBoxW(nullptr,
-                L"\u062f\u0633\u062a\u0631\u0633\u06cc \u0622\u0646\u0644\u0627\u06cc\u0646 \u0627\u06cc\u0646 \u0646\u0633\u062e\u0647 \u0641\u0639\u0627\u0644 \u0646\u06cc\u0633\u062a. \u0628\u0627\u0632\u06cc \u062f\u0631 \u0634\u0628\u06a9\u0647 \u0645\u062d\u0644\u06cc \u062a\u0627 \u067e\u0627\u06cc\u0627\u0646 \u0645\u0647\u0644\u062a \u0644\u0646 \u062f\u0631 \u062f\u0633\u062a\u0631\u0633 \u0627\u0633\u062a.",
-                L"\u0631\u0627\u0647\u200c\u0627\u0646\u062f\u0627\u0632 Allclient", MB_OK | MB_ICONWARNING | MB_DEFAULT_DESKTOP_ONLY | MB_RIGHT | MB_RTLREADING);
-        }
+        MessageBoxW(nullptr,
+            L"\u062f\u0633\u062a\u0631\u0633\u06cc \u0622\u0646\u0644\u0627\u06cc\u0646 \u0627\u06cc\u0646 \u0646\u0633\u062e\u0647 \u0641\u0639\u0627\u0644 \u0646\u06cc\u0633\u062a. \u0628\u0627\u0632\u06cc \u062f\u0631 \u0634\u0628\u06a9\u0647 \u0645\u062d\u0644\u06cc \u062a\u0627 \u067e\u0627\u06cc\u0627\u0646 \u0645\u0647\u0644\u062a \u0644\u0646 \u062f\u0631 \u062f\u0633\u062a\u0631\u0633 \u0627\u0633\u062a.",
+            L"\u0631\u0627\u0647\u200c\u0627\u0646\u062f\u0627\u0632 Allclient", MB_OK | MB_ICONWARNING | MB_DEFAULT_DESKTOP_ONLY | MB_RIGHT | MB_RTLREADING);
     }
 
     if (config_provider_->get_value_int("create_console_window", 0))
         CreateConsoleWindowAndRedirectOutput();
-
-    EnsureSmartSteamEmuActive();
 
     // Video-mode changes are applied before the engine starts, avoiding the
     // fragile in-game restart path. Internal engine restarts skip this page.
@@ -358,8 +322,6 @@ ClientLauncher::NextProcess ClientLauncher::BuildNewGameProcess()
 
 ClientLauncher::EngineSessionResult ClientLauncher::RunEngine()
 {
-    EnsureSmartSteamEmuActive();
-
     if (analytics_)
         analytics_->SendAnalyticsEvent("startup_run_engine");
 
@@ -521,65 +483,6 @@ ClientLauncher::EngineSessionResult ClientLauncher::RunEngine()
     ModifyCmdLineAfterRestart(post_restart_cmd_line);
 
     return engine_session_result;
-}
-
-void ClientLauncher::EnsureSmartSteamEmuActive()
-{
-    try
-    {
-        const auto root = GetCurrentProcessPath().parent_path();
-        const auto sseDll = root / L"platform/steam/games/SmartEmu/SmartSteamEmu/SmartSteamEmu.dll";
-        const auto sseDll64 = root / L"platform/steam/games/SmartEmu/SmartSteamEmu/SmartSteamEmu64.dll";
-
-        if (std::filesystem::is_regular_file(sseDll))
-        {
-            SetEnvironmentVariableA("SteamAppId", "10");
-            SetEnvironmentVariableA("SteamGameId", "10");
-            SetEnvironmentVariableA("SmartSteamEmu", "1");
-
-            HKEY hActiveKey = nullptr;
-            if (RegCreateKeyExW(HKEY_CURRENT_USER, L"Software\\Valve\\Steam\\ActiveProcess", 0, nullptr,
-                REG_OPTION_NON_VOLATILE, KEY_SET_VALUE, nullptr, &hActiveKey, nullptr) == ERROR_SUCCESS)
-            {
-                const DWORD pid = GetCurrentProcessId();
-                const DWORD activeUser = 1;
-                const std::wstring sseStr = sseDll.wstring();
-                const std::wstring sse64Str = sseDll64.wstring();
-
-                RegSetValueExW(hActiveKey, L"pid", 0, REG_DWORD, reinterpret_cast<const BYTE*>(&pid), sizeof(pid));
-                RegSetValueExW(hActiveKey, L"ActiveUser", 0, REG_DWORD, reinterpret_cast<const BYTE*>(&activeUser), sizeof(activeUser));
-                RegSetValueExW(hActiveKey, L"SteamClientDll", 0, REG_SZ,
-                    reinterpret_cast<const BYTE*>(sseStr.c_str()), static_cast<DWORD>((sseStr.size() + 1) * sizeof(wchar_t)));
-                if (std::filesystem::is_regular_file(sseDll64))
-                {
-                    RegSetValueExW(hActiveKey, L"SteamClientDll64", 0, REG_SZ,
-                        reinterpret_cast<const BYTE*>(sse64Str.c_str()), static_cast<DWORD>((sse64Str.size() + 1) * sizeof(wchar_t)));
-                }
-                RegCloseKey(hActiveKey);
-            }
-
-            HKEY hSteamKey = nullptr;
-            if (RegCreateKeyExW(HKEY_CURRENT_USER, L"Software\\Valve\\Steam", 0, nullptr,
-                REG_OPTION_NON_VOLATILE, KEY_SET_VALUE, nullptr, &hSteamKey, nullptr) == ERROR_SUCCESS)
-            {
-                const auto sseDir = root / L"platform/steam/games/SmartEmu/SmartSteamEmu";
-                const auto sseExe = root / L"platform/steam/games/SmartEmu/SSELauncher.exe";
-                const std::wstring sseDirStr = sseDir.wstring();
-                const std::wstring sseExeStr = sseExe.wstring();
-
-                RegSetValueExW(hSteamKey, L"SteamPath", 0, REG_SZ,
-                    reinterpret_cast<const BYTE*>(sseDirStr.c_str()), static_cast<DWORD>((sseDirStr.size() + 1) * sizeof(wchar_t)));
-                RegSetValueExW(hSteamKey, L"SteamExe", 0, REG_SZ,
-                    reinterpret_cast<const BYTE*>(sseExeStr.c_str()), static_cast<DWORD>((sseExeStr.size() + 1) * sizeof(wchar_t)));
-                RegCloseKey(hSteamKey);
-            }
-
-            LoadLibraryW(sseDll.c_str());
-        }
-    }
-    catch (...)
-    {
-    }
 }
 
 void ClientLauncher::PrepareEngineCommandLine()

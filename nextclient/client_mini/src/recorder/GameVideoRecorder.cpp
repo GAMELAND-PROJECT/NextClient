@@ -42,13 +42,122 @@ namespace nextclient::client_mini
 
     GameVideoRecorder::~GameVideoRecorder()
     {
-        Stop();
+        StopWorkerCapture();
+        CancelConversion();
+    }
+
+    // -------------------------------------------------------------
+    // In-Match Zero-Lag Demo Recording
+    // -------------------------------------------------------------
+    bool GameVideoRecorder::StartMatchDemo(const std::string& baseFileName)
+    {
+        _mkdir("cstrike\\demos");
+        m_currentDemoFileName = baseFileName + ".dem";
+        m_matchDemoStartTime = std::chrono::steady_clock::now();
+        m_isMatchDemoRecording = true;
+        return true;
+    }
+
+    void GameVideoRecorder::StopMatchDemo()
+    {
+        m_isMatchDemoRecording = false;
+    }
+
+    std::string GameVideoRecorder::GetFormattedDemoTime() const
+    {
+        if (!m_isMatchDemoRecording.load())
+            return "00:00";
+
+        const auto now = std::chrono::steady_clock::now();
+        const int totalSeconds = static_cast<int>(std::chrono::duration<double>(now - m_matchDemoStartTime).count());
+        const int minutes = totalSeconds / 60;
+        const int seconds = totalSeconds % 60;
+
+        char buf[16]{};
+        std::snprintf(buf, sizeof(buf), "%02d:%02d", minutes, seconds);
+        return buf;
+    }
+
+    // -------------------------------------------------------------
+    // In-Lobby Match Demo Studio
+    // -------------------------------------------------------------
+    std::vector<DemoFileItem> GameVideoRecorder::RefreshDemoList()
+    {
+        m_cachedDemos.clear();
+
+#ifdef _WIN32
+        WIN32_FIND_DATAA fd{};
+        HANDLE hFind = FindFirstFileA("cstrike\\demos\\*.dem", &fd);
+        if (hFind != INVALID_HANDLE_VALUE)
+        {
+            do
+            {
+                if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY))
+                {
+                    DemoFileItem item;
+                    item.fileName = fd.cFileName;
+
+                    // Parse map name if available (e.g. PLAYER_de_dust2_1405-...)
+                    std::string f(fd.cFileName);
+                    const size_t firstUnderscore = f.find('_');
+                    if (firstUnderscore != std::string::npos)
+                    {
+                        const size_t secondUnderscore = f.find('_', firstUnderscore + 1);
+                        if (secondUnderscore != std::string::npos)
+                        {
+                            item.mapName = f.substr(firstUnderscore + 1, secondUnderscore - firstUnderscore - 1);
+                        }
+                    }
+                    if (item.mapName.empty())
+                    {
+                        // Fallback: strip .dem extension
+                        item.mapName = f.substr(0, f.find_last_of('.'));
+                    }
+
+                    // Format file size
+                    const uint64_t sizeBytes = (static_cast<uint64_t>(fd.nFileSizeHigh) << 32) | fd.nFileSizeLow;
+                    if (sizeBytes >= 1024 * 1024)
+                    {
+                        const double mb = static_cast<double>(sizeBytes) / (1024.0 * 1024.0);
+                        char sbuf[32]{};
+                        std::snprintf(sbuf, sizeof(sbuf), "%.1f MB", mb);
+                        item.sizeFormatted = sbuf;
+                    }
+                    else
+                    {
+                        const double kb = static_cast<double>(sizeBytes) / 1024.0;
+                        char sbuf[32]{};
+                        std::snprintf(sbuf, sizeof(sbuf), "%.0f KB", kb);
+                        item.sizeFormatted = sbuf;
+                    }
+
+                    // Format date & timestamp
+                    FILETIME ft = fd.ftLastWriteTime;
+                    SYSTEMTIME st{};
+                    FileTimeToSystemTime(&ft, &st);
+                    char dbuf[32]{};
+                    std::snprintf(dbuf, sizeof(dbuf), "%04d-%02d-%02d %02d:%02d", st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute);
+                    item.dateFormatted = dbuf;
+
+                    item.timestamp = (static_cast<uint64_t>(ft.dwHighDateTime) << 32) | ft.dwLowDateTime;
+
+                    m_cachedDemos.push_back(std::move(item));
+                }
+            } while (FindNextFileA(hFind, &fd));
+            FindClose(hFind);
+        }
+
+        // Sort newest first
+        std::sort(m_cachedDemos.begin(), m_cachedDemos.end(), [](const DemoFileItem& a, const DemoFileItem& b) {
+            return a.timestamp > b.timestamp;
+        });
+#endif
+        return m_cachedDemos;
     }
 
     std::string GameVideoRecorder::FindFfmpegExecutable() const
     {
 #ifdef _WIN32
-        // 1. Check folder of current running game executable
         char exePath[MAX_PATH]{};
         if (GetModuleFileNameA(nullptr, exePath, MAX_PATH) > 0)
         {
@@ -62,8 +171,6 @@ namespace nextclient::client_mini
             }
         }
 #endif
-
-        // 2. Check candidate working and deployment paths
         const char* candidatePaths[] = {
             "ffmpeg.exe",
             "..\\ffmpeg.exe",
@@ -71,13 +178,11 @@ namespace nextclient::client_mini
             "F:\\Allclient\\ffmpeg.exe",
             "D:\\Allclient\\ffmpeg.exe"
         };
-
         for (const auto* path : candidatePaths)
         {
             if (_access(path, 0) == 0)
                 return path;
         }
-
         return "ffmpeg.exe";
     }
 
@@ -126,20 +231,128 @@ namespace nextclient::client_mini
 #endif
     }
 
-    bool GameVideoRecorder::Start(const std::string& baseFileName, int width, int height, int targetFps)
+    bool GameVideoRecorder::StartDemoConversion(const std::string& demoFileName, int targetWidth, int targetHeight, int fps)
     {
-        if (m_isRecording.load() || m_isFinalizing.load())
+        if (m_isConverting.load())
+            return false;
+
+        _mkdir("cstrike\\videos");
+
+        std::string baseName = demoFileName;
+        const size_t dot = baseName.find_last_of('.');
+        if (dot != std::string::npos)
+            baseName = baseName.substr(0, dot);
+
+        m_convertingDemoName = demoFileName;
+        m_lastConvertedVideoPath = "cstrike/videos/" + baseName + ".mp4";
+        m_convertPercent = 5;
+        m_isConverting = true;
+
+#ifdef _WIN32
+        char exePath[MAX_PATH]{};
+        GetModuleFileNameA(nullptr, exePath, MAX_PATH);
+
+        std::ostringstream cmd;
+        cmd << "\"" << exePath << "\" -game cstrike -sw -noborder -windowed -width " << targetWidth << " -height " << targetHeight
+            << " -novid +viewdemo \"demos/" << demoFileName << "\" -democonvert";
+
+        STARTUPINFOA si{};
+        si.cb = sizeof(si);
+        si.dwFlags = STARTF_USESHOWWINDOW;
+        si.wShowWindow = SW_HIDE;
+
+        PROCESS_INFORMATION pi{};
+        std::string cmdStr = cmd.str();
+
+        BOOL created = CreateProcessA(
+            nullptr,
+            cmdStr.data(),
+            nullptr,
+            nullptr,
+            FALSE,
+            CREATE_NO_WINDOW | BELOW_NORMAL_PRIORITY_CLASS,
+            nullptr,
+            nullptr,
+            &si,
+            &pi
+        );
+
+        if (!created)
+        {
+            m_isConverting = false;
+            m_convertPercent = 0;
+            return false;
+        }
+
+        m_hConversionProcess = pi.hProcess;
+        CloseHandle(pi.hThread);
+
+        if (m_conversionMonitorThread.joinable())
+            m_conversionMonitorThread.detach();
+
+        m_conversionMonitorThread = std::thread(&GameVideoRecorder::MonitorConversionThread, this, pi.hProcess, m_lastConvertedVideoPath);
+#endif
+        return true;
+    }
+
+    void GameVideoRecorder::MonitorConversionThread(HANDLE hProcess, std::string outputPath)
+    {
+#ifdef _WIN32
+        int fakeProgress = 10;
+        while (true)
+        {
+            const DWORD waitRes = WaitForSingleObject(hProcess, 500);
+            if (waitRes == WAIT_OBJECT_0)
+            {
+                // Process finished
+                break;
+            }
+
+            if (fakeProgress < 95)
+            {
+                fakeProgress += 3;
+                m_convertPercent = fakeProgress;
+            }
+        }
+
+        CloseHandle(hProcess);
+        m_hConversionProcess = nullptr;
+        m_convertPercent = 100;
+        m_isConverting = false;
+#endif
+    }
+
+    void GameVideoRecorder::CancelConversion()
+    {
+#ifdef _WIN32
+        if (m_isConverting.load() && m_hConversionProcess != nullptr)
+        {
+            TerminateProcess(m_hConversionProcess, 0);
+            CloseHandle(m_hConversionProcess);
+            m_hConversionProcess = nullptr;
+            m_isConverting = false;
+            m_convertPercent = 0;
+        }
+#endif
+    }
+
+    // -------------------------------------------------------------
+    // Dedicated Worker Capture Engine (Used inside -democonvert process)
+    // -------------------------------------------------------------
+    bool GameVideoRecorder::StartWorkerCapture(const std::string& outputBaseName, int width, int height, int fps)
+    {
+        if (m_isWorkerCapturing.load())
             return false;
 
         _mkdir("cstrike\\videos");
 
         m_recordWidth = width;
         m_recordHeight = height;
-        m_targetFps = (targetFps > 0) ? targetFps : 60;
+        m_targetFps = (fps > 0) ? fps : 60;
         m_framesPushed = 0;
 
         const std::string ffmpegPath = FindFfmpegExecutable();
-        m_currentVideoPath = "cstrike/videos/" + baseFileName + ".mp4";
+        std::string outputPath = "cstrike/videos/" + outputBaseName + ".mp4";
 
 #ifdef _WIN32
         const DWORD pid = GetCurrentProcessId();
@@ -147,29 +360,24 @@ namespace nextclient::client_mini
         const std::string videoPipeName = "\\\\.\\pipe\\gl_vid_" + std::to_string(pid) + "_" + std::to_string(randId);
         const std::string audioPipeName = "\\\\.\\pipe\\gl_aud_" + std::to_string(pid) + "_" + std::to_string(randId);
 
-        // Pre-allocate capture buffer once on main thread
         const size_t frameBytes = static_cast<size_t>(width) * height * 3;
         m_preallocatedCaptureBuffer.resize(frameBytes, 0);
 
         m_stopRequested = false;
         m_readyForFrames = false;
-        m_isFinalizing = false;
-        m_isRecording = true;
-        m_startTime = std::chrono::steady_clock::now();
+        m_isWorkerCapturing = true;
 
-        // Clear existing frame queue
         {
             std::lock_guard<std::mutex> lock(m_queueMutex);
             std::queue<std::vector<uint8_t>> emptyQueue;
             std::swap(m_frameQueue, emptyQueue);
         }
 
-        // Launch background master thread so render loop never freezes
         m_masterThread = std::thread(
             &GameVideoRecorder::MasterWorkerThread,
             this,
             ffmpegPath,
-            m_currentVideoPath,
+            outputPath,
             videoPipeName,
             audioPipeName,
             width,
@@ -177,7 +385,6 @@ namespace nextclient::client_mini
             m_targetFps
         );
 #endif
-
         return true;
     }
 
@@ -220,9 +427,8 @@ namespace nextclient::client_mini
         {
             if (hVideoPipe != INVALID_HANDLE_VALUE) CloseHandle(hVideoPipe);
             if (hAudioPipe != INVALID_HANDLE_VALUE) CloseHandle(hAudioPipe);
-            m_isRecording = false;
+            m_isWorkerCapturing = false;
             m_readyForFrames = false;
-            m_isFinalizing = false;
             return;
         }
 
@@ -231,8 +437,6 @@ namespace nextclient::client_mini
 
         const int audioRate = QuerySystemAudioSampleRate();
 
-        // High-precision FFmpeg command:
-        // - aresample=async=1000:min_hard_comp=0.100000:first_pts=0 locks audio PTS to video PTS with 0ms drift
         std::ostringstream cmd;
         cmd << "\"" << ffmpegPath << "\" -y -hide_banner -loglevel error"
             << " -f rawvideo -pix_fmt rgb24 -s " << width << "x" << height
@@ -272,28 +476,27 @@ namespace nextclient::client_mini
             CloseHandle(hAudioPipe);
             m_hVideoPipe = INVALID_HANDLE_VALUE;
             m_hAudioPipe = INVALID_HANDLE_VALUE;
-            m_isRecording = false;
+            m_isWorkerCapturing = false;
             m_readyForFrames = false;
-            m_isFinalizing = false;
             return;
         }
 
         m_hFfmpegProcess = pi.hProcess;
         CloseHandle(pi.hThread);
 
-        // Step 1: Connect video pipe (FFmpeg input 0)
+        // Step 1: Connect video pipe
         ConnectNamedPipe(hVideoPipe, nullptr);
 
-        // Step 2: Send exactly 1 initial video frame for FFmpeg probe
+        // Step 2: Send 1 initial probe frame
         const size_t probeFrameSize = static_cast<size_t>(width) * height * 3;
         std::vector<uint8_t> probeFrame(probeFrameSize, 0);
         DWORD probeWritten = 0;
         WriteFile(hVideoPipe, probeFrame.data(), static_cast<DWORD>(probeFrame.size()), &probeWritten, nullptr);
 
-        // Step 3: Connect audio pipe (FFmpeg input 1)
+        // Step 3: Connect audio pipe
         ConnectNamedPipe(hAudioPipe, nullptr);
 
-        // Step 4: Symmetrical initial audio chunk: exactly 1 frame equivalent (1/fps of a second)
+        // Step 4: Symmetrical initial audio chunk
         const size_t probeAudioSamples = static_cast<size_t>(audioRate / fps);
         std::vector<int16_t> probeAudio(probeAudioSamples * 2, 0);
         WriteFile(hAudioPipe, probeAudio.data(), static_cast<DWORD>(probeAudio.size() * sizeof(int16_t)), &probeWritten, nullptr);
@@ -301,12 +504,11 @@ namespace nextclient::client_mini
         // Step 5: Start audio capture thread
         m_audioThread = std::thread(&GameVideoRecorder::AudioWorkerThread, this, hAudioPipe, audioRate);
 
-        // Step 6: Mark synchronized start time t0 and open gate for game frames
+        // Step 6: Mark synchronized start time
         m_syncStartTime = std::chrono::steady_clock::now();
-        m_framesPushed = 1; // 1 probe frame already written
+        m_framesPushed = 1;
         m_readyForFrames = true;
 
-        // Video streaming loop
         while (!m_stopRequested.load())
         {
             std::vector<uint8_t> frame;
@@ -330,7 +532,6 @@ namespace nextclient::client_mini
             }
         }
 
-        // Flush remaining frames from queue
         while (true)
         {
             std::vector<uint8_t> frame;
@@ -348,16 +549,13 @@ namespace nextclient::client_mini
             }
         }
 
-        // Disconnect and close video pipe cleanly
         DisconnectNamedPipe(hVideoPipe);
         CloseHandle(hVideoPipe);
         m_hVideoPipe = INVALID_HANDLE_VALUE;
 
-        // Join audio worker thread
         if (m_audioThread.joinable())
             m_audioThread.join();
 
-        // Wait for FFmpeg to finalize container with 5-second timeout
         if (m_hFfmpegProcess != nullptr)
         {
             WaitForSingleObject(m_hFfmpegProcess, 5000);
@@ -365,45 +563,39 @@ namespace nextclient::client_mini
             m_hFfmpegProcess = nullptr;
         }
 
-        m_lastSavedVideoPath = outputPath;
         m_readyForFrames = false;
-        m_isRecording = false;
-        m_isFinalizing = false;
+        m_isWorkerCapturing = false;
 #endif
     }
 
-    void GameVideoRecorder::CaptureFrame(int width, int height)
+    void GameVideoRecorder::WorkerCaptureFrame(int width, int height)
     {
 #ifdef _WIN32
-        if (!m_isRecording.load() || !m_readyForFrames.load() || m_stopRequested.load())
+        if (!m_isWorkerCapturing.load() || !m_readyForFrames.load() || m_stopRequested.load())
             return;
 
         if (width != m_recordWidth || height != m_recordHeight)
             return;
 
-        // Precision wallclock timeline pacing:
-        // Calculates how many 60fps frames should exist at this exact microsecond
         const auto now = std::chrono::steady_clock::now();
         const double elapsedSec = std::chrono::duration<double>(now - m_syncStartTime).count();
         const uint64_t targetFrameCount = static_cast<uint64_t>(elapsedSec * m_targetFps);
 
         const uint64_t currentPushed = m_framesPushed.load();
         if (currentPushed >= targetFrameCount)
-            return; // Render loop is running faster than 60 FPS (e.g. 100 FPS), skip this frame
+            return;
 
         uint64_t framesNeeded = targetFrameCount - currentPushed;
         if (framesNeeded > 3)
-            framesNeeded = 3; // Clamp burst to avoid queue flooding
+            framesNeeded = 3;
 
         const size_t frameSize = static_cast<size_t>(width) * height * 3;
         if (m_preallocatedCaptureBuffer.size() != frameSize)
             m_preallocatedCaptureBuffer.resize(frameSize, 0);
 
-        // Crash-proof OpenGL capture protected by isolated SEH function
         if (!SafeGlReadPixels(width, height, m_preallocatedCaptureBuffer.data()))
             return;
 
-        // Non-blocking try-lock: pushes frame and compensates for any dropped frames
         {
             std::unique_lock<std::mutex> lock(m_queueMutex, std::try_to_lock);
             if (lock.owns_lock())
@@ -446,11 +638,10 @@ namespace nextclient::client_mini
                     hr = pAudioClient->GetMixFormat(&pwfx);
                     if (SUCCEEDED(hr) && pwfx != nullptr)
                     {
-                        // Ultra low latency buffer: 40ms (400,000 hns) instead of 1,000ms
                         hr = pAudioClient->Initialize(
                             AUDCLNT_SHAREMODE_SHARED,
                             AUDCLNT_STREAMFLAGS_LOOPBACK,
-                            400000,
+                            400000, // 40ms low-latency buffer
                             0,
                             pwfx,
                             nullptr
@@ -521,14 +712,12 @@ namespace nextclient::client_mini
             }
             else
             {
-                // Fallback silence generation if sound card or WASAPI is unavailable (Lite Windows builds)
-                const size_t silenceFrames = static_cast<size_t>(sampleRate) / 100; // 10ms worth
+                const size_t silenceFrames = static_cast<size_t>(sampleRate) / 100;
                 std::vector<int16_t> silence(silenceFrames * 2, 0);
                 DWORD written = 0;
                 WriteFile(hPipe, silence.data(), static_cast<DWORD>(silence.size() * sizeof(int16_t)), &written, nullptr);
             }
 
-            // Low latency poll: 3ms instead of 10ms
             Sleep(3);
         }
 
@@ -550,52 +739,19 @@ namespace nextclient::client_mini
 #endif
     }
 
-    void GameVideoRecorder::Stop()
+    void GameVideoRecorder::StopWorkerCapture()
     {
 #ifdef _WIN32
-        // Atomic compare-exchange: ensures Stop() is executed exactly once
         bool expected = true;
-        if (!m_isRecording.compare_exchange_strong(expected, false))
+        if (!m_isWorkerCapturing.compare_exchange_strong(expected, false))
             return;
 
-        m_isFinalizing = true;
         m_readyForFrames = false;
         m_stopRequested = true;
         m_queueCv.notify_all();
 
-        // 100% non-blocking: detach worker thread so main game render loop NEVER stalls or freezes!
         if (m_masterThread.joinable())
             m_masterThread.detach();
 #endif
-    }
-
-    double GameVideoRecorder::GetElapsedSeconds() const
-    {
-        if (!m_isRecording.load())
-            return 0.0;
-
-        const auto now = std::chrono::steady_clock::now();
-        return std::chrono::duration<double>(now - m_startTime).count();
-    }
-
-    std::string GameVideoRecorder::GetFormattedTime() const
-    {
-        const int totalSeconds = static_cast<int>(GetElapsedSeconds());
-        const int minutes = totalSeconds / 60;
-        const int seconds = totalSeconds % 60;
-
-        char buf[16]{};
-        std::snprintf(buf, sizeof(buf), "%02d:%02d", minutes, seconds);
-        return buf;
-    }
-
-    std::string GameVideoRecorder::GetCurrentVideoPath() const
-    {
-        return m_currentVideoPath;
-    }
-
-    std::string GameVideoRecorder::GetLastSavedVideoPath() const
-    {
-        return m_lastSavedVideoPath;
     }
 }
