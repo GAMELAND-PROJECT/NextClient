@@ -1089,7 +1089,7 @@ static std::string GetActiveDemoOrMapName()
                 const std::string demoFile = demos[g_SelectedDemoIndex].fileName;
                 int curW = 1024, curH = 768;
                 GetGameScreenResolution(curW, curH);
-                GameVideoRecorder::Instance().StartDemoConversion(demoFile, curW, curH, 100);
+                GameVideoRecorder::Instance().StartDemoConversion(demoFile, curW, curH, 60);
                 g_SelectedDemoIndex = -1;
                 return 0;
             }
@@ -1333,11 +1333,11 @@ static int HUD_RedrawHandler(float flTime, int iIntermission, HUD_RedrawNext nex
             {
                 GameVideoRecorder::Instance().SetDemoPaused(false);
                 gEngfuncs.pfnClientCmd("dem_pause 0\n");
-                gEngfuncs.pfnClientCmd("dem_speed 10.0\n");
+                gEngfuncs.pfnClientCmd("dem_speed 1.0\n");
                 gEngfuncs.pfnClientCmd("fps_override 1\n");
                 gEngfuncs.pfnClientCmd("fps_max 0\n");
                 gEngfuncs.pfnClientCmd("gl_vsync 0\n");
-                gEngfuncs.pfnClientCmd("host_framerate 0.01000000\n");
+                gEngfuncs.pfnClientCmd("host_framerate 0.01666667\n");
             }
             else
             {
