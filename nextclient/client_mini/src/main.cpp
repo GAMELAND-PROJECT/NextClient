@@ -335,7 +335,7 @@ static std::string GetActiveDemoOrMapName()
         DrawHudBox(x + w - 1, y, 1, h, 50, 75, 100, 180);
 
         gEngfuncs.pfnDrawSetTextColor(0.20f, 0.85f, 1.0f);
-        DrawHudString(x + 20, y + 14, "GAMELAND DEMO STUDIO | RENDERING 1080P MP4");
+        DrawHudString(x + 20, y + 14, "GAMELAND DEMO STUDIO | HIGH-SPEED 100 FPS RENDER");
 
         const bool isSeeking = GameVideoRecorder::Instance().IsHighlightSeeking();
         const int pct = isSeeking ? 0 : GameVideoRecorder::Instance().GetRenderProgressPercent();
@@ -364,13 +364,13 @@ static std::string GetActiveDemoOrMapName()
         }
         else
         {
-            std::snprintf(progText, sizeof(progText), "Progress: %d%%  |  Frame %llu of %llu  |  60 FPS Lockstep", pct, pushed, total);
+            std::snprintf(progText, sizeof(progText), "Progress: %d%%  |  Frame %llu of %llu  |  100 FPS Ultra Lockstep", pct, pushed, total);
         }
         gEngfuncs.pfnDrawSetTextColor(0.95f, 0.95f, 0.95f);
         DrawHudString(x + 20, y + 68, progText);
 
         gEngfuncs.pfnDrawSetTextColor(0.60f, 0.75f, 0.85f);
-        DrawHudString(x + 20, y + 92, isSeeking ? "Preparing 1080p studio lockstep capture..." : "Rendering in background... (~2-3 sec)");
+        DrawHudString(x + 20, y + 92, isSeeking ? "Preparing high-speed 100 FPS capture..." : "High-speed render in background... (~1-2 sec)");
     }
 
     void DrawHighlightConfirmDialog(int scrW, int scrH)
@@ -399,7 +399,7 @@ static std::string GetActiveDemoOrMapName()
         DrawHudString(x + 20, y + 48, clipInfo.c_str());
 
         gEngfuncs.pfnDrawSetTextColor(0.65f, 0.78f, 0.90f);
-        DrawHudString(x + 20, y + 70, "Quality: 1080p Full HD (Lanczos) | 60 FPS Locked | HLAE Lockstep");
+        DrawHudString(x + 20, y + 70, "Quality: Native Pixel-Perfect | 100 FPS Ultra Lockstep | HLAE Sync");
 
         DrawHudBox(x + 16, y + 94, w - 32, 1, 50, 70, 90, 120);
 

@@ -177,7 +177,7 @@ namespace nextclient::client_mini
         std::queue<std::vector<uint8_t>> m_frameQueue;
         std::vector<std::vector<uint8_t>> m_frameBufferPool;
         std::atomic<bool> m_stopWriterThread{false};
-        static constexpr size_t kMaxQueueFrames = 120;
+        static constexpr size_t kMaxQueueFrames = 150;
 
         std::vector<uint8_t> m_preallocatedCaptureBuffer;
         unsigned int m_pboIds[2]{0, 0};

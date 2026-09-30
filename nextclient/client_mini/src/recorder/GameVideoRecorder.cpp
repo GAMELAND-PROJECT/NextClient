@@ -354,7 +354,7 @@ namespace nextclient::client_mini
             m_audioRecordThread.join();
 
         char buf[128]{};
-        std::snprintf(buf, sizeof(buf), "Duration: %.1fs  |  Range: %s -> %s  |  60 FPS Synchronized",
+        std::snprintf(buf, sizeof(buf), "Duration: %.1fs  |  Range: %s -> %s  |  100 FPS Ultra Lockstep",
             dur, GetFormattedTime(m_markInTime).c_str(), GetFormattedTime(m_markOutTime).c_str());
         m_highlightClipInfo = buf;
 
@@ -452,8 +452,8 @@ namespace nextclient::client_mini
             PIPE_ACCESS_OUTBOUND,
             PIPE_TYPE_BYTE | PIPE_WAIT,
             1,
-            1024 * 1024 * 4,
-            1024 * 1024 * 4,
+            1024 * 1024 * 32,
+            1024 * 1024 * 32,
             0,
             nullptr
         );
@@ -475,10 +475,10 @@ namespace nextclient::client_mini
 
         std::ostringstream cmd;
         cmd << "\"" << ffmpegPath << "\" -y -hide_banner -loglevel error"
-            << " -f rawvideo -pix_fmt rgb24 -s " << width << "x" << height
+            << " -thread_queue_size 128 -f rawvideo -pix_fmt rgb24 -s " << width << "x" << height
             << " -r 100 -i \"" << videoPipeName << "\""
-            << " -vf " << videoFilter
-            << " -c:v libx264 -preset ultrafast -tune fastdecode -crf 18 -profile:v high -pix_fmt yuv420p -threads 0"
+            << " -filter_threads 0 -vf " << videoFilter
+            << " -c:v libx264 -preset ultrafast -tune fastdecode -crf 18 -profile:v high -pix_fmt yuv420p -threads 0 -slices 4"
             << " -movflags +faststart \"" << m_tempVideoPath << "\"";
 
         STARTUPINFOA si{};
@@ -547,7 +547,7 @@ namespace nextclient::client_mini
         if (m_renderFramesPushed.load() >= m_renderTargetFrames)
             return;
 
-        // HLAE FS_STARTING: Drop frame 0 to let scene and camera matrix settle
+        // Drop frame 0 to let scene and camera matrix settle
         if (m_isFirstRenderFrame)
         {
             m_isFirstRenderFrame = false;
@@ -555,46 +555,18 @@ namespace nextclient::client_mini
         }
 
         const size_t frameSize = static_cast<size_t>(width) * height * 3;
-        if (m_preallocatedCaptureBuffer.size() != frameSize)
-            m_preallocatedCaptureBuffer.resize(frameSize, 0);
 
         if (!m_pboInitialized || m_pboWidth != width || m_pboHeight != height)
         {
             InitPbo(width, height);
         }
 
-        bool captured = false;
-        if (m_pboSupported && m_pboInitialized)
-        {
-            int nextIndex = (m_pboIndex + 1) % 2;
-
-            pfnBindBuffer(GL_PIXEL_PACK_BUFFER_ARB, m_pboIds[nextIndex]);
-            glReadPixels(0, 0, width, height, GL_RGB, GL_UNSIGNED_BYTE, 0);
-
-            pfnBindBuffer(GL_PIXEL_PACK_BUFFER_ARB, m_pboIds[m_pboIndex]);
-            void* pGpuData = pfnMapBuffer(GL_PIXEL_PACK_BUFFER_ARB, GL_READ_ONLY_ARB);
-            if (pGpuData != nullptr)
-            {
-                memcpy(m_preallocatedCaptureBuffer.data(), pGpuData, frameSize);
-                pfnUnmapBuffer(GL_PIXEL_PACK_BUFFER_ARB);
-                captured = true;
-            }
-            pfnBindBuffer(GL_PIXEL_PACK_BUFFER_ARB, 0);
-
-            m_pboIndex = nextIndex;
-        }
-
-        if (!captured)
-        {
-            if (!SafeGlReadPixels(width, height, m_preallocatedCaptureBuffer.data()))
-                return;
-        }
-
+        // Fast-path: Pre-acquire frame buffer from pool to avoid double memcpy
         std::vector<uint8_t> frameBuffer;
         {
             std::unique_lock<std::mutex> lock(m_queueMutex);
             m_queueSpaceCv.wait(lock, [this]() {
-                return m_frameQueue.size() < 100 || m_stopWriterThread.load() || m_highlightState.load() != HighlightState::Rendering;
+                return m_frameQueue.size() < 150 || m_stopWriterThread.load() || m_highlightState.load() != HighlightState::Rendering;
             });
 
             if (m_highlightState.load() != HighlightState::Rendering || m_stopWriterThread.load())
@@ -608,9 +580,35 @@ namespace nextclient::client_mini
         }
 
         if (frameBuffer.size() != frameSize)
-            frameBuffer.resize(frameSize);
+            frameBuffer.resize(frameSize, 0);
 
-        memcpy(frameBuffer.data(), m_preallocatedCaptureBuffer.data(), frameSize);
+        bool captured = false;
+        if (m_pboSupported && m_pboInitialized)
+        {
+            int nextIndex = (m_pboIndex + 1) % 2;
+
+            pfnBindBuffer(GL_PIXEL_PACK_BUFFER_ARB, m_pboIds[nextIndex]);
+            glReadPixels(0, 0, width, height, GL_RGB, GL_UNSIGNED_BYTE, 0);
+
+            pfnBindBuffer(GL_PIXEL_PACK_BUFFER_ARB, m_pboIds[m_pboIndex]);
+            void* pGpuData = pfnMapBuffer(GL_PIXEL_PACK_BUFFER_ARB, GL_READ_ONLY_ARB);
+            if (pGpuData != nullptr)
+            {
+                // Direct single-pass copy from mapped PBO into frame buffer (Zero intermediate copy)
+                memcpy(frameBuffer.data(), pGpuData, frameSize);
+                pfnUnmapBuffer(GL_PIXEL_PACK_BUFFER_ARB);
+                captured = true;
+            }
+            pfnBindBuffer(GL_PIXEL_PACK_BUFFER_ARB, 0);
+
+            m_pboIndex = nextIndex;
+        }
+
+        if (!captured)
+        {
+            if (!SafeGlReadPixels(width, height, frameBuffer.data()))
+                return;
+        }
 
         {
             std::lock_guard<std::mutex> lock(m_queueMutex);
@@ -620,7 +618,6 @@ namespace nextclient::client_mini
         m_renderFramesPushed.fetch_add(1);
 #endif
     }
-
     void GameVideoRecorder::PipeWriterWorker()
     {
 #ifdef _WIN32
@@ -650,7 +647,7 @@ namespace nextclient::client_mini
                 WriteFile(m_hVideoPipe, frame.data(), static_cast<DWORD>(frame.size()), &written, nullptr);
 
                 std::lock_guard<std::mutex> lock(m_queueMutex);
-                if (m_frameBufferPool.size() < 120)
+                if (m_frameBufferPool.size() < 150)
                 {
                     m_frameBufferPool.push_back(std::move(frame));
                 }
@@ -1236,8 +1233,8 @@ namespace nextclient::client_mini
             PIPE_ACCESS_OUTBOUND,
             PIPE_TYPE_BYTE | PIPE_WAIT,
             1,
-            1024 * 1024 * 4,
-            1024 * 1024 * 4,
+            1024 * 1024 * 32,
+            1024 * 1024 * 32,
             0,
             nullptr
         );
@@ -1324,11 +1321,11 @@ namespace nextclient::client_mini
 
         std::ostringstream cmd;
         cmd << "\"" << ffmpegPath << "\" -y -hide_banner -loglevel error"
-            << " -f rawvideo -pix_fmt rgb24 -s " << width << "x" << height
+            << " -thread_queue_size 128 -f rawvideo -pix_fmt rgb24 -s " << width << "x" << height
             << " -r " << fps << " -i \"" << videoPipeName << "\""
             << " -f s16le -ar " << audioRate << " -ac 2 -i \"" << audioPipeName << "\""
-            << " -vf " << videoFilter
-            << " -c:v libx264 -preset ultrafast -tune fastdecode -crf 18 -profile:v high -pix_fmt yuv420p -threads 0"
+            << " -filter_threads 0 -vf " << videoFilter
+            << " -c:v libx264 -preset ultrafast -tune fastdecode -crf 18 -profile:v high -pix_fmt yuv420p -threads 0 -slices 4"
             << " -af aresample=async=1000:min_hard_comp=0.100000:first_pts=0"
             << " -c:a aac -b:a 160k"
             << " -movflags +faststart+frag_keyframe+empty_moov"
