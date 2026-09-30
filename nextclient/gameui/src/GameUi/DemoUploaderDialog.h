@@ -1,4 +1,4 @@
-#ifndef DEMOUPLOADERDIALOG_H
+﻿#ifndef DEMOUPLOADERDIALOG_H
 #define DEMOUPLOADERDIALOG_H
 #ifdef _WIN32
 #pragma once
@@ -25,13 +25,13 @@ protected:
 
 private:
     void RefreshDemoList();
-    void ConvertSelectedDemo();
     void PlaySelectedDemo();
-    void OpenVideosFolder();
+    void DeleteSelectedDemo();
+    void OpenDemosFolder();
 
     vgui2::ListPanel *m_pDemoList;
-    vgui2::Button *m_pConvertButton;
     vgui2::Button *m_pPlayButton;
+    vgui2::Button *m_pDeleteButton;
     vgui2::Button *m_pOpenFolderButton;
     vgui2::Button *m_pRefreshButton;
     vgui2::Button *m_pCloseButton;

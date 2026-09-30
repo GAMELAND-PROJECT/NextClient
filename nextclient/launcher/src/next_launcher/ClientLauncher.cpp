@@ -510,6 +510,7 @@ void ClientLauncher::PrepareEngineCommandLine()
 
     if (!cmd_line_->CheckParm("-num_edicts"))
         cmd_line_->AppendParm("-num_edicts", "4096");
+    if (!cmd_line_->CheckParm("-windowed") && !cmd_line_->CheckParm("-sw")) cmd_line_->AppendParm("-fullscreen", nullptr);
 
     if (cmd_line_->CheckParm("-demorender"))
     {
@@ -579,6 +580,7 @@ void ClientLauncher::FixScreenResolution()
         hl_registry_->WriteInt("ScreenWidth", kDefaultWidth);
         hl_registry_->WriteInt("ScreenHeight", kDefaultHeight);
     }
+    if (!cmd_line_->CheckParm("-windowed") && !cmd_line_->CheckParm("-sw")) hl_registry_->WriteInt("ScreenWindowed", 0);
 }
 
 bool ClientLauncher::GlobalMutexCheck()

@@ -692,11 +692,9 @@ static void GetGameScreenResolution(int& outWidth, int& outHeight)
     void EnsureDemoDirectory()
     {
 #ifdef _WIN32
-        _mkdir("cstrike\\demos");
-        _mkdir("cstrike\\videos");
+        _mkdir("demos");
 #else
-        mkdir("cstrike/demos", 0755);
-        mkdir("cstrike/videos", 0755);
+        mkdir("demos", 0755);
 #endif
     }
 
@@ -727,7 +725,7 @@ static void GetGameScreenResolution(int& outWidth, int& outHeight)
             gEngfuncs.pfnClientCmd("stop\n");
             GameVideoRecorder::Instance().StopMatchDemo();
 
-            gEngfuncs.pfnConsolePrint("\n^2[Gameland Match Recorder] Match demo stopped and saved to cstrike/demos/!\n\n");
+            gEngfuncs.pfnConsolePrint("\n^2[Gameland Match Recorder] Match demo stopped and saved to demos/!\n\n");
         }
     }
 
@@ -975,35 +973,6 @@ static void HUD_InitPost()
 
     hud_draw = g_engfuncs.pfnCVarGetPointer("hud_draw");
 
-    // Handle Headless Background Demo Converter Worker
-    const char* cmdLine = GetCommandLineA();
-    if (cmdLine != nullptr && std::strstr(cmdLine, "-democonvert") != nullptr)
-    {
-        std::string baseName = "converted_demo";
-        const char* viewdemoPtr = std::strstr(cmdLine, "+viewdemo");
-        if (viewdemoPtr != nullptr)
-        {
-            std::string line = viewdemoPtr + 9;
-            while (!line.empty() && (line.front() == ' ' || line.front() == '"'))
-                line.erase(line.begin());
-            size_t endPos = line.find_first_of(" \"\r\n");
-            if (endPos != std::string::npos)
-                line = line.substr(0, endPos);
-            const size_t slash = line.find_last_of("/\\");
-            if (slash != std::string::npos)
-                line = line.substr(slash + 1);
-            const size_t dot = line.find_last_of('.');
-            if (dot != std::string::npos)
-                line = line.substr(0, dot);
-            if (!line.empty())
-                baseName = line;
-        }
-
-        int scrW = 1280, scrH = 720;
-        GetGameScreenResolution(scrW, scrH);
-        GameVideoRecorder::Instance().StartWorkerCapture(baseName, scrW, scrH, 60);
-    }
-
     InvertMouseInit();
 
     ColorChatInConsolePatch();
@@ -1033,34 +1002,6 @@ static int HUD_RedrawHandler(float flTime, int iIntermission, HUD_RedrawNext nex
     if (hud_draw_value != 0.0f && !overlay_visible && g_DemoMenuVisible)
         DrawDemoMenu();
 
-    // Check if running as background headless converter worker
-    const char* cmdLine = GetCommandLineA();
-    const bool isWorker = (cmdLine != nullptr && std::strstr(cmdLine, "-democonvert") != nullptr);
-
-    if (isWorker)
-    {
-        int scrW = 1280, scrH = 720;
-        GetGameScreenResolution(scrW, scrH);
-        GameVideoRecorder::Instance().WorkerCaptureFrame(scrW, scrH);
-
-        static int workerFrameCount = 0;
-        workerFrameCount++;
-        if (workerFrameCount > 120)
-        {
-            bool isPlaying = false;
-            if (gEngfuncs.pDemoAPI != nullptr && gEngfuncs.pDemoAPI->IsPlayingback != nullptr)
-                isPlaying = gEngfuncs.pDemoAPI->IsPlayingback();
-
-            if (!isPlaying)
-            {
-                GameVideoRecorder::Instance().StopWorkerCapture();
-                ExitProcess(0);
-            }
-        }
-    }
-    else
-    {
-        // Normal game client:
         // Render top-right Windows capture style timer widget if match demo is recording
         if (GameVideoRecorder::Instance().IsMatchDemoRecording() && !g_DemoMenuVisible)
         {
@@ -1068,7 +1009,6 @@ static int HUD_RedrawHandler(float flTime, int iIntermission, HUD_RedrawNext nex
             GetGameScreenResolution(scrW, scrH);
             DrawWindowsCaptureWidget(scrW);
         }
-    }
 
     if (g_PendingDemoAction != DemoMenuAction::None)
         RunPendingDemoAction();

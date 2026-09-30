@@ -1,4 +1,4 @@
-#include "GameUi.h"
+﻿#include "GameUi.h"
 #include "DemoUploaderDialog.h"
 #include <vgui_controls/ListPanel.h>
 #include <vgui_controls/Button.h>
@@ -17,6 +17,7 @@
 #include <sstream>
 #include <format>
 #include <chrono>
+#include <set>
 
 #ifdef MessageBox
 #undef MessageBox
@@ -29,7 +30,7 @@ CDemoUploaderDialog::CDemoUploaderDialog(vgui2::Panel *parent) : Frame(parent, "
 {
     SetBounds(0, 0, 620, 440);
     SetSizeable(false);
-    SetTitle("GameLand Match Demo Studio & Video Converter", true);
+    SetTitle("GameLand Match Demo Studio", true);
 
     m_pDemoList = new ListPanel(this, "DemoList");
     m_pDemoList->AddColumnHeader(0, "demoname", "Demo File", 270);
@@ -37,14 +38,14 @@ CDemoUploaderDialog::CDemoUploaderDialog(vgui2::Panel *parent) : Frame(parent, "
     m_pDemoList->AddColumnHeader(2, "size", "Size", 75);
     m_pDemoList->AddColumnHeader(3, "date", "Recorded Date", 110);
 
-    m_pConvertButton = new Button(this, "ConvertButton", "Convert to MP4 (1080p)");
     m_pPlayButton = new Button(this, "PlayButton", "Play Demo");
-    m_pOpenFolderButton = new Button(this, "OpenFolderButton", "Videos Folder");
+    m_pDeleteButton = new Button(this, "DeleteButton", "Delete Demo");
+    m_pOpenFolderButton = new Button(this, "OpenFolderButton", "Demos Folder");
     m_pRefreshButton = new Button(this, "RefreshButton", "Refresh");
     m_pCloseButton = new Button(this, "CloseButton", "Close (F4)");
 
-    m_pConvertButton->SetCommand("Convert");
     m_pPlayButton->SetCommand("Play");
+    m_pDeleteButton->SetCommand("Delete");
     m_pOpenFolderButton->SetCommand("OpenFolder");
     m_pRefreshButton->SetCommand("Refresh");
     m_pCloseButton->SetCommand("Close");
@@ -87,17 +88,18 @@ void CDemoUploaderDialog::ApplySchemeSettings(vgui2::IScheme *pScheme)
     const int btnY = 390;
     const int btnH = 30;
 
-    m_pConvertButton->SetBounds(20, btnY, 175, btnH);
-    m_pPlayButton->SetBounds(205, btnY, 95, btnH);
-    m_pOpenFolderButton->SetBounds(310, btnY, 115, btnH);
-    m_pRefreshButton->SetBounds(435, btnY, 80, btnH);
-    m_pCloseButton->SetBounds(525, btnY, 75, btnH);
+    m_pPlayButton->SetBounds(20, btnY, 110, btnH);
+    m_pDeleteButton->SetBounds(138, btnY, 110, btnH);
+    m_pOpenFolderButton->SetBounds(256, btnY, 130, btnH);
+    m_pRefreshButton->SetBounds(394, btnY, 95, btnH);
+    m_pCloseButton->SetBounds(497, btnY, 103, btnH);
 }
 
 struct DemoEntryItem
 {
     std::string filename;
     std::string relpath;
+    std::string fullpath;
     std::string map;
     std::string sizeStr;
     std::string dateStr;
@@ -119,36 +121,46 @@ static std::string FormatBytes(uintmax_t bytes)
 static std::string ExtractMap(const std::string& name)
 {
     std::string lower = name;
-    for (auto& c : lower) c = (char)std::tolower((unsigned char)c);
+    for (char& c : lower) c = (char)tolower(c);
 
-    for (const auto* prefix : {"de_", "cs_", "aim_", "awp_", "fy_", "surf_", "zm_"})
+    static const char* kMaps[] = {
+        "de_dust2", "de_inferno", "de_mirage", "de_nuke", "de_train",
+        "de_aztec", "de_cbble", "de_cpl_mill", "de_cpl_strike", "de_cpl_fire",
+        "de_tuscan", "de_forge", "de_hell", "de_kabul", "de_dust",
+        "cs_assault", "cs_italy", "cs_militia", "cs_office", "cs_747",
+        "awp_india", "aim_map", "aim_headshot", "fy_pool_day", "fy_iceworld",
+        "de_piranesi"
+    };
+
+    for (const char* m : kMaps)
     {
-        size_t pos = lower.find(prefix);
-        if (pos != std::string::npos)
-        {
-            size_t endPos = lower.find_first_of("._", pos + 3);
-            if (endPos != std::string::npos)
-                return name.substr(pos, endPos - pos);
-            return name.substr(pos);
-        }
+        if (lower.find(m) != std::string::npos)
+            return m;
     }
-    return "cstrike";
+    return "-";
 }
 
 void CDemoUploaderDialog::RefreshDemoList()
 {
-    m_pDemoList->DeleteAllItems();
+    m_pDemoList->RemoveAll();
 
     std::vector<DemoEntryItem> demos;
+    std::set<std::string> seenNames;
 
     auto scanDir = [&](const std::string& dirPath, const std::string& prefixRel) {
         try {
             if (fs::exists(dirPath)) {
                 for (const auto& entry : fs::directory_iterator(dirPath)) {
                     if (entry.is_regular_file() && entry.path().extension() == ".dem") {
+                        std::string fname = entry.path().filename().string();
+                        if (seenNames.find(fname) != seenNames.end())
+                            continue;
+                        seenNames.insert(fname);
+
                         DemoEntryItem item;
-                        item.filename = entry.path().filename().string();
+                        item.filename = fname;
                         item.relpath = prefixRel.empty() ? item.filename : (prefixRel + "/" + item.filename);
+                        item.fullpath = entry.path().string();
                         item.map = ExtractMap(item.filename);
 
                         auto fsize = entry.file_size();
@@ -173,6 +185,9 @@ void CDemoUploaderDialog::RefreshDemoList()
         } catch (...) {}
     };
 
+    // Scan main game root folder demos first (D:\Allclient\demos\)
+    scanDir("demos", "demos");
+    // Also scan cstrike/demos for compatibility
     scanDir("cstrike/demos", "demos");
     scanDir("cstrike", "");
 
@@ -186,6 +201,7 @@ void CDemoUploaderDialog::RefreshDemoList()
         KeyValues *kv = new KeyValues("data");
         kv->SetString("demoname", d.filename.c_str());
         kv->SetString("relpath", d.relpath.c_str());
+        kv->SetString("fullpath", d.fullpath.c_str());
         kv->SetString("map", d.map.c_str());
         kv->SetString("size", d.sizeStr.c_str());
         kv->SetString("date", d.dateStr.c_str());
@@ -196,78 +212,6 @@ void CDemoUploaderDialog::RefreshDemoList()
     if (m_pDemoList->GetItemCount() > 0)
     {
         m_pDemoList->SetSingleSelectedItem(m_pDemoList->GetItemIDFromRow(0));
-    }
-}
-
-void CDemoUploaderDialog::ConvertSelectedDemo()
-{
-    if (m_pDemoList->GetSelectedItemsCount() == 0)
-    {
-        MessageBox *pBox = new MessageBox("Error", "Please select a demo from the list first.");
-        pBox->DoModal();
-        return;
-    }
-
-    int itemID = m_pDemoList->GetSelectedItem(0);
-    KeyValues *kv = m_pDemoList->GetItem(itemID);
-    const char *szRelPath = kv->GetString("relpath", "");
-    const char *szDemoName = kv->GetString("demoname", "");
-
-    if (!szRelPath[0]) return;
-
-    // Use current screen resolution dynamically
-    int curW = 1024, curH = 768;
-    if (vgui2::surface() != nullptr)
-        vgui2::surface()->GetScreenSize(curW, curH);
-
-    CreateDirectoryA("cstrike\\videos", nullptr);
-
-    char exePath[MAX_PATH]{};
-    GetModuleFileNameA(nullptr, exePath, MAX_PATH);
-
-    // Resolve cstrike.exe directly so we bypass launcher single-instance check
-    fs::path curPath(exePath);
-    fs::path cstrikePath = curPath.parent_path() / "cstrike.exe";
-    std::string runnerPath = fs::is_regular_file(cstrikePath) ? cstrikePath.string() : curPath.string();
-
-    std::ostringstream cmd;
-    cmd << "\"" << runnerPath << "\" -game cstrike -sw -noborder -windowed -width " << curW << " -height " << curH
-        << " -novid -novideosettings +viewdemo \"" << szRelPath << "\" -democonvert";
-
-    STARTUPINFOA si{};
-    si.cb = sizeof(si);
-    si.dwFlags = STARTF_USESHOWWINDOW;
-    si.wShowWindow = SW_HIDE;
-
-    PROCESS_INFORMATION pi{};
-    std::string cmdStr = cmd.str();
-
-    BOOL created = CreateProcessA(
-        nullptr,
-        cmdStr.data(),
-        nullptr,
-        nullptr,
-        FALSE,
-        CREATE_NO_WINDOW | BELOW_NORMAL_PRIORITY_CLASS,
-        nullptr,
-        nullptr,
-        &si,
-        &pi
-    );
-
-    if (created)
-    {
-        CloseHandle(pi.hThread);
-        CloseHandle(pi.hProcess);
-
-        std::string msg = "Demo conversion to 1080p 60FPS MP4 has started in the background!\n\nDemo: " + std::string(szDemoName) + "\nOutput: cstrike/videos/\n\nYou can keep playing or close this window.";
-        MessageBox *pBox = new MessageBox("GameLand Studio", msg.c_str());
-        pBox->DoModal();
-    }
-    else
-    {
-        MessageBox *pBox = new MessageBox("Error", "Failed to start background video converter.");
-        pBox->DoModal();
     }
 }
 
@@ -282,37 +226,84 @@ void CDemoUploaderDialog::PlaySelectedDemo()
 
     int itemID = m_pDemoList->GetSelectedItem(0);
     KeyValues *kv = m_pDemoList->GetItem(itemID);
+    const char *szDemoName = kv->GetString("demoname", "");
     const char *szRelPath = kv->GetString("relpath", "");
+    const char *szFullPath = kv->GetString("fullpath", "");
 
-    if (!szRelPath[0]) return;
+    if (!szDemoName[0]) return;
 
     if (engine != nullptr)
     {
-        std::string cmd = std::format("viewdemo \"{}\"\n", szRelPath);
+        if (szFullPath[0] && g_pFullFileSystem != nullptr)
+        {
+            try {
+                fs::path p(szFullPath);
+                g_pFullFileSystem->AddSearchPathNoWrite(p.parent_path().string().c_str(), "GAME");
+            } catch (...) {}
+        }
+
+        const char *szTarget = (szRelPath && szRelPath[0]) ? szRelPath : szDemoName;
+        std::string cmd = std::format("viewdemo \"{}\"\n", szTarget);
         engine->pfnClientCmd(cmd.c_str());
         OnClose();
     }
 }
 
-void CDemoUploaderDialog::OpenVideosFolder()
+void CDemoUploaderDialog::DeleteSelectedDemo()
 {
-    CreateDirectoryA("cstrike\\videos", nullptr);
-    WinExec("explorer.exe cstrike\\videos", SW_SHOW);
+    if (m_pDemoList->GetSelectedItemsCount() == 0)
+    {
+        MessageBox *pBox = new MessageBox("Error", "Please select a demo from the list first.");
+        pBox->DoModal();
+        return;
+    }
+
+    int itemID = m_pDemoList->GetSelectedItem(0);
+    KeyValues *kv = m_pDemoList->GetItem(itemID);
+    const char *szFullPath = kv->GetString("fullpath", "");
+    const char *szDemoName = kv->GetString("demoname", "");
+
+    if (!szFullPath[0]) return;
+
+    std::string promptMsg = std::string("Are you sure you want to delete this demo?\n\nFile: ") + szDemoName;
+    int choice = MessageBoxA(
+        nullptr,
+        promptMsg.c_str(),
+        "Delete Demo - GameLand Studio",
+        MB_YESNO | MB_ICONQUESTION | MB_TOPMOST
+    );
+
+    if (choice == IDYES)
+    {
+        try {
+            if (fs::exists(szFullPath)) {
+                fs::remove(szFullPath);
+            }
+        } catch (...) {}
+
+        RefreshDemoList();
+    }
+}
+
+void CDemoUploaderDialog::OpenDemosFolder()
+{
+    CreateDirectoryA("demos", nullptr);
+    WinExec("explorer.exe demos", SW_SHOW);
 }
 
 void CDemoUploaderDialog::OnCommand(const char *command)
 {
-    if (!strcmp(command, "Convert"))
-    {
-        ConvertSelectedDemo();
-    }
-    else if (!strcmp(command, "Play"))
+    if (!strcmp(command, "Play"))
     {
         PlaySelectedDemo();
     }
+    else if (!strcmp(command, "Delete"))
+    {
+        DeleteSelectedDemo();
+    }
     else if (!strcmp(command, "OpenFolder"))
     {
-        OpenVideosFolder();
+        OpenDemosFolder();
     }
     else if (!strcmp(command, "Refresh"))
     {
