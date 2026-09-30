@@ -17,16 +17,22 @@ public:
     virtual ~CDemoUploaderDialog();
     virtual void Activate();
 
+    void OnKeyCodePressed(vgui2::KeyCode code) override;
+
 protected:
     virtual void OnCommand(const char *command);
     virtual void ApplySchemeSettings(vgui2::IScheme *pScheme);
 
 private:
     void RefreshDemoList();
-    void UploadSelectedDemo();
+    void ConvertSelectedDemo();
+    void PlaySelectedDemo();
+    void OpenVideosFolder();
 
     vgui2::ListPanel *m_pDemoList;
-    vgui2::Button *m_pUploadButton;
+    vgui2::Button *m_pConvertButton;
+    vgui2::Button *m_pPlayButton;
+    vgui2::Button *m_pOpenFolderButton;
     vgui2::Button *m_pRefreshButton;
     vgui2::Button *m_pCloseButton;
 };
