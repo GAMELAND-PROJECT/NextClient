@@ -353,7 +353,7 @@ namespace nextclient::client_mini
             m_audioRecordThread.join();
 
         char buf[128]{};
-        std::snprintf(buf, sizeof(buf), "Duration: %.1fs  |  Range: %s -> %s  |  1080p 60 FPS",
+        std::snprintf(buf, sizeof(buf), "Duration: %.1fs  |  Range: %s -> %s  |  Native 100 FPS",
             dur, GetFormattedTime(m_markInTime).c_str(), GetFormattedTime(m_markOutTime).c_str());
         m_highlightClipInfo = buf;
 
@@ -413,7 +413,9 @@ namespace nextclient::client_mini
 
         m_recordWidth = width;
         m_recordHeight = height;
-        m_renderTargetFrames = static_cast<uint64_t>(std::ceil(dur * 60.0f));
+        const int fps = 100;
+        m_targetFps = fps;
+        m_renderTargetFrames = static_cast<uint64_t>(std::ceil(dur * static_cast<float>(fps)));
         m_renderFramesPushed = 0;
         m_isFirstRenderFrame = true;
 
@@ -434,7 +436,7 @@ namespace nextclient::client_mini
         }
         if (safeName.empty()) safeName = "Highlight";
 
-        m_lastSavedHighlightPath = "videos/Highlight_" + safeName + "_" + stamp + "_1080p.mp4";
+        m_lastSavedHighlightPath = "videos/Highlight_" + safeName + "_" + stamp + ".mp4";
 
         const DWORD pid = GetCurrentProcessId();
         const DWORD tick = GetTickCount();
@@ -465,19 +467,16 @@ namespace nextclient::client_mini
 
         const std::string ffmpegPath = FindFfmpegExecutable();
 
+        // 1:1 Pixel-Perfect Native capture (Zero scaling blur, 3x faster encode)
         std::string videoFilter = "vflip";
-        if (height < 1080)
-        {
-            videoFilter = "vflip,scale=-2:1080:flags=bicubic";
-        }
 
         std::ostringstream cmd;
         cmd << "\"" << ffmpegPath << "\" -y -hide_banner -loglevel error"
             << " -f rawvideo -pix_fmt rgb24 -s " << width << "x" << height
-            << " -r 60 -i \"" << videoPipeName << "\""
+            << " -r 100 -i \"" << videoPipeName << "\""
             << " -vf " << videoFilter
-            << " -c:v libx264 -preset superfast -tune zerolatency -crf 21 -maxrate 14M -bufsize 28M -pix_fmt yuv420p -threads 0"
-            << " -colorspace bt709 -color_primaries bt709 -color_trc bt709 -color_range tv"
+            << " -c:v libx264 -preset superfast -crf 19 -maxrate 18M -bufsize 36M -pix_fmt yuv420p -threads 0"
+            << " -colorspace bt709 -color_primaries bt709 -color_trc bt709 -color_range pc"
             << " -movflags +faststart \"" << m_tempVideoPath << "\"";
 
         STARTUPINFOA si{};
@@ -1286,10 +1285,6 @@ namespace nextclient::client_mini
         const int audioRate = QuerySystemAudioSampleRate();
 
         std::string videoFilter = "vflip";
-        if (height < 1080)
-        {
-            videoFilter = "vflip,scale=-2:1080:flags=bicubic";
-        }
 
         std::ostringstream cmd;
         cmd << "\"" << ffmpegPath << "\" -y -hide_banner -loglevel error"
@@ -1297,8 +1292,8 @@ namespace nextclient::client_mini
             << " -r " << fps << " -i \"" << videoPipeName << "\""
             << " -f s16le -ar " << audioRate << " -ac 2 -i \"" << audioPipeName << "\""
             << " -vf " << videoFilter
-            << " -c:v libx264 -preset superfast -tune zerolatency -crf 21 -maxrate 14M -bufsize 28M -pix_fmt yuv420p -threads 0"
-            << " -colorspace bt709 -color_primaries bt709 -color_trc bt709 -color_range tv"
+            << " -c:v libx264 -preset superfast -crf 19 -maxrate 18M -bufsize 36M -pix_fmt yuv420p -threads 0"
+            << " -colorspace bt709 -color_primaries bt709 -color_trc bt709 -color_range pc"
             << " -af aresample=async=1000:min_hard_comp=0.100000:first_pts=0"
             << " -c:a aac -b:a 160k"
             << " -movflags +faststart+frag_keyframe+empty_moov"
