@@ -909,11 +909,7 @@ GameNetAccessStatus QueryGameNetOnlineAccess()
     char phoneNum[64] = {0};
     GetPrivateProfileStringA("Allclient", "PhoneNumber", "", phoneNum, sizeof(phoneNum), iniPath.c_str());
 
-    const bool isHome = (_stricmp(clientType, "Home") == 0 || strlen(devHash) == 24
-#if defined(GAMELAND_HOME_CLIENT) && GAMELAND_HOME_CLIENT
-        || true
-#endif
-    );
+    const bool isHome = (_stricmp(clientType, "Home") == 0 || (strlen(devHash) == 24 && _stricmp(clientType, "GameNet") != 0));
 
     if (isHome)
     {
