@@ -468,14 +468,15 @@ namespace nextclient::client_mini
         const std::string ffmpegPath = FindFfmpegExecutable();
 
         // 1:1 Pixel-Perfect Native capture (Zero scaling blur, 3x faster encode)
-        std::string videoFilter = "vflip";
+        // Studio-Grade Post-Processing: Depth Contrast, Vibrant Colors & Crystal Sharpening (Zero Scaling Blur, CRT/LCD 4:3 & 16:9 100% Safe)
+        std::string videoFilter = "vflip,eq=contrast=1.14:brightness=-0.02:saturation=1.22,unsharp=5:5:0.8:3:3:0.4";
 
         std::ostringstream cmd;
         cmd << "\"" << ffmpegPath << "\" -y -hide_banner -loglevel error"
             << " -f rawvideo -pix_fmt rgb24 -s " << width << "x" << height
             << " -r 60 -i \"" << videoPipeName << "\""
             << " -vf " << videoFilter
-            << " -c:v libx264 -preset superfast -crf 20 -pix_fmt yuv420p -threads 0"
+            << " -c:v libx264 -preset superfast -crf 18 -profile:v high -pix_fmt yuv420p -threads 0"
             << " -movflags +faststart \"" << m_tempVideoPath << "\"";
 
         STARTUPINFOA si{};
@@ -1283,7 +1284,8 @@ namespace nextclient::client_mini
 
         const int audioRate = QuerySystemAudioSampleRate();
 
-        std::string videoFilter = "vflip";
+        // Studio-Grade Post-Processing: Depth Contrast, Vibrant Colors & Crystal Sharpening (Zero Scaling Blur, CRT/LCD 4:3 & 16:9 100% Safe)
+        std::string videoFilter = "vflip,eq=contrast=1.14:brightness=-0.02:saturation=1.22,unsharp=5:5:0.8:3:3:0.4";
 
         std::ostringstream cmd;
         cmd << "\"" << ffmpegPath << "\" -y -hide_banner -loglevel error"
@@ -1291,7 +1293,7 @@ namespace nextclient::client_mini
             << " -r " << fps << " -i \"" << videoPipeName << "\""
             << " -f s16le -ar " << audioRate << " -ac 2 -i \"" << audioPipeName << "\""
             << " -vf " << videoFilter
-            << " -c:v libx264 -preset superfast -crf 20 -pix_fmt yuv420p -threads 0"
+            << " -c:v libx264 -preset superfast -crf 18 -profile:v high -pix_fmt yuv420p -threads 0"
             << " -af aresample=async=1000:min_hard_comp=0.100000:first_pts=0"
             << " -c:a aac -b:a 160k"
             << " -movflags +faststart+frag_keyframe+empty_moov"
