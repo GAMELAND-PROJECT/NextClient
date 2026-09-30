@@ -259,6 +259,13 @@ CGameConsoleDialog::CGameConsoleDialog() : BaseClass(NULL, "GameConsole", false)
     m_pEntry->SendNewLine(true);
     m_pEntry->SetTabPosition(1);
 
+    m_pToggleGuide = new vgui2::Button(this, "ToggleGuide", "Console");
+    m_pToggleGuide->SetCommand("ToggleGuide");
+    m_pToggleGuide->SetVisible(false);
+
+    m_bLanHostGuideVisible = false;
+    m_bIsListenHost = false;
+
     m_pHistory = new CNoKeyboardInputRichText(this, "ConsoleHistory", m_pEntry);
     m_pLanHostGuide = new CLanHostGuidePanel(this);
     m_pLanHostGuide->SetVisible(false);
@@ -300,21 +307,50 @@ void CGameConsoleDialog::Clear()
     m_pLanHostGuide->SetVisible(false);
 }
 
-void CGameConsoleDialog::ShowLanHostGuide(bool show)
+void CGameConsoleDialog::UpdateLanHostStatus(bool isListenHost)
 {
-    // Keep history visible in LAN without the blocking bitmap
-    m_pLanHostGuide->SetVisible(false);
-    m_pHistory->SetVisible(true);
-    m_pHistory->SetVerticalScrollbar(true);
-
-    if (engine && engine->pfnGetCvarFloat("developer") > 0.0f)
+    m_bIsListenHost = isListenHost;
+    if (isListenHost)
     {
-        m_pHistory->SetMaximumCharCount(32768);
+        ShowLanHostGuide(true);
     }
     else
     {
-        m_pHistory->SetMaximumCharCount(4096);
+        if (m_pToggleGuide)
+            m_pToggleGuide->SetVisible(false);
+        ShowLanHostGuide(false);
     }
+}
+
+void CGameConsoleDialog::ShowLanHostGuide(bool show)
+{
+    m_bLanHostGuideVisible = show;
+    m_pLanHostGuide->SetVisible(show);
+    m_pHistory->SetVisible(!show);
+    m_pHistory->SetVerticalScrollbar(!show);
+
+    if (m_bIsListenHost && m_pToggleGuide)
+    {
+        m_pToggleGuide->SetVisible(true);
+        m_pToggleGuide->SetText(show ? "Console" : "Host Guide");
+    }
+    else if (m_pToggleGuide)
+    {
+        m_pToggleGuide->SetVisible(false);
+    }
+
+    if (show)
+    {
+        SetMinimumSize(620, 440);
+        SetSize(std::max(GetWide(), 620), std::max(GetTall(), 440));
+    }
+    else
+    {
+        const bool debugging = engine && (engine->pfnGetCvarFloat("developer") > 0.0f);
+        m_pHistory->SetMaximumCharCount(debugging ? 32768 : 4096);
+    }
+
+    InvalidateLayout();
 }
 
 //-----------------------------------------------------------------------------
@@ -488,7 +524,7 @@ void CGameConsoleDialog::ColorPrint(Color color, const char *text)
     if (!bDev && !IsAllowedLanConsoleMessage(text))
         return;
 
-    if (!m_pHistory->IsVisible())
+    if (!m_bLanHostGuideVisible && !m_pHistory->IsVisible())
     {
         m_pHistory->SetVisible(true);
         m_pHistory->SetVerticalScrollbar(true);
@@ -530,7 +566,7 @@ void CGameConsoleDialog::ColorPrintWithoutJsEvent(Color color, const wchar_t* te
     if (!bDev && !IsAllowedLanConsoleMessageWide(text))
         return;
 
-    if (!m_pHistory->IsVisible())
+    if (!m_bLanHostGuideVisible && !m_pHistory->IsVisible())
     {
         m_pHistory->SetVisible(true);
         m_pHistory->SetVerticalScrollbar(true);
@@ -551,7 +587,7 @@ void CGameConsoleDialog::DPrint(const char *text)
 void CGameConsoleDialog::OnThink()
 {
     BaseClass::OnThink();
-    if (!m_pHistory->IsVisible())
+    if (!m_bLanHostGuideVisible && !m_pHistory->IsVisible())
     {
         m_pHistory->SetVisible(true);
         m_pHistory->SetVerticalScrollbar(true);
@@ -765,6 +801,29 @@ void CGameConsoleDialog::OnCommand(const char *command)
         // submit the entry as a console commmand
         char szText[256];
         m_pEntry->GetText(szText, sizeof(szText));
+
+        char *pTrim = szText;
+        while (*pTrim == ' ' || *pTrim == '\t') pTrim++;
+        int trimLen = strlen(pTrim);
+        while (trimLen > 0 && (pTrim[trimLen - 1] == ' ' || pTrim[trimLen - 1] == '\t'))
+        {
+            pTrim[trimLen - 1] = '\0';
+            trimLen--;
+        }
+
+        if (m_bIsListenHost && (!stricmp(pTrim, "help") || !stricmp(pTrim, "guide") || !stricmp(pTrim, "commands")))
+        {
+            ShowLanHostGuide(true);
+            m_pEntry->SetText("");
+            m_pCompletionList->SetVisible(false);
+            return;
+        }
+
+        if (m_bIsListenHost && m_bLanHostGuideVisible)
+        {
+            ShowLanHostGuide(false);
+        }
+
         engine->pfnClientCmd(szText);    
 
         char szMessage[262];
@@ -792,6 +851,10 @@ void CGameConsoleDialog::OnCommand(const char *command)
         AddToHistory( szText, extra );
         m_pCompletionList->SetVisible(false);
 
+    }
+    else if (!stricmp(command, "ToggleGuide"))
+    {
+        ShowLanHostGuide(!m_bLanHostGuideVisible);
     }
     else
     {
@@ -910,14 +973,26 @@ void CGameConsoleDialog::PerformLayout()
     const int topHeight = 28;
     const int entryInset = 4;
     const int submitWide = 64;
+    const int toggleWide = (m_pToggleGuide && m_pToggleGuide->IsVisible()) ? 86 : 0;
 
     m_pHistory->SetPos(inset, inset + topHeight);
     m_pHistory->SetSize(wide - (inset * 2), tall - (entryInset * 2 + inset * 2 + topHeight + entryHeight));
     m_pLanHostGuide->SetBounds(inset, inset + topHeight, wide - inset * 2,
         tall - (entryInset * 2 + inset * 2 + topHeight + entryHeight));
 
-    m_pEntry->SetPos(inset, tall - (entryInset * 2 + entryHeight));
-    m_pEntry->SetSize(wide - (inset * 3 + submitWide), entryHeight);
+    if (toggleWide > 0)
+    {
+        m_pToggleGuide->SetPos(wide - (inset + submitWide + 4 + toggleWide), tall - (entryInset * 2 + entryHeight));
+        m_pToggleGuide->SetSize(toggleWide, entryHeight);
+
+        m_pEntry->SetPos(inset, tall - (entryInset * 2 + entryHeight));
+        m_pEntry->SetSize(wide - (inset * 2 + submitWide + 4 + toggleWide + 4), entryHeight);
+    }
+    else
+    {
+        m_pEntry->SetPos(inset, tall - (entryInset * 2 + entryHeight));
+        m_pEntry->SetSize(wide - (inset * 3 + submitWide), entryHeight);
+    }
 
     m_pSubmit->SetPos(wide - (inset + submitWide), tall - (entryInset * 2 + entryHeight));
     m_pSubmit->SetSize(submitWide, entryHeight);

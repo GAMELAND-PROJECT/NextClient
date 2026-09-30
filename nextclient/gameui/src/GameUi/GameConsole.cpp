@@ -96,7 +96,8 @@ void CGameConsole::Activate()
     if (GameUI().IsInLevel())
         m_pConsole->SetFadeEffectDisableOverride(true);
 
-    m_pConsole->ShowLanHostGuide(false);
+    const bool is_listen_host = GameUI().IsInLevel() && EngineMini() && EngineMini()->IsListenServerActive();
+    m_pConsole->UpdateLanHostStatus(is_listen_host);
 
     m_pConsole->Activate();
 

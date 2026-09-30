@@ -76,6 +76,7 @@ public:
 
     // Shows the small, static LAN-host command card without enabling engine logs.
     void ShowLanHostGuide(bool show);
+    void UpdateLanHostStatus(bool isListenHost);
 
     void Hide();
     void DumpConsoleTextToFile();
@@ -111,9 +112,13 @@ private:
     vgui2::Panel *m_pLanHostGuide;
     TabCatchingTextEntry *m_pEntry;
     vgui2::Button *m_pSubmit;
+    vgui2::Button *m_pToggleGuide;
     vgui2::Menu *m_pCompletionList;
     Color m_PrintColor;
     Color m_DPrintColor;
+
+    bool m_bLanHostGuideVisible;
+    bool m_bIsListenHost;
 
     bool m_bAutoCompleteMode;	// true if the user is currently tabbing through completion options
     int m_iNextCompletion;		// the completion that we'll next go to
