@@ -9,6 +9,7 @@ HudCrosshair::HudCrosshair(nitroapi::NitroApiInterface *nitro_api) :
 {
     unsubscribers_.emplace_back(cl()->CHudAmmo__DrawCrosshair |= [this](CHudAmmo* const ptr, float time, int weaponid, const auto& next) {
         DrawCrosshair(time, weaponid);
+        m_bCrosshairDrawnThisFrame = true;
         return 1;
     });
 }
@@ -39,6 +40,67 @@ void HudCrosshair::VidInit()
     m_iCrosshairScaleBase = 0;
     m_szLastCrosshairColor[0] = '\0';
     m_szLastCrosshairSize[0] = '\0';
+    m_bCrosshairDrawnThisFrame = false;
+}
+
+void HudCrosshair::Draw(float flTime)
+{
+    if (m_bCrosshairDrawnThisFrame)
+    {
+        m_bCrosshairDrawnThisFrame = false;
+        return;
+    }
+
+    // If native CHudAmmo did not draw crosshair this frame (e.g. at demo start or before round restart when m_pWeapon is NULL)
+    if (*cl()->gHUD->m_iHideHUDDisplay & 1)
+        return;
+
+    // Do not draw crosshair if scoped in (FOV < 90 on snipers)
+    if (gHUD()->m_iFOV != nullptr && *gHUD()->m_iFOV > 0 && *gHUD()->m_iFOV < 90)
+        return;
+
+    int weaponId = WEAPON_AK47; // Default fallback
+    cl_entity_t* vm = cl_enginefunc()->GetViewModel();
+    if (vm != nullptr && vm->model != nullptr && vm->model->name != nullptr)
+    {
+        std::string modelName = vm->model->name;
+        for (char& c : modelName) c = static_cast<char>(tolower(c));
+
+        if (modelName.find("v_ak47") != std::string::npos) weaponId = WEAPON_AK47;
+        else if (modelName.find("v_m4a1") != std::string::npos) weaponId = WEAPON_M4A1;
+        else if (modelName.find("v_deagle") != std::string::npos) weaponId = WEAPON_DEAGLE;
+        else if (modelName.find("v_usp") != std::string::npos) weaponId = WEAPON_USP;
+        else if (modelName.find("v_glock18") != std::string::npos) weaponId = WEAPON_GLOCK18;
+        else if (modelName.find("v_awp") != std::string::npos) weaponId = WEAPON_AWP;
+        else if (modelName.find("v_scout") != std::string::npos) weaponId = WEAPON_SCOUT;
+        else if (modelName.find("v_mp5") != std::string::npos) weaponId = WEAPON_MP5N;
+        else if (modelName.find("v_knife") != std::string::npos) weaponId = WEAPON_KNIFE;
+        else if (modelName.find("v_famas") != std::string::npos) weaponId = WEAPON_FAMAS;
+        else if (modelName.find("v_galil") != std::string::npos) weaponId = WEAPON_GALIL;
+        else if (modelName.find("v_p90") != std::string::npos) weaponId = WEAPON_P90;
+        else if (modelName.find("v_aug") != std::string::npos) weaponId = WEAPON_AUG;
+        else if (modelName.find("v_sg552") != std::string::npos) weaponId = WEAPON_SG552;
+        else if (modelName.find("v_sg550") != std::string::npos) weaponId = WEAPON_SG550;
+        else if (modelName.find("v_g3sg1") != std::string::npos) weaponId = WEAPON_G3SG1;
+        else if (modelName.find("v_m3") != std::string::npos) weaponId = WEAPON_M3;
+        else if (modelName.find("v_xm1014") != std::string::npos) weaponId = WEAPON_XM1014;
+        else if (modelName.find("v_mac10") != std::string::npos) weaponId = WEAPON_MAC10;
+        else if (modelName.find("v_tmp") != std::string::npos) weaponId = WEAPON_TMP;
+        else if (modelName.find("v_elite") != std::string::npos) weaponId = WEAPON_ELITE;
+        else if (modelName.find("v_fiveseven") != std::string::npos) weaponId = WEAPON_FIVESEVEN;
+        else if (modelName.find("v_p228") != std::string::npos) weaponId = WEAPON_P228;
+        else if (modelName.find("v_m249") != std::string::npos) weaponId = WEAPON_M249;
+    }
+
+    if (weaponId == WEAPON_AWP || weaponId == WEAPON_SCOUT || weaponId == WEAPON_G3SG1 || weaponId == WEAPON_SG550)
+        return;
+
+    DrawCrosshair(flTime, weaponId);
+}
+
+void HudCrosshair::Reset()
+{
+    m_bCrosshairDrawnThisFrame = false;
 }
 
 void HudCrosshair::DrawCrosshair(float flTime, int weaponid)

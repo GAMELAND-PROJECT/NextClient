@@ -367,6 +367,24 @@ namespace nextclient::client_mini
         if (m_audioRecordThread.joinable())
             m_audioRecordThread.join();
 
+        m_stopWriterThread = true;
+        m_queueCv.notify_all();
+        m_queueSpaceCv.notify_all();
+        if (m_pipeWriterThread.joinable())
+            m_pipeWriterThread.join();
+
+        if (m_hVideoPipe != INVALID_HANDLE_VALUE)
+        {
+            CloseHandle(m_hVideoPipe);
+            m_hVideoPipe = INVALID_HANDLE_VALUE;
+        }
+        if (m_hFfmpegProcess != nullptr)
+        {
+            TerminateProcess(m_hFfmpegProcess, 0);
+            CloseHandle(m_hFfmpegProcess);
+            m_hFfmpegProcess = nullptr;
+        }
+
         if (!m_tempAudioPath.empty())
         {
             DeleteFileA(m_tempAudioPath.c_str());
@@ -499,6 +517,16 @@ namespace nextclient::client_mini
         const size_t frameSize = static_cast<size_t>(width) * height * 3;
         m_preallocatedCaptureBuffer.resize(frameSize, 0);
 
+        {
+            std::lock_guard<std::mutex> lock(m_queueMutex);
+            std::queue<std::vector<uint8_t>> emptyQueue;
+            std::swap(m_frameQueue, emptyQueue);
+            m_frameBufferPool.clear();
+        }
+
+        m_stopWriterThread = false;
+        m_pipeWriterThread = std::thread(&GameVideoRecorder::PipeWriterWorker, this);
+
         m_highlightState = HighlightState::Rendering;
         return true;
 #else
@@ -561,9 +589,72 @@ namespace nextclient::client_mini
                 return;
         }
 
-        DWORD written = 0;
-        WriteFile(m_hVideoPipe, m_preallocatedCaptureBuffer.data(), static_cast<DWORD>(frameSize), &written, nullptr);
+        std::vector<uint8_t> frameBuffer;
+        {
+            std::unique_lock<std::mutex> lock(m_queueMutex);
+            m_queueSpaceCv.wait(lock, [this]() {
+                return m_frameQueue.size() < 35 || m_stopWriterThread.load() || m_highlightState.load() != HighlightState::Rendering;
+            });
+
+            if (m_highlightState.load() != HighlightState::Rendering || m_stopWriterThread.load())
+                return;
+
+            if (!m_frameBufferPool.empty())
+            {
+                frameBuffer = std::move(m_frameBufferPool.back());
+                m_frameBufferPool.pop_back();
+            }
+        }
+
+        if (frameBuffer.size() != frameSize)
+            frameBuffer.resize(frameSize);
+
+        memcpy(frameBuffer.data(), m_preallocatedCaptureBuffer.data(), frameSize);
+
+        {
+            std::lock_guard<std::mutex> lock(m_queueMutex);
+            m_frameQueue.push(std::move(frameBuffer));
+        }
+        m_queueCv.notify_one();
         m_renderFramesPushed.fetch_add(1);
+#endif
+    }
+
+    void GameVideoRecorder::PipeWriterWorker()
+    {
+#ifdef _WIN32
+        while (true)
+        {
+            std::vector<uint8_t> frame;
+            {
+                std::unique_lock<std::mutex> lock(m_queueMutex);
+                m_queueCv.wait(lock, [this]() {
+                    return !m_frameQueue.empty() || m_stopWriterThread.load();
+                });
+
+                if (m_frameQueue.empty() && m_stopWriterThread.load())
+                    break;
+
+                if (!m_frameQueue.empty())
+                {
+                    frame = std::move(m_frameQueue.front());
+                    m_frameQueue.pop();
+                    m_queueSpaceCv.notify_one();
+                }
+            }
+
+            if (!frame.empty() && m_hVideoPipe != INVALID_HANDLE_VALUE)
+            {
+                DWORD written = 0;
+                WriteFile(m_hVideoPipe, frame.data(), static_cast<DWORD>(frame.size()), &written, nullptr);
+
+                std::lock_guard<std::mutex> lock(m_queueMutex);
+                if (m_frameBufferPool.size() < 40)
+                {
+                    m_frameBufferPool.push_back(std::move(frame));
+                }
+            }
+        }
 #endif
     }
 
@@ -572,6 +663,15 @@ namespace nextclient::client_mini
 #ifdef _WIN32
         if (m_highlightState.load() != HighlightState::Rendering)
             return;
+
+        m_stopWriterThread = true;
+        m_queueCv.notify_all();
+        m_queueSpaceCv.notify_all();
+
+        if (m_pipeWriterThread.joinable())
+        {
+            m_pipeWriterThread.join();
+        }
 
         // Close video pipe so FFmpeg finishes the temp video
         if (m_hVideoPipe != INVALID_HANDLE_VALUE)

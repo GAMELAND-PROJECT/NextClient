@@ -33,6 +33,7 @@ class HudCrosshair : public HudBase, public nitroapi::NitroApiHelper
     int m_iAmmoLastCheck{};
     float m_flCrosshairDistance{};
     int m_iCrosshairScaleBase{};
+    bool m_bCrosshairDrawnThisFrame{false};
 
 public:
     explicit HudCrosshair(nitroapi::NitroApiInterface* nitro_api);
@@ -40,6 +41,8 @@ public:
 
     void Init() override;
     void VidInit() override;
+    void Draw(float time) override;
+    void Reset() override;
 
 private:
     void DrawCrosshair(float flTime, int weaponid);

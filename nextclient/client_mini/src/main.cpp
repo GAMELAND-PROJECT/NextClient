@@ -1256,6 +1256,50 @@ static void HUD_InitPost()
     TurnSpeedLimitPatch();
 }
 
+static void FixDemoScoreboardTeams()
+{
+    if (g_NitroApi == nullptr || g_NitroApi->GetClientData() == nullptr || g_NitroApi->GetClientData()->g_PlayerExtraInfo == nullptr)
+        return;
+
+    extra_player_info_t* extraInfo = g_NitroApi->GetClientData()->g_PlayerExtraInfo;
+
+    for (int i = 1; i <= 32; ++i)
+    {
+        hud_player_info_t info{};
+        gEngfuncs.pfnGetPlayerInfo(i, &info);
+        if (info.name == nullptr || info.name[0] == '\0')
+            continue;
+
+        extra_player_info_t& extra = extraInfo[i];
+        if (extra.teamname[0] == '\0' || (std::strcmp(extra.teamname, "TERRORIST") != 0 && std::strcmp(extra.teamname, "CT") != 0))
+        {
+            if (info.model != nullptr && info.model[0] != '\0')
+            {
+                std::string model = info.model;
+                for (char& c : model) c = static_cast<char>(tolower(c));
+
+                if (model.find("terror") != std::string::npos ||
+                    model.find("leet") != std::string::npos ||
+                    model.find("arctic") != std::string::npos ||
+                    model.find("guerilla") != std::string::npos)
+                {
+                    extra.teamnumber = 1; // TEAM_TERRORIST
+                    strcpy_s(extra.teamname, sizeof(extra.teamname), "TERRORIST");
+                }
+                else if (model.find("urban") != std::string::npos ||
+                         model.find("gsg9") != std::string::npos ||
+                         model.find("sas") != std::string::npos ||
+                         model.find("gign") != std::string::npos ||
+                         model.find("vip") != std::string::npos)
+                {
+                    extra.teamnumber = 2; // TEAM_CT
+                    strcpy_s(extra.teamname, sizeof(extra.teamname), "CT");
+                }
+            }
+        }
+    }
+}
+
 static int HUD_RedrawHandler(float flTime, int iIntermission, HUD_RedrawNext next)
 {
     const bool console_visible = g_GameConsole && g_GameConsole->IsConsoleVisible();
@@ -1333,6 +1377,10 @@ static int HUD_RedrawHandler(float flTime, int iIntermission, HUD_RedrawNext nex
 
     // Render Demo Highlight HUD elements during demo playback
     const bool isViewingDemo = (gEngfuncs.pDemoAPI && gEngfuncs.pDemoAPI->IsPlayingback());
+    if (isViewingDemo)
+    {
+        FixDemoScoreboardTeams();
+    }
     if (isViewingDemo && !overlay_visible)
     {
         if (GameVideoRecorder::Instance().IsHighlightSeeking() || GameVideoRecorder::Instance().IsHighlightRendering())

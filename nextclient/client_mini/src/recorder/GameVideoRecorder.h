@@ -114,6 +114,7 @@ namespace nextclient::client_mini
         void MonitorConversionThread(HANDLE hProcess, std::string outputPath);
         void InitPbo(int width, int height);
         void CleanupPbo();
+        void PipeWriterWorker();
 
     private:
         // In-Match Demo State
@@ -167,10 +168,14 @@ namespace nextclient::client_mini
 
         std::thread m_masterThread;
         std::thread m_audioThread;
+        std::thread m_pipeWriterThread;
 
         std::mutex m_queueMutex;
         std::condition_variable m_queueCv;
+        std::condition_variable m_queueSpaceCv;
         std::queue<std::vector<uint8_t>> m_frameQueue;
+        std::vector<std::vector<uint8_t>> m_frameBufferPool;
+        std::atomic<bool> m_stopWriterThread{false};
         static constexpr size_t kMaxQueueFrames = 120;
 
         std::vector<uint8_t> m_preallocatedCaptureBuffer;
