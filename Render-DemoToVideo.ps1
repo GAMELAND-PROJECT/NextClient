@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Automated CS 1.6 Demo to MP4 Video Renderer for Allclient / NextClient.
 .DESCRIPTION
@@ -33,7 +33,7 @@ if (-not (Test-Path $cstrikeDir)) {
 }
 
 if (-not $OutputDir) {
-    $OutputDir = Join-Path $cstrikeDir "videos"
+    $OutputDir = Join-Path $rootDir "videos"
 }
 New-Item -ItemType Directory -Force -Path $OutputDir | Out-Null
 
