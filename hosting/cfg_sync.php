@@ -66,6 +66,7 @@ if ($action === 'pull') {
         'exists' => true,
         'updated_at' => date('Y-m-d H:i:s', filemtime($userConfigFile)),
         'size' => filesize($userConfigFile),
+        'sha256' => hash('sha256', $content),
         'cfg_content' => $content
     ]);
     exit;
@@ -86,13 +87,41 @@ if ($action === 'push') {
         exit;
     }
 
+    // Integrity Guard: protect against empty, corrupted or broken configs
+    if (strlen($cfgContent) < 150 || stripos($cfgContent, 'bind') === false) {
+        echo json_encode(['success' => false, 'message' => 'محتوای کانفیگ نامعتبر یا بسیار کوتاه است. برای حفظ امنیت، کانفیگ قبلی تغییر نکرد.']);
+        exit;
+    }
+
+    // Automatic versioned backup on the host
+    $backupDir = $DATA_DIR . DIRECTORY_SEPARATOR . 'backups';
+    if (!is_dir($backupDir)) {
+        @mkdir($backupDir, 0755, true);
+    }
+    if (file_exists($userConfigFile) && filesize($userConfigFile) >= 150) {
+        @copy($userConfigFile, $userConfigFile . '.bak');
+        $timestamp = date('Ymd_His');
+        @copy($userConfigFile, $backupDir . DIRECTORY_SEPARATOR . "cfg_{$mobileClean}_{$timestamp}.cfg");
+
+        // Keep last 5 historical backups per mobile
+        $backups = glob($backupDir . DIRECTORY_SEPARATOR . "cfg_{$mobileClean}_*.cfg");
+        if (is_array($backups) && count($backups) > 5) {
+            sort($backups);
+            $toDelete = array_slice($backups, 0, count($backups) - 5);
+            foreach ($toDelete as $oldFile) {
+                @unlink($oldFile);
+            }
+        }
+    }
+
     file_put_contents($userConfigFile, $cfgContent, LOCK_EX);
 
     echo json_encode([
         'success' => true,
         'message' => 'کانفیگ ابری با موفقیت ذخیره و به‌روزرسانی شد.',
         'updated_at' => date('Y-m-d H:i:s'),
-        'size' => strlen($cfgContent)
+        'size' => strlen($cfgContent),
+        'sha256' => hash('sha256', $cfgContent)
     ]);
     exit;
 }
@@ -104,7 +133,25 @@ if ($action === 'info') {
         'mobile' => $user['mobile'],
         'exists' => $exists,
         'updated_at' => $exists ? date('Y-m-d H:i:s', filemtime($userConfigFile)) : null,
-        'size' => $exists ? filesize($userConfigFile) : 0
+        'size' => $exists ? filesize($userConfigFile) : 0,
+        'sha256' => $exists ? hash_file('sha256', $userConfigFile) : null
+    ]);
+    exit;
+}
+
+if ($action === 'restore_backup') {
+    $bakFile = $userConfigFile . '.bak';
+    if (!file_exists($bakFile) || filesize($bakFile) < 150) {
+        echo json_encode(['success' => false, 'message' => 'فایل پشتیبان معتبری برای بازیابی یافت نشد.']);
+        exit;
+    }
+    copy($bakFile, $userConfigFile);
+    $content = file_get_contents($userConfigFile);
+    echo json_encode([
+        'success' => true,
+        'message' => 'کانفیگ با موفقیت از فایل پشتیبان بازیابی شد.',
+        'cfg_content' => $content,
+        'sha256' => hash('sha256', $content)
     ]);
     exit;
 }

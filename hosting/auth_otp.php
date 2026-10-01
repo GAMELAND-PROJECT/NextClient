@@ -44,6 +44,12 @@ function getDb($dbFile) {
     try {
         $db->exec("ALTER TABLE users ADD COLUMN password_plain TEXT");
     } catch (Exception $e) {}
+    try {
+        $db->exec("ALTER TABLE users ADD COLUMN active_device_hash TEXT DEFAULT ''");
+    } catch (Exception $e) {}
+    try {
+        $db->exec("ALTER TABLE users ADD COLUMN last_heartbeat INTEGER DEFAULT 0");
+    } catch (Exception $e) {}
 
     $db->exec("CREATE TABLE IF NOT EXISTS otp_sessions (
         mobile TEXT PRIMARY KEY,
@@ -196,6 +202,7 @@ try {
         $mobile = trim($input['mobile'] ?? '');
         $otp = trim($input['otp'] ?? '');
         $password = trim((string)($input['password'] ?? ''));
+        $deviceHash = strtoupper(trim((string)($input['device_hash'] ?? '')));
 
         if (!preg_match('/^09[0-9]{9}$/', $mobile)) {
             echo json_encode(['success' => false, 'message' => 'شماره موبایل نامعتبر است.'], JSON_UNESCAPED_UNICODE);
@@ -244,7 +251,9 @@ try {
 
             // Successfully retrieve forgotten password!
             $newToken = bin2hex(random_bytes(24));
-            $db->prepare("UPDATE users SET token = :token, last_login = datetime('now') WHERE id = :id")->execute([':token' => $newToken, ':id' => $existingUser['id']]);
+            $now = time();
+            $db->prepare("UPDATE users SET token = :token, last_login = datetime('now'), active_device_hash = :dev, last_heartbeat = :hb WHERE id = :id")
+               ->execute([':token' => $newToken, ':dev' => $deviceHash, ':hb' => $now, ':id' => $existingUser['id']]);
             $db->prepare("DELETE FROM otp_sessions WHERE mobile = :mobile")->execute([':mobile' => $mobile]);
 
             echo json_encode([
@@ -266,14 +275,17 @@ try {
 
         $passwordHash = password_hash($password, PASSWORD_BCRYPT);
         $token = bin2hex(random_bytes(24));
+        $now = time();
 
-        $stmt = $db->prepare("INSERT INTO users (mobile, password_hash, password_plain, token, last_login) VALUES (:mobile, :hash, :plain, :token, datetime('now'))
-            ON CONFLICT(mobile) DO UPDATE SET password_hash = :hash, password_plain = :plain, token = :token, last_login = datetime('now')");
+        $stmt = $db->prepare("INSERT INTO users (mobile, password_hash, password_plain, token, last_login, active_device_hash, last_heartbeat) VALUES (:mobile, :hash, :plain, :token, datetime('now'), :dev, :hb)
+            ON CONFLICT(mobile) DO UPDATE SET password_hash = :hash, password_plain = :plain, token = :token, last_login = datetime('now'), active_device_hash = :dev, last_heartbeat = :hb");
         $stmt->execute([
             ':mobile' => $mobile,
             ':hash' => $passwordHash,
             ':plain' => $password,
-            ':token' => $token
+            ':token' => $token,
+            ':dev' => $deviceHash,
+            ':hb' => $now
         ]);
 
         $stmt = $db->prepare("DELETE FROM otp_sessions WHERE mobile = :mobile");
@@ -293,6 +305,7 @@ try {
     if ($action === 'login') {
         $mobile = trim($input['mobile'] ?? '');
         $password = (string)($input['password'] ?? '');
+        $deviceHash = strtoupper(trim((string)($input['device_hash'] ?? '')));
 
         $stmt = $db->prepare("SELECT * FROM users WHERE mobile = :mobile");
         $stmt->execute([':mobile' => $mobile]);
@@ -303,10 +316,32 @@ try {
             exit;
         }
 
-        // Refresh token on login & cache password_plain
+        // Single Active Session Check (180s / 3 minutes lease)
+        $activeHash = strtoupper(trim((string)($user['active_device_hash'] ?? '')));
+        $lastHeartbeat = (int)($user['last_heartbeat'] ?? 0);
+        $now = time();
+        $isLockedByOther = (!empty($activeHash) && !empty($deviceHash) && $activeHash !== $deviceHash && ($now - $lastHeartbeat) < 180);
+
+        if ($isLockedByOther) {
+            $remaining = 180 - ($now - $lastHeartbeat);
+            echo json_encode([
+                'success' => false,
+                'error_code' => 'ACTIVE_SESSION_EXISTS',
+                'message' => "این حساب هم‌اکنون در سیستم دیگری فعال است. برای ورود همزمان مجاز نیستید. (انقضا در صورت قطعی: {$remaining} ثانیه)"
+            ], JSON_UNESCAPED_UNICODE);
+            exit;
+        }
+
+        // Refresh token on login & cache password_plain & bind active device
         $newToken = bin2hex(random_bytes(24));
-        $stmt = $db->prepare("UPDATE users SET token = :token, password_plain = :plain, last_login = datetime('now') WHERE id = :id");
-        $stmt->execute([':token' => $newToken, ':plain' => $password, ':id' => $user['id']]);
+        $stmt = $db->prepare("UPDATE users SET token = :token, password_plain = :plain, last_login = datetime('now'), active_device_hash = :dev, last_heartbeat = :hb WHERE id = :id");
+        $stmt->execute([
+            ':token' => $newToken,
+            ':plain' => $password,
+            ':dev' => $deviceHash,
+            ':hb' => $now,
+            ':id' => $user['id']
+        ]);
 
         echo json_encode([
             'success' => true,
@@ -320,8 +355,9 @@ try {
     if ($action === 'check_token') {
         $token = trim($input['token'] ?? $_SERVER['HTTP_AUTHORIZATION'] ?? '');
         $token = str_replace('Bearer ', '', $token);
+        $deviceHash = strtoupper(trim((string)($input['device_hash'] ?? '')));
 
-        $stmt = $db->prepare("SELECT mobile, created_at, last_login FROM users WHERE token = :token");
+        $stmt = $db->prepare("SELECT id, mobile, active_device_hash, last_heartbeat FROM users WHERE token = :token");
         $stmt->execute([':token' => $token]);
         $user = $stmt->fetch(PDO::FETCH_ASSOC);
 
@@ -330,11 +366,90 @@ try {
             exit;
         }
 
+        $activeHash = strtoupper(trim((string)($user['active_device_hash'] ?? '')));
+        $lastHeartbeat = (int)($user['last_heartbeat'] ?? 0);
+        $now = time();
+
+        if (!empty($activeHash) && !empty($deviceHash) && $activeHash !== $deviceHash && ($now - $lastHeartbeat) < 180) {
+            echo json_encode([
+                'success' => false,
+                'authenticated' => false,
+                'session_conflict' => true,
+                'message' => 'این حساب در رایانه دیگری در حال استفاده است.'
+            ], JSON_UNESCAPED_UNICODE);
+            exit;
+        }
+
+        // Reclaim or refresh lease
+        $db->prepare("UPDATE users SET active_device_hash = :dev, last_heartbeat = :hb WHERE id = :id")
+           ->execute([':dev' => $deviceHash, ':hb' => $now, ':id' => $user['id']]);
+
         echo json_encode([
             'success' => true,
             'authenticated' => true,
             'mobile' => $user['mobile']
         ], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+
+    if ($action === 'heartbeat') {
+        $token = trim($input['token'] ?? $_SERVER['HTTP_AUTHORIZATION'] ?? '');
+        $token = str_replace('Bearer ', '', $token);
+        $deviceHash = strtoupper(trim((string)($input['device_hash'] ?? '')));
+
+        if (empty($token)) {
+            echo json_encode(['success' => false, 'message' => 'توکن ارسال نشده است.'], JSON_UNESCAPED_UNICODE);
+            exit;
+        }
+
+        $stmt = $db->prepare("SELECT id, mobile, active_device_hash, last_heartbeat FROM users WHERE token = :token");
+        $stmt->execute([':token' => $token]);
+        $user = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        if (!$user) {
+            echo json_encode(['success' => false, 'session_lost' => true, 'message' => 'نشست کاربری نامعتبر است.'], JSON_UNESCAPED_UNICODE);
+            exit;
+        }
+
+        $activeHash = strtoupper(trim((string)($user['active_device_hash'] ?? '')));
+        $lastHeartbeat = (int)($user['last_heartbeat'] ?? 0);
+        $now = time();
+
+        if (!empty($activeHash) && !empty($deviceHash) && $activeHash !== $deviceHash && ($now - $lastHeartbeat) < 180) {
+            echo json_encode([
+                'success' => false,
+                'session_lost' => true,
+                'message' => 'حساب کاربری شما در دستگاه دیگری وارد شده است.'
+            ], JSON_UNESCAPED_UNICODE);
+            exit;
+        }
+
+        $db->prepare("UPDATE users SET active_device_hash = :dev, last_heartbeat = :hb WHERE id = :id")
+           ->execute([':dev' => $deviceHash, ':hb' => $now, ':id' => $user['id']]);
+
+        echo json_encode(['success' => true], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+
+    if ($action === 'logout') {
+        $token = trim($input['token'] ?? $_SERVER['HTTP_AUTHORIZATION'] ?? '');
+        $token = str_replace('Bearer ', '', $token);
+        $deviceHash = strtoupper(trim((string)($input['device_hash'] ?? '')));
+
+        if (!empty($token)) {
+            $stmt = $db->prepare("SELECT id, active_device_hash FROM users WHERE token = :token");
+            $stmt->execute([':token' => $token]);
+            $user = $stmt->fetch(PDO::FETCH_ASSOC);
+            if ($user) {
+                $activeHash = strtoupper(trim((string)($user['active_device_hash'] ?? '')));
+                if (empty($deviceHash) || empty($activeHash) || $activeHash === $deviceHash) {
+                    $db->prepare("UPDATE users SET active_device_hash = '', last_heartbeat = 0 WHERE id = :id")
+                       ->execute([':id' => $user['id']]);
+                }
+            }
+        }
+
+        echo json_encode(['success' => true, 'message' => 'خروج با موفقیت انجام شد.'], JSON_UNESCAPED_UNICODE);
         exit;
     }
 
