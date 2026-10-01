@@ -3,6 +3,7 @@
 #include <vgui_controls/ListPanel.h>
 #include <vgui_controls/Button.h>
 #include <vgui_controls/MessageBox.h>
+#include <vgui_controls/QueryBox.h>
 #include <vgui/ISurfaceNext.h>
 #include <KeyValues.h>
 
@@ -41,12 +42,14 @@ CDemoUploaderDialog::CDemoUploaderDialog(vgui2::Panel *parent) : Frame(parent, "
     m_pPlayButton = new Button(this, "PlayButton", "Play Demo");
     m_pDeleteButton = new Button(this, "DeleteButton", "Delete Demo");
     m_pOpenFolderButton = new Button(this, "OpenFolderButton", "Demos Folder");
+    m_pOpenVideosButton = new Button(this, "OpenVideosButton", "Videos Folder");
     m_pRefreshButton = new Button(this, "RefreshButton", "Refresh");
     m_pCloseButton = new Button(this, "CloseButton", "Close (F4)");
 
     m_pPlayButton->SetCommand("Play");
     m_pDeleteButton->SetCommand("Delete");
     m_pOpenFolderButton->SetCommand("OpenFolder");
+    m_pOpenVideosButton->SetCommand("OpenVideosFolder");
     m_pRefreshButton->SetCommand("Refresh");
     m_pCloseButton->SetCommand("Close");
 
@@ -88,11 +91,12 @@ void CDemoUploaderDialog::ApplySchemeSettings(vgui2::IScheme *pScheme)
     const int btnY = 390;
     const int btnH = 30;
 
-    m_pPlayButton->SetBounds(20, btnY, 110, btnH);
-    m_pDeleteButton->SetBounds(138, btnY, 110, btnH);
-    m_pOpenFolderButton->SetBounds(256, btnY, 130, btnH);
-    m_pRefreshButton->SetBounds(394, btnY, 95, btnH);
-    m_pCloseButton->SetBounds(497, btnY, 103, btnH);
+    m_pPlayButton->SetBounds(20, btnY, 90, btnH);
+    m_pDeleteButton->SetBounds(115, btnY, 95, btnH);
+    m_pOpenFolderButton->SetBounds(215, btnY, 105, btnH);
+    m_pOpenVideosButton->SetBounds(325, btnY, 105, btnH);
+    m_pRefreshButton->SetBounds(435, btnY, 80, btnH);
+    m_pCloseButton->SetBounds(520, btnY, 80, btnH);
 }
 
 struct DemoEntryItem
@@ -185,11 +189,23 @@ void CDemoUploaderDialog::RefreshDemoList()
         } catch (...) {}
     };
 
-    // Scan main game root folder demos first (D:\Allclient\demos\)
+    // Ensure demos directory exists in game root
+    CreateDirectoryA("demos", nullptr);
+
+    // Auto-migrate any leftover demos from cstrike/demos/ to root demos/
+    try {
+        if (fs::exists("cstrike/demos")) {
+            for (const auto& entry : fs::directory_iterator("cstrike/demos")) {
+                if (entry.is_regular_file() && entry.path().extension() == ".dem") {
+                    std::error_code ec;
+                    fs::rename(entry.path(), "demos/" + entry.path().filename().string(), ec);
+                }
+            }
+        }
+    } catch (...) {}
+
+    // Scan primary game demos folder: root demos/
     scanDir("demos", "demos");
-    // Also scan cstrike/demos for compatibility
-    scanDir("cstrike/demos", "demos");
-    scanDir("cstrike", "");
 
     // Sort newest first
     std::sort(demos.begin(), demos.end(), [](const DemoEntryItem& a, const DemoEntryItem& b) {
@@ -253,7 +269,7 @@ void CDemoUploaderDialog::DeleteSelectedDemo()
 {
     if (m_pDemoList->GetSelectedItemsCount() == 0)
     {
-        MessageBox *pBox = new MessageBox("Error", "Please select a demo from the list first.");
+        MessageBox *pBox = new MessageBox("Error", "Please select a demo from the list first.", this);
         pBox->DoModal();
         return;
     }
@@ -265,22 +281,27 @@ void CDemoUploaderDialog::DeleteSelectedDemo()
 
     if (!szFullPath[0]) return;
 
-    std::string promptMsg = std::string("Are you sure you want to delete this demo?\n\nFile: ") + szDemoName;
-    int choice = MessageBoxA(
-        nullptr,
-        promptMsg.c_str(),
-        "Delete Demo - GameLand Studio",
-        MB_YESNO | MB_ICONQUESTION | MB_TOPMOST
-    );
+    m_pendingDeletePath = szFullPath;
 
-    if (choice == IDYES)
+    std::string promptMsg = std::string("Are you sure you want to delete this demo?\n\nFile: ") + szDemoName;
+    QueryBox *pBox = new QueryBox("Delete Demo - GameLand Studio", promptMsg.c_str(), this);
+    pBox->SetOKButtonText("Delete");
+    pBox->SetCancelButtonText("Cancel");
+    pBox->SetOKCommand(new KeyValues("Command", "command", "ConfirmDeleteDemo"));
+    pBox->AddActionSignalTarget(this);
+    pBox->DoModal();
+}
+
+void CDemoUploaderDialog::OnConfirmDeleteDemo()
+{
+    if (!m_pendingDeletePath.empty())
     {
         try {
-            if (fs::exists(szFullPath)) {
-                fs::remove(szFullPath);
+            if (fs::exists(m_pendingDeletePath)) {
+                fs::remove(m_pendingDeletePath);
             }
         } catch (...) {}
-
+        m_pendingDeletePath.clear();
         RefreshDemoList();
     }
 }
@@ -289,6 +310,12 @@ void CDemoUploaderDialog::OpenDemosFolder()
 {
     CreateDirectoryA("demos", nullptr);
     WinExec("explorer.exe demos", SW_SHOW);
+}
+
+void CDemoUploaderDialog::OpenVideosFolder()
+{
+    CreateDirectoryA("videos", nullptr);
+    WinExec("explorer.exe videos", SW_SHOW);
 }
 
 void CDemoUploaderDialog::OnCommand(const char *command)
@@ -301,9 +328,17 @@ void CDemoUploaderDialog::OnCommand(const char *command)
     {
         DeleteSelectedDemo();
     }
+    else if (!strcmp(command, "ConfirmDeleteDemo"))
+    {
+        OnConfirmDeleteDemo();
+    }
     else if (!strcmp(command, "OpenFolder"))
     {
         OpenDemosFolder();
+    }
+    else if (!strcmp(command, "OpenVideosFolder"))
+    {
+        OpenVideosFolder();
     }
     else if (!strcmp(command, "Refresh"))
     {

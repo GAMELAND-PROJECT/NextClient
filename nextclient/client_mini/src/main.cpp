@@ -695,7 +695,7 @@ static std::string GetActiveDemoOrMapName()
         if (demos.empty())
         {
             gEngfuncs.pfnDrawSetTextColor(0.85f, 0.60f, 0.20f);
-            DrawHudString(menuX + 16, menuY + 50, "No demos found in cstrike/demos/");
+            DrawHudString(menuX + 16, menuY + 50, "No demos found in demos/");
 
             gEngfuncs.pfnDrawSetTextColor(0.65f, 0.70f, 0.75f);
             DrawHudString(menuX + 16, menuY + 75, "Play a match and press F4 to record!");
@@ -1092,7 +1092,7 @@ static std::string GetActiveDemoOrMapName()
 
             if (BindingEquals(pszCurrentBinding, "slot9") || keynum == '9')
             {
-                WinExec("explorer.exe cstrike\\videos", SW_SHOW);
+                WinExec("explorer.exe videos", SW_SHOW);
                 return 0;
             }
 
@@ -1140,7 +1140,7 @@ static std::string GetActiveDemoOrMapName()
         {
             if (BindingEquals(pszCurrentBinding, "slot9") || keynum == '9')
             {
-                WinExec("explorer.exe cstrike\\videos", SW_SHOW);
+                WinExec("explorer.exe videos", SW_SHOW);
                 return 0;
             }
 
@@ -1193,7 +1193,7 @@ static std::string GetActiveDemoOrMapName()
         // Open videos folder
         if (BindingEquals(pszCurrentBinding, "slot9") || keynum == '9')
         {
-            WinExec("explorer.exe cstrike\\videos", SW_SHOW);
+            WinExec("explorer.exe videos", SW_SHOW);
             return 0;
         }
 

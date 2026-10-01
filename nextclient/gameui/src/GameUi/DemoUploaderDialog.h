@@ -4,6 +4,7 @@
 #pragma once
 #endif
 
+#include <string>
 #include <vgui_controls/Frame.h>
 #include <vgui_controls/ListPanel.h>
 #include <vgui_controls/Button.h>
@@ -27,12 +28,17 @@ private:
     void RefreshDemoList();
     void PlaySelectedDemo();
     void DeleteSelectedDemo();
+    void OnConfirmDeleteDemo();
     void OpenDemosFolder();
+    void OpenVideosFolder();
+
+    std::string m_pendingDeletePath;
 
     vgui2::ListPanel *m_pDemoList;
     vgui2::Button *m_pPlayButton;
     vgui2::Button *m_pDeleteButton;
     vgui2::Button *m_pOpenFolderButton;
+    vgui2::Button *m_pOpenVideosButton;
     vgui2::Button *m_pRefreshButton;
     vgui2::Button *m_pCloseButton;
 };

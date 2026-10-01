@@ -1,6 +1,7 @@
 #include "GameVideoRecorder.h"
 #include "../main.h"
 
+#include <filesystem>
 #include <iostream>
 #include <fstream>
 #include <sstream>
@@ -185,6 +186,32 @@ namespace nextclient::client_mini
     void GameVideoRecorder::StopMatchDemo()
     {
         m_isMatchDemoRecording = false;
+        _mkdir("demos");
+
+        std::string demoFile = m_currentDemoFileName;
+        if (!demoFile.empty())
+        {
+            std::thread([demoFile]() {
+                for (int i = 0; i < 20; ++i) {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                    std::string cstrikeDemoPath = "cstrike/demos/" + demoFile;
+                    std::string cstrikeRootDemoPath = "cstrike/" + demoFile;
+                    std::string targetPath = "demos/" + demoFile;
+
+                    if (std::filesystem::exists(cstrikeDemoPath)) {
+                        std::error_code ec;
+                        std::filesystem::rename(cstrikeDemoPath, targetPath, ec);
+                        if (!ec) break;
+                    } else if (std::filesystem::exists(cstrikeRootDemoPath)) {
+                        std::error_code ec;
+                        std::filesystem::rename(cstrikeRootDemoPath, targetPath, ec);
+                        if (!ec) break;
+                    } else if (std::filesystem::exists(targetPath)) {
+                        break;
+                    }
+                }
+            }).detach();
+        }
     }
 
     std::string GameVideoRecorder::GetFormattedDemoTime() const
@@ -917,6 +944,19 @@ namespace nextclient::client_mini
         m_cachedDemos.clear();
 
 #ifdef _WIN32
+        _mkdir("demos");
+
+        try {
+            if (std::filesystem::exists("cstrike/demos")) {
+                for (const auto& entry : std::filesystem::directory_iterator("cstrike/demos")) {
+                    if (entry.is_regular_file() && entry.path().extension() == ".dem") {
+                        std::error_code ec;
+                        std::filesystem::rename(entry.path(), "demos/" + entry.path().filename().string(), ec);
+                    }
+                }
+            }
+        } catch (...) {}
+
         WIN32_FIND_DATAA fd{};
         HANDLE hFind = FindFirstFileA("demos\\*.dem", &fd);
         if (hFind != INVALID_HANDLE_VALUE)
