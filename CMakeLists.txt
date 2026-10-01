@@ -176,7 +176,7 @@ if (NOT NEXTCLIENT_BUILD_TESTS)
                 COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:next_launcher> ${NEXTCLIENT_INSTALL_DIR}/cstrike.exe
                 COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:auto_launcher> ${NEXTCLIENT_INSTALL_DIR}/Allclient.exe
                 COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:updater> ${NEXTCLIENT_INSTALL_DIR}/updater.exe
-                COMMAND ${CMAKE_COMMAND} -E copy_if_different "${ALLCLIENT_INSTALL_INI}" "${NEXTCLIENT_INSTALL_DIR}/allclient-install.ini"
+                # Preserved allclient-install.ini
                 COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/Render-DemoToVideo.ps1" "${NEXTCLIENT_INSTALL_DIR}/Render-DemoToVideo.ps1"
                 COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:engine_mini> ${NEXTCLIENT_INSTALL_DIR}/next_engine_mini.dll
                 COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:filesystem_proxy> ${NEXTCLIENT_INSTALL_DIR}/FileSystem_Proxy.dll
