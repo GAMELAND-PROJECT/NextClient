@@ -473,20 +473,12 @@ namespace nextclient::client_mini
         // Dynamic In-Game Gamma & 100 FPS Studio Filter
         std::string videoFilter = BuildStudioVideoFilter();
 
-        // Direct OpenGL VSync decoupling to unlock hardware render frame rate
-        typedef BOOL (WINAPI *PFNWGLSWAPINTERVALEXTPROC)(int interval);
-        PFNWGLSWAPINTERVALEXTPROC pfnSwapInterval = (PFNWGLSWAPINTERVALEXTPROC)wglGetProcAddress("wglSwapIntervalEXT");
-        if (pfnSwapInterval != nullptr)
-        {
-            pfnSwapInterval(0);
-        }
-
         std::ostringstream cmd;
         cmd << "\"" << ffmpegPath << "\" -y -hide_banner -loglevel error"
             << " -thread_queue_size 128 -f rawvideo -pix_fmt rgb24 -s " << width << "x" << height
             << " -r 100 -i \"" << videoPipeName << "\""
             << " -filter_threads 0 -vf " << videoFilter
-            << " -c:v libx264 -preset ultrafast -tune zerolatency -crf 18 -profile:v high -pix_fmt yuv420p -threads 0 -slices 4"
+            << " -c:v libx264 -preset ultrafast -tune fastdecode -crf 18 -profile:v high -pix_fmt yuv420p -threads 0 -slices 4"
             << " -movflags +faststart \"" << m_tempVideoPath << "\"";
 
         STARTUPINFOA si{};
@@ -739,13 +731,6 @@ namespace nextclient::client_mini
 
         DeleteFileA(m_tempVideoPath.c_str());
         DeleteFileA(m_tempAudioPath.c_str());
-
-        typedef BOOL (WINAPI *PFNWGLSWAPINTERVALEXTPROC)(int interval);
-        PFNWGLSWAPINTERVALEXTPROC pfnSwapInterval = (PFNWGLSWAPINTERVALEXTPROC)wglGetProcAddress("wglSwapIntervalEXT");
-        if (pfnSwapInterval != nullptr)
-        {
-            pfnSwapInterval(1);
-        }
 
         m_highlightState = HighlightState::Idle;
         m_markInTime = 0.0f;
@@ -1025,7 +1010,7 @@ namespace nextclient::client_mini
         ss << std::fixed << std::setprecision(2);
         ss << "vflip,eq=gamma=" << ffmpegGamma
            << ":contrast=1.08:brightness=" << ffmpegBrightness
-           << ":saturation=1.15";
+           << ":saturation=1.15,unsharp=3:3:0.6:3:3:0.3";
         return ss.str();
     }
 
