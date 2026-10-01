@@ -1684,7 +1684,7 @@ void RestoreUserSession(HWND window)
                 }
                 else
                 {
-                    SetWindowTextW(g_userStatusLabel, g_accessStatus.is_home_client ? L"وارد نشده‌اید (کانفیگ سیستم لود می‌شود)" : L"وارد نشده‌اید (مهمان: کانفیگ پیش‌فرض لود می‌شود)");
+                    SetWindowTextW(g_userStatusLabel, L"وارد نشده‌اید (مهمان: کانفیگ پیش‌فرض لود می‌شود)");
                 }
                 InvalidateRect(g_userStatusLabel, nullptr, TRUE);
             }
@@ -1805,7 +1805,7 @@ void PerformUserLogout(HWND window)
 
     if (g_userStatusLabel)
     {
-        SetWindowTextW(g_userStatusLabel, g_accessStatus.is_home_client ? L"وارد نشده‌اید (کانفیگ سیستم لود می‌شود)" : L"وارد نشده‌اید (مهمان: کانفیگ پیش‌فرض لود می‌شود)");
+        SetWindowTextW(g_userStatusLabel, L"وارد نشده‌اید (مهمان: کانفیگ پیش‌فرض لود می‌شود)");
         InvalidateRect(g_userStatusLabel, nullptr, TRUE);
     }
 
@@ -2518,7 +2518,7 @@ void CreateControls(HWND window)
     g_userRegisterBtn = AddActionButton(window, L"ثبت‌نام / بازیابی رمز", 320, 392, 150, 32, IdUserRegister);
 
     // Unclipped full status message
-    g_userStatusLabel = label(g_accessStatus.is_home_client ? L"وارد نشده‌اید (کانفیگ سیستم لود می‌شود)" : L"وارد نشده‌اید (مهمان: کانفیگ پیش‌فرض لود می‌شود)", 50, 396, 260, 24);
+    g_userStatusLabel = label(L"وارد نشده‌اید (مهمان: کانفیگ پیش‌فرض لود می‌شود)", 50, 396, 260, 24);
     SendMessageW(g_userStatusLabel, WM_SETFONT, reinterpret_cast<WPARAM>(g_badgeFont), TRUE);
 
     // ─── Section 4: Action Buttons ───
@@ -2711,7 +2711,7 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
                     }
                     if (g_userStatusLabel)
                     {
-                        SetWindowTextW(g_userStatusLabel, g_accessStatus.is_home_client ? L"وارد نشده‌اید (کانفیگ سیستم لود می‌شود)" : L"وارد نشده‌اید (مهمان: کانفیگ پیش‌فرض لود می‌شود)");
+                        SetWindowTextW(g_userStatusLabel, L"وارد نشده‌اید (مهمان: کانفیگ پیش‌فرض لود می‌شود)");
                         InvalidateRect(g_userStatusLabel, nullptr, TRUE);
                     }
                     if (g_userRegisterBtn)
@@ -2728,7 +2728,7 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
         case IdLaunch:
             if (ApplySettings())
             {
-                if (!g_accessStatus.is_home_client && !IsUserAuthenticated())
+                if (!IsUserAuthenticated())
                 {
                     ResetGuestConfigToDefault();
                 }
@@ -2935,13 +2935,10 @@ bool IsUserAuthenticated()
 
 void ResetGuestConfigToDefault()
 {
-    // Home clients should NEVER have their local PC config wiped in guest mode!
-    if (g_accessStatus.is_home_client)
-        return;
-
     namespace fs = std::filesystem;
     const auto gameDir = ExecutableRoot() / L"cstrike";
     const auto gameCfg = gameDir / L"config.cfg";
+    const auto gameCfgBak = gameDir / L"config.cfg.bak";
     const auto userCfg = gameDir / L"userconfig.cfg";
     const auto defaultCfg = ExecutableRoot() / L"default" / L"config.cfg";
 
@@ -2969,17 +2966,25 @@ void ResetGuestConfigToDefault()
         }
     }
 
-    constexpr char kDefaultUserConfig[] = R"CFG(alias d "disconnect"
-alias q "quit"
-alias ret "retry"
+    // Clean up any old backup from previous logged-in user
+    if (fs::exists(gameCfgBak, ec))
+    {
+        fs::remove(gameCfgBak, ec);
+    }
 
-exec gameland_lan_host.cfg
-)CFG";
+    // Reset memory hash so next login or sync starts clean
+    g_lastLoadedConfigHash.clear();
+
+    std::string defaultUserConfig = "alias d \"disconnect\"\nalias q \"quit\"\nalias ret \"retry\"\n";
+    if (!g_accessStatus.is_home_client)
+    {
+        defaultUserConfig += "\nexec gameland_lan_host.cfg\n";
+    }
 
     std::ofstream userOut(userCfg, std::ios::binary | std::ios::trunc);
     if (userOut.is_open())
     {
-        userOut.write(kDefaultUserConfig, std::strlen(kDefaultUserConfig));
+        userOut.write(defaultUserConfig.data(), defaultUserConfig.size());
         userOut.close();
     }
 }
