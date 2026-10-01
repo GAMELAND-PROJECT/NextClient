@@ -942,13 +942,7 @@ void RefreshDemoList()
     g_demoFiles.clear();
     SendMessageW(g_demoList, LB_RESETCONTENT, 0, 0);
 
-    const auto cstrikeDir = ExecutableRoot() / L"cstrike";
-    const auto demoDir = cstrikeDir / L"demos";
-    if (!std::filesystem::is_directory(cstrikeDir))
-    {
-        SetDemoStatus(L"Demo folder was not found.", true);
-        return;
-    }
+    const auto demoDir = ExecutableRoot() / L"demos";
 
     std::error_code error;
     std::filesystem::create_directories(demoDir, error);
@@ -984,7 +978,7 @@ void RefreshDemoList()
     if (!g_demoFiles.empty())
         SendMessageW(g_demoList, LB_SETCURSEL, 0, 0);
 
-    SetDemoStatus(g_demoFiles.empty() ? L"No local .dem files found in cstrike\\demos." : L"Ready.");
+    SetDemoStatus(g_demoFiles.empty() ? L"No local .dem files found in demos." : L"Ready.");
 }
 
 bool ReadDemoPassword(HWND window, std::wstring& password)
@@ -1098,14 +1092,14 @@ void ConvertSelectedDemoToVideo(HWND window)
     }
 
     const auto demoName = path.stem().wstring();
-    const auto videoDir = root / L"cstrike" / L"videos";
+    const auto videoDir = root / L"videos";
     std::error_code ec;
     std::filesystem::create_directories(videoDir, ec);
 
     const std::wstring confirmMsg =
         L"آیا مایلید این دمو با نرخ ۶۰ فریم بر ثانیه به فایل ویدیویی MP4 تبدیل شود؟\n\n"
         L"فایل دمو: " + path.filename().wstring() + L"\n"
-        L"خروجی: cstrike/videos/" + demoName + L".mp4\n\n"
+        L"خروجی: videos/" + demoName + L".mp4\n\n"
         L"تضمین پایداری: این فرایند با اولویت کنترل‌شده (Below Normal) در پس‌زمینه اجرا شده و هیچ لگی در بازی عادی ایجاد نمی‌کند.";
 
     if (MessageBoxW(window, confirmMsg.c_str(), L"تأیید رندر ویدیو", MB_YESNO | MB_ICONQUESTION) != IDYES)
@@ -1132,7 +1126,7 @@ void ConvertSelectedDemoToVideo(HWND window)
         CloseHandle(pi.hProcess);
         MessageBoxW(window,
             L"فرایند تبدیل دمو به ویدیوی MP4 با کیفیت 60 FPS در پس‌زمینه آغاز شد.\n\n"
-            L"پس از اتمام کامل رندر، فایل ویدیویی به صورت خودکار در پوشه cstrike/videos نمایش داده خواهد شد.",
+            L"پس از اتمام کامل رندر، فایل ویدیویی به صورت خودکار در پوشه videos نمایش داده خواهد شد.",
             L"آغاز رندر ویدیو", MB_OK | MB_ICONINFORMATION);
     }
     else
