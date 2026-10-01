@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$SourceRoot = 'F:\CS 1.6 - AllClient',
+    [string]$SourceRoot = 'F:\Allclient',
     [string]$BuildDirectory = 'build\vs2022',
     [string]$Compiler = 'C:\Program Files\Inno Setup 7\ISCC.exe'
 )
@@ -13,7 +13,7 @@ if (-not [IO.Path]::IsPathRooted($BuildDirectory)) {
 $SourceRoot = (Resolve-Path -LiteralPath $SourceRoot).Path
 $BuildDirectory = (Resolve-Path -LiteralPath $BuildDirectory).Path
 $cache = Get-Content -LiteralPath (Join-Path $BuildDirectory 'CMakeCache.txt')
-$installSetting = @($cache | Where-Object { $_ -match '^NEXTCLIENT_INSTALL_DIR:PATH=' })
+$installSetting = @($cache | Where-Object { $_ -match '^NEXTCLIENT_INSTALL_DIR:(?:PATH|UNINITIALIZED)=' })
 if ($installSetting.Count -ne 1) { throw 'Configure NEXTCLIENT_INSTALL_DIR before packaging.' }
 $installRoot = (Resolve-Path -LiteralPath ($installSetting[0] -replace '^[^=]+=', '')).Path
 if ($installRoot -ne $SourceRoot) {
@@ -28,7 +28,7 @@ foreach ($required in @('platform\steam\games\SmartEmu\SSELauncher.exe', 'platfo
 
 # BUILD_ALL builds and deploys every runtime component and the matching assets.
 # Compiling the ISS alone used to silently distribute yesterday's game binaries.
-& rtk proxy cmake --build $BuildDirectory --config Release --target BUILD_ALL --parallel 4
+cmake --build $BuildDirectory --config Release --target BUILD_ALL --parallel 4
 if ($LASTEXITCODE -ne 0) { throw 'Client build/deployment failed; installer was not created.' }
 
 $binaryMap = [ordered]@{
@@ -51,7 +51,18 @@ foreach ($entry in $binaryMap.GetEnumerator()) {
     $hashes[$entry.Value] = $installedHash
 }
 
-& rtk proxy $Compiler "/DSourceRoot=$SourceRoot" (Join-Path $PSScriptRoot 'Allclient.iss')
+$installDir = Join-Path $repoRoot 'install'
+if (Test-Path -LiteralPath $installDir) {
+    foreach ($entry in $binaryMap.GetEnumerator()) {
+        $srcFile = Join-Path $binaryRoot $entry.Key
+        $dstFile = Join-Path $installDir $entry.Value
+        $dstFolder = Split-Path $dstFile -Parent
+        if (-not (Test-Path -LiteralPath $dstFolder)) { New-Item -ItemType Directory -Path $dstFolder -Force | Out-Null }
+        Copy-Item -LiteralPath $srcFile -Destination $dstFile -Force
+    }
+}
+
+& $Compiler "/DSourceRoot=$SourceRoot" "/DBinaryRoot=$binaryRoot" (Join-Path $PSScriptRoot 'Allclient.iss')
 if ($LASTEXITCODE -ne 0) { throw 'Installer compilation failed.' }
 $setupPath = Join-Path $PSScriptRoot 'output\Allclient-Setup.exe'
 $manifest = [ordered]@{

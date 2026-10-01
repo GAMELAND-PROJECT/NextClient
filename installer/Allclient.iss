@@ -1,6 +1,6 @@
-﻿#define AppName "Allclient"
+#define AppName "Allclient"
 #ifndef AppVersion
-  #define AppVersion "0.0.1"
+  #define AppVersion "1.0.0"
 #endif
 #define AppPublisher "GAMELAND PROJECT"
 #define AppExeName "cstrike.exe"
@@ -29,8 +29,6 @@ UsePreviousAppDir=yes
 DisableProgramGroupPage=yes
 OutputDir=output
 OutputBaseFilename=Allclient-Setup
-DiskSpanning=yes
-DiskSliceSize=Max
 SetupIconFile=..\nextclient\launcher\src\next_launcher\assets\app_icon.ico
 UninstallDisplayIcon={app}\{#AppExeName}
 Compression=lzma2/ultra64
@@ -55,13 +53,13 @@ Source: "runtime\vc_redist.x64.exe"; Flags: dontcopy
 Source: "runtime\vcredist2010_x86.exe"; Flags: dontcopy
 Source: "runtime\vcredist2010_x64.exe"; Flags: dontcopy
 ; 1. Base files excluding maps and user config (so custom maps are never overwritten)
-Source: "{#SourceRoot}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "cstrike\maps\*,cstrike\userconfig.cfg,backups\*,cstrike_downloads\*,crashes\*,htmlcache\*,*.log,*.mdmp,debug.log,install.bat,unins000.exe,unins000.dat,*.bak*,hitbox_vis.asi*,*.asi.disabled,auto_launcher_tests.exe,allclient-install.ini"
+Source: "{#SourceRoot}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "cstrike\maps\*,cstrike\userconfig.cfg,backups\*,cstrike_downloads\*,crashes\*,htmlcache\*,*.log,*.mdmp,debug.log,install.bat,unins000.exe,unins000.dat,*.bak*,*.bak_gameland*,update\*,demos\*,videos\*,*.pdb,*.git*,build-info.txt,hitbox_vis.asi*,*.asi.disabled,auto_launcher_tests.exe,allclient-install.ini,gameland_license.dat"
 ; 2. Game maps - NEVER overwrite existing maps! Custom and downloaded maps are 100% preserved
-Source: "{#SourceRoot}\cstrike\maps\*"; DestDir: "{app}\cstrike\maps"; Flags: onlyifdoesntexist recursesubdirs createallsubdirs; Excludes: "*.log,*.bak*"
+Source: "{#SourceRoot}\cstrike\maps\*"; DestDir: "{app}\cstrike\maps"; Flags: onlyifdoesntexist recursesubdirs createallsubdirs; Excludes: "*.log,*.bak*,*.bak_gameland*"
 ; 3. User config template - only install if not already existing
 Source: "{#SourceRoot}\cstrike\userconfig.cfg"; DestDir: "{app}\cstrike"; Flags: onlyifdoesntexist;
 ; 4. Overlay latest compiled binaries and configs
-Source: "{#BinaryRoot}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "cstrike\maps\*,*.log,*.mdmp,debug.log,hitbox_vis.asi*,*.asi.disabled,auto_launcher_tests.exe,allclient-install.ini"
+Source: "{#BinaryRoot}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "cstrike\maps\*,*.log,*.mdmp,debug.log,hitbox_vis.asi*,*.asi.disabled,auto_launcher_tests.exe,allclient-install.ini,*.pdb,*.git*,build-info.txt,*.bak*,*.bak_gameland*,gameland_license.dat"
 
 [INI]
 Filename: "{app}\allclient-install.ini"; Section: "Allclient"; Key: "Schema"; String: "1"
@@ -84,30 +82,8 @@ Filename: "{app}\Allclient.exe"; WorkingDir: "{app}"; Description: "اجرای A
 
 [Code]
 function InitializeSetup(): Boolean;
-var
-  SetupDir, BinSlice: String;
-  BinSize: Integer;
 begin
   Result := True;
-  SetupDir := ExtractFilePath(ExpandConstant('{srcexe}'));
-  BinSlice := SetupDir + 'Allclient-Setup-1.bin';
-
-  { Anti-tamper & Data integrity check for 2-piece setup }
-  if not FileExists(BinSlice) then
-  begin
-    MsgBox('خطای امنیتی: فایل داده‌های بازی (Allclient-Setup-1.bin) در کنار برنامه نصب یافت نشد.' + #13#10#13#10 +
-           'لطفاً هر دو فایل Allclient-Setup.exe و Allclient-Setup-1.bin را در یک پوشه قرار دهید.', mbCriticalError, MB_OK);
-    Result := False;
-    Exit;
-  end;
-
-  if not FileSize(BinSlice, BinSize) or (BinSize < 100000000) then
-  begin
-    MsgBox('خطای امنیتی: فایل داده‌های بازی (Allclient-Setup-1.bin) ناقص یا دستکاری شده است.' + #13#10#13#10 +
-           'حجم فایل معتبر نیست. لطفاً مجدداً فایل کامل را دریافت فرمایید.', mbCriticalError, MB_OK);
-    Result := False;
-    Exit;
-  end;
 end;
 
 function GetVolumeInformation(
@@ -136,7 +112,6 @@ const
   { The target Windows 7 systems can reach this first-party endpoint over
     HTTP, while their obsolete TLS/certificate stacks reject its HTTPS route. }
   AccessApiUrl = 'http://gameland.cam/installer_access.php';
-  OfflineCode = 'amir1394';
   AllclientUninstallKey = 'Software\Microsoft\Windows\CurrentVersion\Uninstall\{D9E46BD1-52F8-470F-8639-FF31FE7C5E48}_is1';
 
 var

@@ -1,4 +1,4 @@
-﻿#include <Windows.h>
+#include <Windows.h>
 #include <CommCtrl.h>
 #include <WinInet.h>
 #include <windowsx.h>
@@ -160,6 +160,7 @@ HWND g_userRegisterBtn{};
 HWND g_userStatusLabel{};
 std::wstring g_activeUserPhone;
 std::string g_activeUserToken;
+static bool s_restoringSession = false;
 
 HWND g_regMobile{};
 HWND g_regRequestOtpBtn{};
@@ -1502,6 +1503,69 @@ bool PushUserConfigToCloud(const std::string& token)
     return success == "true";
 }
 
+void SaveUserSession(const std::wstring& phone, const std::wstring& password, const std::string& token)
+{
+    RegistryKey regKey(HKEY_CURRENT_USER, kLauncherKey, KEY_SET_VALUE);
+    regKey.WriteString(L"SavedUserPhone", phone);
+    if (!password.empty())
+        regKey.WriteString(L"SavedUserPassword", password);
+    if (!token.empty())
+        regKey.WriteString(L"SavedUserToken", WidenUtf8(token));
+    regKey.WriteDword(L"SavedUserLoggedIn", 1);
+}
+
+void ClearUserSession(bool clearCredentials = false)
+{
+    RegistryKey regKey(HKEY_CURRENT_USER, kLauncherKey, KEY_SET_VALUE);
+    regKey.WriteString(L"SavedUserToken", L"");
+    regKey.WriteDword(L"SavedUserLoggedIn", 0);
+    if (clearCredentials)
+    {
+        regKey.WriteString(L"SavedUserPhone", L"");
+        regKey.WriteString(L"SavedUserPassword", L"");
+    }
+}
+
+void RestoreUserSession(HWND window)
+{
+    s_restoringSession = true;
+    RegistryKey regKey(HKEY_CURRENT_USER, kLauncherKey, KEY_QUERY_VALUE);
+    const std::wstring phone = regKey.ReadString(L"SavedUserPhone");
+    const std::wstring password = regKey.ReadString(L"SavedUserPassword");
+    const std::string token = NarrowUtf8(regKey.ReadString(L"SavedUserToken"));
+    const DWORD loggedIn = regKey.ReadDword(L"SavedUserLoggedIn", 0);
+
+    if (!phone.empty() && g_userPhone)
+        SetWindowTextW(g_userPhone, phone.c_str());
+
+    if (!password.empty() && g_userPassword)
+        SetWindowTextW(g_userPassword, password.c_str());
+
+    if (loggedIn != 0 && !token.empty() && !phone.empty())
+    {
+        g_activeUserPhone = phone;
+        g_activeUserToken = token;
+
+        if (g_userStatusLabel)
+        {
+            const std::wstring status = L"وارد شده: \u200e" + phone;
+            SetWindowTextW(g_userStatusLabel, status.c_str());
+            InvalidateRect(g_userStatusLabel, nullptr, TRUE);
+        }
+        if (g_userLoginBtn)
+        {
+            SetWindowTextW(g_userLoginBtn, L"خروج از اکانت");
+            InvalidateRect(g_userLoginBtn, nullptr, TRUE);
+        }
+        if (g_userRegisterBtn)
+        {
+            SetWindowTextW(g_userRegisterBtn, L"ریست کردن کانفیگ");
+            InvalidateRect(g_userRegisterBtn, nullptr, TRUE);
+        }
+    }
+    s_restoringSession = false;
+}
+
 void PerformUserLogin(HWND window)
 {
     wchar_t phoneBuf[64]{};
@@ -1535,6 +1599,7 @@ void PerformUserLogin(HWND window)
     {
         g_activeUserPhone = phone;
         g_activeUserToken = token;
+        SaveUserSession(phone, password, token);
         const std::wstring status = L"وارد شده: \u200e" + phone;
         SetWindowTextW(g_userStatusLabel, status.c_str());
         InvalidateRect(g_userStatusLabel, nullptr, TRUE);
@@ -1572,6 +1637,7 @@ void PerformUserLogout(HWND window)
 
     g_activeUserToken.clear();
     g_activeUserPhone.clear();
+    ClearUserSession(false);
 
     if (g_userPassword)
         SetWindowTextW(g_userPassword, L"");
@@ -2005,13 +2071,14 @@ LRESULT CALLBACK OtpRegisterProc(HWND window, UINT message, WPARAM wParam, LPARA
 
                 g_activeUserPhone = mobile;
                 g_activeUserToken = token;
+                SaveUserSession(mobile, effectivePass, token);
                 if (g_userPhone)
                     SetWindowTextW(g_userPhone, mobile.c_str());
                 if (g_userPassword)
                     SetWindowTextW(g_userPassword, effectivePass.c_str());
                 if (g_userStatusLabel)
                 {
-                    const std::wstring status = L"\u0648\u0627\u0631\u062f \u0634\u062f\u0647: \\u200e" + mobile;
+                    const std::wstring status = L"وارد شده: \u200e" + mobile;
                     SetWindowTextW(g_userStatusLabel, status.c_str());
                     InvalidateRect(g_userStatusLabel, nullptr, TRUE);
                 }
@@ -2317,6 +2384,7 @@ void CreateControls(HWND window)
     g_mouseAtLastApply = ReadSystemMouseSettings();
     g_mousePreviewChanged = false;
     SetMouseControls(g_mouseAtLastApply);
+    RestoreUserSession(window);
 }
 
 void CheckLauncherUpdates(HWND window)
@@ -2475,26 +2543,30 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
     case WM_COMMAND:
         if (HIWORD(wParam) == EN_CHANGE && reinterpret_cast<HWND>(lParam) == g_userPhone)
         {
-            wchar_t curPhone[64]{};
-            GetWindowTextW(g_userPhone, curPhone, static_cast<int>(std::size(curPhone)));
-            if (!g_activeUserToken.empty() && std::wstring(curPhone) != g_activeUserPhone)
+            if (!s_restoringSession)
             {
-                g_activeUserToken.clear();
-                g_activeUserPhone.clear();
-                if (g_userLoginBtn)
+                wchar_t curPhone[64]{};
+                GetWindowTextW(g_userPhone, curPhone, static_cast<int>(std::size(curPhone)));
+                if (!g_activeUserToken.empty() && std::wstring(curPhone) != g_activeUserPhone)
                 {
-                    SetWindowTextW(g_userLoginBtn, L"ورود");
-                    InvalidateRect(g_userLoginBtn, nullptr, TRUE);
-                }
-                if (g_userStatusLabel)
-                {
-                    SetWindowTextW(g_userStatusLabel, L"وارد نشده‌اید (مهمان: کانفیگ پیش‌فرض لود می‌شود)");
-                    InvalidateRect(g_userStatusLabel, nullptr, TRUE);
-                }
-                if (g_userRegisterBtn)
-                {
-                    SetWindowTextW(g_userRegisterBtn, L"ثبت‌نام / فراموشی رمز");
-                    InvalidateRect(g_userRegisterBtn, nullptr, TRUE);
+                    g_activeUserToken.clear();
+                    g_activeUserPhone.clear();
+                    ClearUserSession(false);
+                    if (g_userLoginBtn)
+                    {
+                        SetWindowTextW(g_userLoginBtn, L"ورود");
+                        InvalidateRect(g_userLoginBtn, nullptr, TRUE);
+                    }
+                    if (g_userStatusLabel)
+                    {
+                        SetWindowTextW(g_userStatusLabel, L"وارد نشده‌اید (مهمان: کانفیگ پیش‌فرض لود می‌شود)");
+                        InvalidateRect(g_userStatusLabel, nullptr, TRUE);
+                    }
+                    if (g_userRegisterBtn)
+                    {
+                        SetWindowTextW(g_userRegisterBtn, L"ثبت‌نام / فراموشی رمز");
+                        InvalidateRect(g_userRegisterBtn, nullptr, TRUE);
+                    }
                 }
             }
         }
