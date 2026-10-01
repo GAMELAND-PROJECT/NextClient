@@ -505,7 +505,7 @@ namespace nextclient::client_mini
             << " -thread_queue_size 128 -f rawvideo -pix_fmt rgb24 -s " << width << "x" << height
             << " -r 100 -i \"" << videoPipeName << "\""
             << " -filter_threads 0 -vf " << videoFilter
-            << " -c:v libx264 -preset ultrafast -tune fastdecode -crf 18 -profile:v high -pix_fmt yuv420p -threads 0 -slices 4"
+            << " -c:v libx264 -preset veryfast -tune fastdecode -crf 21 -profile:v high -pix_fmt yuv420p -threads 0 -slices 4"
             << " -movflags +faststart \"" << m_tempVideoPath << "\"";
 
         STARTUPINFOA si{};
@@ -1365,7 +1365,7 @@ namespace nextclient::client_mini
             << " -r " << fps << " -i \"" << videoPipeName << "\""
             << " -f s16le -ar " << audioRate << " -ac 2 -i \"" << audioPipeName << "\""
             << " -filter_threads 0 -vf " << videoFilter
-            << " -c:v libx264 -preset ultrafast -tune fastdecode -crf 18 -profile:v high -pix_fmt yuv420p -threads 0 -slices 4"
+            << " -c:v libx264 -preset veryfast -tune fastdecode -crf 21 -profile:v high -pix_fmt yuv420p -threads 0 -slices 4"
             << " -af aresample=async=1000:min_hard_comp=0.100000:first_pts=0"
             << " -c:a aac -b:a 160k"
             << " -movflags +faststart+frag_keyframe+empty_moov"
