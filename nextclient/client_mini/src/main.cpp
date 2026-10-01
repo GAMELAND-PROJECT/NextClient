@@ -1357,6 +1357,14 @@ static int HUD_RedrawHandler(float flTime, int iIntermission, HUD_RedrawNext nex
             if (GameVideoRecorder::Instance().StartStudioRender(name, scrW, scrH))
             {
                 GameVideoRecorder::Instance().SetDemoPaused(false);
+                gEngfuncs.pfnClientCmd("drawradar\n");
+                gEngfuncs.pfnClientCmd("cl_radartype 1\n");
+                gEngfuncs.pfnClientCmd("gl_texturemode GL_LINEAR_MIPMAP_LINEAR\n");
+                gEngfuncs.pfnClientCmd("gl_ansio 16\n");
+                gEngfuncs.pfnClientCmd("gl_picmip 0\n");
+                gEngfuncs.pfnClientCmd("gl_max_size 512\n");
+                gEngfuncs.pfnClientCmd("r_detailtextures 1\n");
+                gEngfuncs.pfnClientCmd("cl_himodels 1\n");
                 gEngfuncs.pfnClientCmd("dem_pause 0\n");
                 gEngfuncs.pfnClientCmd("dem_speed 1.0\n");
                 gEngfuncs.pfnClientCmd("fps_override 1\n");

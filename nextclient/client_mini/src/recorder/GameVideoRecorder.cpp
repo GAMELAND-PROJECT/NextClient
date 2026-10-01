@@ -505,7 +505,7 @@ namespace nextclient::client_mini
             << " -thread_queue_size 128 -f rawvideo -pix_fmt rgb24 -s " << width << "x" << height
             << " -r 100 -i \"" << videoPipeName << "\""
             << " -filter_threads 0 -vf " << videoFilter
-            << " -c:v libx264 -preset veryfast -tune fastdecode -crf 21 -profile:v high -pix_fmt yuv420p -threads 0 -slices 4"
+            << " -c:v libx264 -preset fast -crf 16 -profile:v high -pix_fmt yuv420p -threads 0"
             << " -movflags +faststart \"" << m_tempVideoPath << "\"";
 
         STARTUPINFOA si{};
@@ -1023,34 +1023,28 @@ namespace nextclient::client_mini
 
     std::string GameVideoRecorder::BuildStudioVideoFilter() const
     {
-        float gameGamma = 2.5f;
-        float gameBrightness = 1.0f;
-#ifdef _WIN32
-        if (gEngfuncs.pfnGetCvarPointer != nullptr)
-        {
-            cvar_t* pG = gEngfuncs.pfnGetCvarPointer("gamma");
-            if (pG && pG->value > 0.05f)
-                gameGamma = pG->value;
-
-            cvar_t* pB = gEngfuncs.pfnGetCvarPointer("brightness");
-            if (pB)
-                gameBrightness = pB->value;
-        }
-#endif
-
-        // Balanced Dynamic Gamma Calibration:
-        // Lifts dark models out of shadow clamp without bleaching sunny walls or ceilings
-        float ffmpegGamma = 1.02f + (gameGamma - 1.5f) * 0.20f;
-        ffmpegGamma = std::clamp(ffmpegGamma, 1.15f, 1.35f);
-
-        // Zero additive brightness offset keeps black level true black and eliminates wash-out
-        float ffmpegBrightness = 0.0f;
-
         std::ostringstream ss;
-        ss << std::fixed << std::setprecision(2);
-        ss << "vflip,eq=gamma=" << ffmpegGamma
-           << ":contrast=1.08:brightness=" << ffmpegBrightness
-           << ":saturation=1.15,unsharp=3:3:0.6:3:3:0.3";
+        ss << "vflip";
+
+        const int srcW = (m_recordWidth > 0) ? m_recordWidth : 800;
+        const int srcH = (m_recordHeight > 0) ? m_recordHeight : 600;
+
+        // Upscale any low-res frame (800x600, 1024x768, 720p, etc.) to 1080p height
+        // using the high-precision Lanczos algorithm to prevent media player bilinear blur.
+        // Aspect ratio is strictly preserved without any stretch distortion.
+        if (srcH < 1080)
+        {
+            const int targetH = 1080;
+            int targetW = static_cast<int>(std::round(static_cast<double>(targetH) * srcW / srcH));
+            if (targetW % 2 != 0)
+                targetW++;
+
+            ss << ",scale=" << targetW << ":" << targetH << ":flags=lanczos";
+        }
+
+        // Hardware Desktop Gamma Ramp compensation (glReadPixels raw buffer is dark/flat)
+        ss << ",eq=gamma=1.18";
+
         return ss.str();
     }
 
@@ -1365,7 +1359,7 @@ namespace nextclient::client_mini
             << " -r " << fps << " -i \"" << videoPipeName << "\""
             << " -f s16le -ar " << audioRate << " -ac 2 -i \"" << audioPipeName << "\""
             << " -filter_threads 0 -vf " << videoFilter
-            << " -c:v libx264 -preset veryfast -tune fastdecode -crf 21 -profile:v high -pix_fmt yuv420p -threads 0 -slices 4"
+            << " -c:v libx264 -preset fast -crf 16 -profile:v high -pix_fmt yuv420p -threads 0"
             << " -af aresample=async=1000:min_hard_comp=0.100000:first_pts=0"
             << " -c:a aac -b:a 160k"
             << " -movflags +faststart+frag_keyframe+empty_moov"
