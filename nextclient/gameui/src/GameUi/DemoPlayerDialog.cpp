@@ -1,12 +1,13 @@
-//
-//========= Copyright © 1996-2001, Valve LLC, All rights reserved. ============
+//========= Copyright Valve LLC, All rights reserved. ============
 //
 // Purpose: DemoPlayerDialog.cpp: implementation of the CDemoPlayerDialog class.
 //
-// $NoKeywords: $
 //=============================================================================
 
 #include <stdio.h>
+#include <algorithm>
+#include <cmath>
+#include <string>
 #include "DemoPlayerDialog.h"
 
 #include <vgui/ISurfaceNext.h>
@@ -43,12 +44,16 @@
 #include <IEngineWrapper.h>
 #include <IDirector.h>
 
+#ifdef _WIN32
+#include <windows.h>
+#endif
+
 // memdbgon must be the last include file in a .cpp file!!!
 #include <tier0/memdbgon.h>
 
 #undef PostMessage
 
-#pragma warning(disable : 4244)	// 'conversion' conversion from 'type1' to 'type2', possible loss of data
+#pragma warning(disable : 4244) // 'conversion' conversion from 'type1' to 'type2', possible loss of data
 
 using namespace vgui2;
 
@@ -56,266 +61,421 @@ using namespace vgui2;
 // Construction/Destruction
 //////////////////////////////////////////////////////////////////////
 
-CDemoPlayerDialog::CDemoPlayerDialog(vgui2::Panel *parent) : Frame (parent, "DemoPlayerDialog")
+CDemoPlayerDialog::CDemoPlayerDialog(vgui2::Panel *parent) : Frame(parent, "DemoPlayerDialog")
 {
     m_World = NULL;
     m_Engine = NULL;
     m_DemoPlayer = NULL;
-
     m_System = NULL;
-//    m_Serial = 4001;	//HACK HACK, assuming we will never load more than 4000 modules
-//    m_SystemTime = 0.0f;
 
-    if ( !LoadModules() )
+    // Completely suppress Demo Player UI during headless background video conversion
+    if (strstr(GetCommandLineA(), "-democonvert") != nullptr)
     {
-        SetVisible( false );
+        SetVisible(false);
         return;
     }
 
-    if ( m_DemoPlayer->IsEditMode() )
+    if (!LoadModules())
     {
-        SetBounds(0, 0, 464, 128);
-    }
-    else
-    {
-        SetBounds(0, 0, 464, 96);
+        SetVisible(false);
+        return;
     }
 
-    SetSizeable( false );
+    int screenW = 800, screenH = 600;
+    if (vgui2::surface())
+    {
+        vgui2::surface()->GetScreenSize(screenW, screenH);
+    }
+    const int dlgW = 560;
+    const int dlgH = 92;
+    SetBounds((screenW - dlgW) / 2, screenH - dlgH - 45, dlgW, dlgH);
+
+    SetSizeable(false);
     SetMoveable(true);
 
-    vgui2::surface()->CreatePopup( GetVPanel(), false );
-
+    vgui2::surface()->CreatePopup(GetVPanel(), false);
     SetVisible(true);
+    SetTitle("#GameUI_DemoPlayer", true);
 
-    SetTitle( "#GameUI_DemoPlayer", true );
-
-    // main panel
+    // High precision normalized slider: 0 to 1000 for sub-second smooth scrubbing
+    m_pTimeSlider = new Slider(this, "TimeSlider");
+    m_pTimeSlider->SetRange(0, 1000);
+    m_pTimeSlider->SetDragOnRepositionNob(true);
+    m_pTimeSlider->AddActionSignalTarget(this);
 
     m_pLableTimeCode = new Label(this, "TimeLabel", "00:00:00");
 
-    m_pTimeSlider = new Slider(this, "TimeSlider");
-    m_pTimeSlider->SetRange( 0, 60 );
-    m_pTimeSlider->AddActionSignalTarget( this );
-
-//	Button *button;
-
-    // Demo player buttons
+    // Standard demo controls
     m_pButtonLoad = new Button(this, "LoadButton", "");
-    m_pButtonPlay = new Button(this, "PlayButton", "");
-    m_pButtonPause = new Button(this, "PauseButton", "");
-    m_pButtonStepF = new Button(this, "StepFButton", "");
-    m_pButtonStepB = new Button(this, "StepBButton", "");
     m_pButtonStart = new Button(this, "StartButton", "");
+    m_pButtonStepB = new Button(this, "StepBButton", "");
+    m_pButtonPause = new Button(this, "PauseButton", "");
+    m_pButtonPlay = new Button(this, "PlayButton", "");
+    m_pButtonStepF = new Button(this, "StepFButton", "");
     m_pButtonEnd = new Button(this, "EndButton", "");
-    m_pButtonSlower	= new Button(this, "SlowerButton", "");
-    m_pButtonFaster	= new Button(this, "FasterButton", "");
+    m_pButtonSlower = new Button(this, "SlowerButton", "");
+    m_pButtonFaster = new Button(this, "FasterButton", "");
     m_pButtonStop = new Button(this, "StopButton", "");
 
-    // Demo editor buttons
+    // Enhanced jump & speed controls
+    m_pButtonJumpBack = new Button(this, "JumpBackBtn", "-5s");
+    m_pButtonJumpFwd = new Button(this, "JumpFwdBtn", "+5s");
+    m_pButtonSpeedReset = new Button(this, "SpeedResetBtn", "1.0x");
 
+    m_pButtonJumpBack->SetCommand("jumpback5");
+    m_pButtonJumpFwd->SetCommand("jumpfwd5");
+    m_pButtonSpeedReset->SetCommand("speedreset");
+
+    // Toggle and Editor buttons
     m_MasterButton = new ToggleButton(this, "MasterButton", "Master");
-    m_MasterButton->AddActionSignalTarget( this );
+    m_MasterButton->AddActionSignalTarget(this);
+    m_MasterButton->SetVisible(false);
 
-    Button *button;
-    button = new Button(this, "EventsButton", "Events");
-    button = new Button(this, "SaveButton", "Save");
-
-    m_NextTimeScale = 2.0f; // = x2
+    m_NextTimeScale = 2.0f;
     m_lastSliderTime = -1;
 
     LoadControlSettings("Resource\\DemoPlayerDialog.res");
     LoadUserConfig("DemoPlayerDialog");
 
-    m_hDemoEventsDialog = new CDemoEventsDialog( this, "DemoEventsDialog", m_Engine, m_DemoPlayer );
-    m_hDemoEventsDialog->AddActionSignalTarget( this );
-
+    m_hDemoEventsDialog = new CDemoEventsDialog(this, "DemoEventsDialog", m_Engine, m_DemoPlayer);
+    m_hDemoEventsDialog->AddActionSignalTarget(this);
     m_hDemoPlayerFileDialog = NULL;
 }
 
 CDemoPlayerDialog::~CDemoPlayerDialog()
 {
-    if ( m_DemoPlayer )
-    {
-        // m_DemoPlayer->RemoveListener( this );  TODO m_DemoPlayer->RemoveListener( this );
-    }
 }
 
-void CDemoPlayerDialog::ApplySchemeSettings( IScheme *pScheme )
+void CDemoPlayerDialog::ApplySchemeSettings(IScheme *pScheme)
 {
-    BaseClass::ApplySchemeSettings( pScheme );
+    BaseClass::ApplySchemeSettings(pScheme);
 
-    m_pButtonLoad->SetImageAtIndex(0, scheme()->GetImage("Resource\\icon_load", false), 0);
-    m_pButtonPlay->SetImageAtIndex(0, scheme()->GetImage("Resource\\icon_play", false), 0);
-    m_pButtonPause->SetImageAtIndex(0, scheme()->GetImage("Resource\\icon_pause", false), 0);
-    m_pButtonStepF->SetImageAtIndex(0, scheme()->GetImage("Resource\\icon_stepf", false), 0);
-    m_pButtonStepB->SetImageAtIndex(0, scheme()->GetImage("Resource\\icon_stepb", false), 0);
-    m_pButtonStart->SetImageAtIndex(0, scheme()->GetImage("Resource\\icon_start", false), 0);
-    m_pButtonEnd->SetImageAtIndex(0, scheme()->GetImage("Resource\\icon_end", false), 0);
-    m_pButtonStop->SetImageAtIndex(0, scheme()->GetImage("Resource\\icon_stop", false), 0);
-    m_pButtonFaster->SetImageAtIndex(0, scheme()->GetImage("Resource\\icon_faster", false), 0);
-    m_pButtonSlower->SetImageAtIndex(0, scheme()->GetImage("Resource\\icon_slower", false), 0);
+    if (scheme())
+    {
+        if (m_pButtonLoad) m_pButtonLoad->SetImageAtIndex(0, scheme()->GetImage("Resource\\icon_load", false), 0);
+        if (m_pButtonPlay) m_pButtonPlay->SetImageAtIndex(0, scheme()->GetImage("Resource\\icon_play", false), 0);
+        if (m_pButtonPause) m_pButtonPause->SetImageAtIndex(0, scheme()->GetImage("Resource\\icon_pause", false), 0);
+        if (m_pButtonStepF) m_pButtonStepF->SetImageAtIndex(0, scheme()->GetImage("Resource\\icon_stepf", false), 0);
+        if (m_pButtonStepB) m_pButtonStepB->SetImageAtIndex(0, scheme()->GetImage("Resource\\icon_stepb", false), 0);
+        if (m_pButtonStart) m_pButtonStart->SetImageAtIndex(0, scheme()->GetImage("Resource\\icon_start", false), 0);
+        if (m_pButtonEnd) m_pButtonEnd->SetImageAtIndex(0, scheme()->GetImage("Resource\\icon_end", false), 0);
+        if (m_pButtonStop) m_pButtonStop->SetImageAtIndex(0, scheme()->GetImage("Resource\\icon_stop", false), 0);
+        if (m_pButtonFaster) m_pButtonFaster->SetImageAtIndex(0, scheme()->GetImage("Resource\\icon_faster", false), 0);
+        if (m_pButtonSlower) m_pButtonSlower->SetImageAtIndex(0, scheme()->GetImage("Resource\\icon_slower", false), 0);
+    }
+
+    // Precise, elegant layout
+    const int pad = 10;
+    const int dlgW = GetWide();
+    const int sliderY = 28;
+    const int sliderH = 24;
+    const int btnY = 56;
+    const int btnH = 26;
+
+    if (m_pTimeSlider)
+    {
+        m_pTimeSlider->SetBounds(pad, sliderY, dlgW - (pad * 2), sliderH);
+    }
+
+    int curX = pad;
+    auto placeBtn = [&](Button *btn, int width) {
+        if (btn)
+        {
+            btn->SetBounds(curX, btnY, width, btnH);
+            curX += width + 4;
+        }
+    };
+
+    placeBtn(m_pButtonLoad, 24);
+    placeBtn(m_pButtonStart, 24);
+    placeBtn(m_pButtonJumpBack, 34);
+    placeBtn(m_pButtonStepB, 24);
+    placeBtn(m_pButtonPause, 26);
+    placeBtn(m_pButtonPlay, 26);
+    placeBtn(m_pButtonStepF, 24);
+    placeBtn(m_pButtonJumpFwd, 34);
+    placeBtn(m_pButtonEnd, 24);
+    placeBtn(m_pButtonSlower, 24);
+    placeBtn(m_pButtonSpeedReset, 38);
+    placeBtn(m_pButtonFaster, 24);
+
+    if (m_pLableTimeCode)
+    {
+        int labelW = (dlgW - pad - 28) - curX;
+        if (labelW < 90) labelW = 90;
+        m_pLableTimeCode->SetBounds(curX, btnY, labelW, btnH);
+    }
+
+    if (m_pButtonStop)
+    {
+        m_pButtonStop->SetBounds(dlgW - pad - 24, btnY, 24, btnH);
+    }
 }
 
 void CDemoPlayerDialog::OnThink()
 {
     BaseClass::OnThink();
 
-    if ( !m_DemoPlayer )
-        return;
-
-    if ( !m_DemoPlayer->IsActive() )
+    if (!m_DemoPlayer || !m_DemoPlayer->IsActive())
         return;
 
     Update();
 }
 
-void CDemoPlayerDialog::Update()
+double CDemoPlayerDialog::SliderPosToWorldTime(int pos)
 {
-    // get total world time length
+    if (m_demoEndTime <= m_demoStartTime)
+        return m_demoStartTime;
 
-    if ( !m_DemoPlayer )
+    double frac = std::clamp(static_cast<double>(pos) / 1000.0, 0.0, 1.0);
+    return m_demoStartTime + frac * (m_demoEndTime - m_demoStartTime);
+}
+
+int CDemoPlayerDialog::WorldTimeToSliderPos(double worldTime)
+{
+    if (m_demoEndTime <= m_demoStartTime)
+        return 0;
+
+    double frac = (worldTime - m_demoStartTime) / (m_demoEndTime - m_demoStartTime);
+    frac = std::clamp(frac, 0.0, 1.0);
+    return static_cast<int>(std::round(frac * 1000.0));
+}
+
+void CDemoPlayerDialog::PerformSeek(double targetTime)
+{
+    if (!m_DemoPlayer)
         return;
 
-    wchar_t title[300];
-
-    if ( !m_DemoPlayer->IsActive() )
+    if (m_demoEndTime > m_demoStartTime)
     {
-        SetTitle( "Demo Player", false);
+        targetTime = std::clamp(targetTime, m_demoStartTime, m_demoEndTime);
     }
-    else if ( m_DemoPlayer->IsLoading() )
+    else if (targetTime < 0.0)
     {
-        swprintf( title, L"Loading %hs ...", m_DemoPlayer->GetFileName() );
-        SetTitle( title, false);
+        targetTime = 0.0;
+    }
+
+    m_DemoPlayer->SetWorldTime(targetTime, false);
+
+    if (m_Engine)
+    {
+        m_Engine->Cbuf_AddText("stopsound\n");
+    }
+}
+
+void CDemoPlayerDialog::UpdateTimeCodeLabel(double worldTime, bool isSeeking)
+{
+    if (!m_pLableTimeCode)
+        return;
+
+    int curSec = std::max(0, static_cast<int>(worldTime));
+    int curMin = curSec / 60;
+    curSec %= 60;
+    int curMsec = static_cast<int>(std::fmod(worldTime, 1.0) * 100.0);
+    if (curMsec < 0) curMsec = 0;
+
+    int totalSec = std::max(0, static_cast<int>(m_demoEndTime - m_demoStartTime));
+    int totalMin = totalSec / 60;
+    totalSec %= 60;
+
+    char buf[64]{};
+    if (isSeeking)
+    {
+        std::snprintf(buf, sizeof(buf), "%02d:%02d.%02d / %02d:%02d [SEEK]",
+            curMin, curSec, curMsec, totalMin, totalSec);
     }
     else
     {
-        swprintf(title, L"%hs", m_DemoPlayer->GetFileName());
+        std::snprintf(buf, sizeof(buf), "%02d:%02d.%02d / %02d:%02d",
+            curMin, curSec, curMsec, totalMin, totalSec);
+    }
+    m_pLableTimeCode->SetText(buf);
+}
+
+void CDemoPlayerDialog::OnSliderDragStart(int position)
+{
+    m_bUserIsDraggingSlider = true;
+    m_bWasPlayingBeforeDrag = (m_DemoPlayer && !m_DemoPlayer->IsPaused());
+
+    if (m_DemoPlayer)
+    {
+        m_DemoPlayer->SetPaused(true);
+    }
+    if (m_Engine)
+    {
+        m_Engine->Cbuf_AddText("stopsound\n");
+    }
+}
+
+void CDemoPlayerDialog::OnSliderMoved(int position)
+{
+    if (!m_bUserIsDraggingSlider && m_pTimeSlider && m_pTimeSlider->IsDragged())
+    {
+        OnSliderDragStart(position);
+    }
+
+    if (!m_bUserIsDraggingSlider)
+        return;
+
+    double targetTime = SliderPosToWorldTime(position);
+    UpdateTimeCodeLabel(targetTime, true);
+
+    auto now = std::chrono::steady_clock::now();
+    auto elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(now - m_lastSeekTime).count();
+    if (elapsedMs >= 120) // Throttle to prevent flooding the engine while scrubbing
+    {
+        m_lastSeekTime = now;
+        PerformSeek(targetTime);
+    }
+}
+
+void CDemoPlayerDialog::OnSliderDragEnd(int position)
+{
+    m_bUserIsDraggingSlider = false;
+
+    double targetTime = SliderPosToWorldTime(position);
+    PerformSeek(targetTime);
+
+    if (m_bWasPlayingBeforeDrag && m_DemoPlayer)
+    {
+        m_DemoPlayer->SetPaused(false);
+    }
+
+    UpdateTimeCodeLabel(targetTime, false);
+}
+
+void CDemoPlayerDialog::OnJumpRelative(double deltaSeconds)
+{
+    if (!m_DemoPlayer)
+        return;
+
+    double curTime = m_DemoPlayer->GetWorldTime();
+    double targetTime = curTime + deltaSeconds;
+    PerformSeek(targetTime);
+
+    if (m_pTimeSlider && !m_bUserIsDraggingSlider)
+    {
+        m_pTimeSlider->SetValue(WorldTimeToSliderPos(targetTime), false);
+    }
+    UpdateTimeCodeLabel(targetTime, false);
+}
+
+void CDemoPlayerDialog::Update()
+{
+    if (!m_DemoPlayer || !m_World)
+        return;
+
+    if (strstr(GetCommandLineA(), "-democonvert") != nullptr)
+    {
+        SetVisible(false);
+        return;
+    }
+
+    // Safety check on dragging state: if mouse button was released outside
+    if (m_bUserIsDraggingSlider && m_pTimeSlider && !m_pTimeSlider->IsDragged())
+    {
+        OnSliderDragEnd(m_pTimeSlider->GetValue());
+    }
+
+    wchar_t title[300]{};
+    if (!m_DemoPlayer->IsActive())
+    {
+        SetTitle("Demo Player", false);
+    }
+    else if (m_DemoPlayer->IsLoading())
+    {
+        swprintf(title, L"Loading %hs ...", m_DemoPlayer->GetFileName());
+        SetTitle(title, false);
+    }
+    else
+    {
+        swprintf(title, L"Demo Player - %hs", m_DemoPlayer->GetFileName());
         SetTitle(title, false);
     }
 
-    frame_t * firstFrame = m_World->GetFirstFrame();
-    frame_t * lastFrame = m_World->GetLastFrame();
+    frame_t *firstFrame = m_World->GetFirstFrame();
+    frame_t *lastFrame = m_World->GetLastFrame();
 
-    if ( firstFrame && lastFrame )
+    if (firstFrame && lastFrame)
     {
-        frame_t * prevFrame = NULL;
-        frame_t * nextFrame = firstFrame;
+        frame_t *prevFrame = NULL;
+        frame_t *nextFrame = firstFrame;
 
-        // Sync time slider range by skipping over frames before the actual start of the demo
-        // If the time gap between frames > 2s, consider the first valid frame as the actual demo start
-        while ( nextFrame )
+        while (nextFrame)
         {
-            // Skip frames that are too far apart (these frames are not part of the actual demo)
-            if ( prevFrame && (nextFrame->time - prevFrame->time) > 2.0f )
+            if (prevFrame && (nextFrame->time - prevFrame->time) > 2.0f)
             {
-                firstFrame = nextFrame; // Set the first valid frame as the real start
+                firstFrame = nextFrame;
                 break;
             }
-
             prevFrame = nextFrame;
             nextFrame = m_World->GetFrameBySeqNr(nextFrame->seqnr + 1);
         }
 
-        float range = lastFrame->time - firstFrame->time;
-        m_pTimeSlider->SetRange(firstFrame->time,lastFrame->time) ;
-        m_pTimeSlider->InvalidateLayout();
+        m_demoStartTime = firstFrame->time;
+        m_demoEndTime = lastFrame->time;
     }
 
-    double	worldTime = m_DemoPlayer->GetWorldTime();
-    float	timeScale = m_DemoPlayer->GetTimeScale();
+    double worldTime = m_DemoPlayer->GetWorldTime();
 
-    int sliderTime = m_pTimeSlider->GetValue();
-
-    if ( m_lastSliderTime > 0 && sliderTime != m_lastSliderTime )
+    // While user is actively dragging the slider, NEVER overwrite slider value!
+    if (!m_bUserIsDraggingSlider && m_pTimeSlider)
     {
-        int tmin, tmax;
-        m_pTimeSlider->GetRange( tmin, tmax );
+        int targetPos = WorldTimeToSliderPos(worldTime);
+        if (m_pTimeSlider->GetValue() != targetPos)
+        {
+            m_pTimeSlider->SetValue(targetPos, false); // bTriggerChangeMessage = false
+        }
+        UpdateTimeCodeLabel(worldTime, false);
+    }
 
-        // slider has been moved by user, apply changes to editor
-
-        // If the slider is at the beginning, set the world time to the actual start of the demo
-        // (avoiding truncation due to integer slider values)
-        if ( firstFrame && tmin == sliderTime )
-            m_DemoPlayer->SetWorldTime( firstFrame->time, false );
+    // Update speed badge button text
+    if (m_pButtonSpeedReset)
+    {
+        float scale = m_DemoPlayer->GetTimeScale();
+        char speedBuf[16]{};
+        if (std::abs(scale - 1.0f) < 0.05f)
+            std::snprintf(speedBuf, sizeof(speedBuf), "1.0x");
+        else if (scale < 0.9f)
+            std::snprintf(speedBuf, sizeof(speedBuf), "%.2fx", scale);
         else
-            m_DemoPlayer->SetWorldTime( sliderTime, false );
-
-        if ( m_lastSliderTime > 0)
-            OnPause();	// pause game while brwosing tru time
-        m_lastSliderTime = sliderTime;
+            std::snprintf(speedBuf, sizeof(speedBuf), "%.1fx", scale);
+        m_pButtonSpeedReset->SetText(speedBuf);
     }
-    else
-    {
-        m_lastSliderTime = (int) worldTime;
-        m_pTimeSlider->SetValue( m_lastSliderTime );
-    }
-
-    // set time code
-    char timeCode[32]; // mins:secs:msecs
-    std::string timeScaleString;
-    std::string descrition = "Playing";
-
-    if ( !m_DemoPlayer->IsActive() )
-    {
-        descrition = "Stopped";
-    }
-    else if ( m_DemoPlayer->IsPaused() )
-    {
-        descrition = "Paused";
-    }
-
-    if ( timeScale < 0.9f ) 
-        timeScaleString = "x1/" + std::to_string((int)(1 / timeScale));
-    else if ( timeScale > 1.1f )
-        timeScaleString = "x" + std::to_string((int)timeScale);
-    else
-        timeScaleString = "x1";
-
-    _snprintf(timeCode,31,"%02u:%02u:%02u  %s  %s", int(worldTime)/60, int(worldTime)%60, int(worldTime*100.0f)%100,
-              timeScaleString.c_str(), descrition.c_str() );
-
-    timeCode[31]=0;
-
-    m_pLableTimeCode->SetText( timeCode );
 }
 
 void CDemoPlayerDialog::OnPlay()
 {
-    m_DemoPlayer->SetPaused( false );
-    m_Engine->SetCvar("spec_autodirector", "1");	// enable director mode
+    if (!m_DemoPlayer) return;
+    m_DemoPlayer->SetPaused(false);
+    if (m_Engine)
+    {
+        m_Engine->SetCvar("spec_autodirector", "1");
+    }
 }
 
 bool CDemoPlayerDialog::LoadModules()
 {
     m_System = SystemWrapper();
-
-    if ( m_System == NULL )
-    {
+    if (m_System == NULL)
         return false;
-    }
 
-    m_Engine = (IEngineWrapper*)m_System->GetModule( "enginewrapper002", "", NULL );
-
-    if ( m_Engine == NULL )
+    m_Engine = (IEngineWrapper*)m_System->GetModule("enginewrapper002", "", NULL);
+    if (m_Engine == NULL)
     {
         m_System->Printf("CDemoPlayerDialog::LoadModules: couldn't get engine interface.\n");
         return false;
     }
 
-    m_DemoPlayer = (IDemoPlayer*) m_System->GetModule( DEMOPLAYER_INTERFACE_VERSION, "", NULL );
-
-    if ( m_DemoPlayer == NULL )
+    m_DemoPlayer = (IDemoPlayer*)m_System->GetModule(DEMOPLAYER_INTERFACE_VERSION, "", NULL);
+    if (m_DemoPlayer == NULL)
     {
         m_System->Printf("CDemoPlayerDialog::LoadModules: couldn't load demo player module.\n");
         return false;
     }
 
-    // m_DemoPlayer->RegisterListener( this ); TODO m_DemoPlayer->RegisterListener( this );
-
     m_World = m_DemoPlayer->GetWorld();
-
-    if ( m_World == NULL )
+    if (m_World == NULL)
     {
         m_System->Printf("CDemoPlayerDialog::LoadModules: couldn't get world module.\n");
         return false;
@@ -326,232 +486,258 @@ bool CDemoPlayerDialog::LoadModules()
 
 void CDemoPlayerDialog::OnPause()
 {
-    m_DemoPlayer->SetPaused( true );
-    m_Engine->Cbuf_AddText("stopsound\n");	// Stop sound
+    if (!m_DemoPlayer) return;
+    m_DemoPlayer->SetPaused(true);
+    if (m_Engine)
+    {
+        m_Engine->Cbuf_AddText("stopsound\n");
+    }
 }
 
-void CDemoPlayerDialog::OnNextFrame(int direction )
+void CDemoPlayerDialog::OnNextFrame(int direction)
 {
-    float time		= m_DemoPlayer->GetWorldTime();
+    if (!m_DemoPlayer || !m_World) return;
 
-    frame_t * frame = m_World->GetFrameByTime( time );
+    float time = m_DemoPlayer->GetWorldTime();
+    frame_t *frame = m_World->GetFrameByTime(time);
+    if (!frame) return;
 
-    if (!frame)
-        return;
+    frame = m_World->GetFrameBySeqNr(frame->seqnr + direction);
+    if (!frame) return;
 
-    frame = m_World->GetFrameBySeqNr( frame->seqnr + direction );
-
-    if (!frame)
-        return;
-
-    m_DemoPlayer->SetWorldTime( frame->time, false );
-    m_DemoPlayer->SetPaused( true );
-
+    PerformSeek(frame->time);
+    m_DemoPlayer->SetPaused(true);
 }
 
 void CDemoPlayerDialog::OnStart()
 {
-    frame_t * first = m_World->GetFirstFrame();
+    if (!m_DemoPlayer || !m_World) return;
+    frame_t *first = m_World->GetFirstFrame();
+    if (!first) return;
 
-    if ( !first )
-        return;
-
-    m_DemoPlayer->SetWorldTime( first->time - 0.01f, false );
-    m_DemoPlayer->SetTimeScale( 1.0f );
-    m_DemoPlayer->SetPaused( true );
-}
-
-void CDemoPlayerDialog::OnSlower()
-{
-    float timeScale = m_DemoPlayer->GetTimeScale();
-
-    if ( (int)(1 / timeScale) >= 8 )
-        return;
-
-    timeScale /= 2.0f;
-
-    m_DemoPlayer->SetTimeScale( timeScale );
-}
-
-void CDemoPlayerDialog::OnSave()
-{
-    m_DemoPlayer->SaveGame( "demoedit.dem" );	// TODO, allow other name
-}
-
-void CDemoPlayerDialog::OnEvents()
-{
-    if ( !m_hDemoEventsDialog.Get() )
-    {
-        m_hDemoEventsDialog = new CDemoEventsDialog( this, "DemoEventsDialog", m_Engine, m_DemoPlayer );
-        m_hDemoEventsDialog->AddActionSignalTarget( this );
-    }
-
-    m_hDemoEventsDialog->Activate();
-    PostMessage( m_hDemoEventsDialog->GetVPanel(), new KeyValues("UpdateCmdList"));	// update event list
-}
-
-void CDemoPlayerDialog::OnFaster()
-{
-    float timeScale = m_DemoPlayer->GetTimeScale();
-
-    if ( (int)timeScale >= 4 )
-        return;
-
-    timeScale *= 2.0f;
-
-    m_DemoPlayer->SetTimeScale( timeScale );
+    PerformSeek(first->time);
+    m_DemoPlayer->SetTimeScale(1.0f);
+    m_DemoPlayer->SetPaused(true);
 }
 
 void CDemoPlayerDialog::OnEnd()
 {
-    frame_t * last = m_World->GetLastFrame();
+    if (!m_DemoPlayer || !m_World) return;
+    frame_t *last = m_World->GetLastFrame();
+    if (!last) return;
 
-    if ( !last )
-        return;
-
-    m_DemoPlayer->SetWorldTime( last->time, false );
-
-    OnPause();
+    PerformSeek(last->time);
+    m_DemoPlayer->SetPaused(true);
 }
 
-//-----------------------------------------------------------------------------
-// Purpose:
-//-----------------------------------------------------------------------------
-void CDemoPlayerDialog::OnClose()
+void CDemoPlayerDialog::OnSlower()
 {
-    BaseClass::OnClose();
-    MarkForDeletion();
+    if (!m_DemoPlayer) return;
+    float curScale = m_DemoPlayer->GetTimeScale();
+    float newScale = 1.0f;
 
-    if ( m_DemoPlayer )
+    if (curScale > 3.0f) newScale = 2.0f;
+    else if (curScale > 1.5f) newScale = 1.0f;
+    else if (curScale > 0.75f) newScale = 0.5f;
+    else if (curScale > 0.35f) newScale = 0.25f;
+    else newScale = 0.25f;
+
+    m_DemoPlayer->SetTimeScale(newScale);
+}
+
+void CDemoPlayerDialog::OnFaster()
+{
+    if (!m_DemoPlayer) return;
+    float curScale = m_DemoPlayer->GetTimeScale();
+    float newScale = 1.0f;
+
+    if (curScale < 0.35f) newScale = 0.5f;
+    else if (curScale < 0.75f) newScale = 1.0f;
+    else if (curScale < 1.5f) newScale = 2.0f;
+    else if (curScale < 3.0f) newScale = 4.0f;
+    else newScale = 4.0f;
+
+    m_DemoPlayer->SetTimeScale(newScale);
+}
+
+void CDemoPlayerDialog::OnResetSpeed()
+{
+    if (!m_DemoPlayer) return;
+    m_DemoPlayer->SetTimeScale(1.0f);
+}
+
+void CDemoPlayerDialog::OnSave()
+{
+    if (m_DemoPlayer)
     {
-        // m_DemoPlayer->RemoveListener( this ); TODO m_DemoPlayer->RemoveListener( this );
+        m_DemoPlayer->SaveGame("demoedit.dem");
     }
 }
 
-void CDemoPlayerDialog::OnCommand( const char *command )
+void CDemoPlayerDialog::OnEvents()
 {
-    if ( !m_DemoPlayer || !m_World || !m_Engine )
+    if (!m_hDemoEventsDialog.Get())
     {
-        // don't do anything
+        m_hDemoEventsDialog = new CDemoEventsDialog(this, "DemoEventsDialog", m_Engine, m_DemoPlayer);
+        m_hDemoEventsDialog->AddActionSignalTarget(this);
+    }
+    m_hDemoEventsDialog->Activate();
+    PostMessage(m_hDemoEventsDialog->GetVPanel(), new KeyValues("UpdateCmdList"));
+}
+
+void CDemoPlayerDialog::OnClose()
+{
+    BaseClass::OnClose();
+}
+
+void CDemoPlayerDialog::OnCommand(const char *command)
+{
+    if (!m_DemoPlayer || !m_World || !m_Engine)
+    {
         BaseClass::OnCommand(command);
         return;
     }
 
-    if ( !strcmp( command, "pause" ) )
+    if (!strcmp(command, "pause"))
     {
         OnPause();
     }
-    else if ( !strcmp( command, "load" ) )
+    else if (!strcmp(command, "load"))
     {
         OnLoad();
     }
-    else if ( !strcmp( command, "play" ) )
+    else if (!strcmp(command, "play"))
     {
         OnPlay();
     }
-    else if ( !strcmp( command, "stepf" ) )
+    else if (!strcmp(command, "stepf"))
     {
-        OnNextFrame( 1 );
+        OnNextFrame(1);
     }
-    else if ( !strcmp( command, "stepb" ) )
+    else if (!strcmp(command, "stepb"))
     {
-        OnNextFrame( -1 );
+        OnNextFrame(-1);
     }
-    else if ( !strcmp( command, "start" ) )
+    else if (!strcmp(command, "start"))
     {
         OnStart();
     }
-    else if ( !strcmp( command, "end" ) )
+    else if (!strcmp(command, "end"))
     {
         OnEnd();
     }
-    else if ( !strcmp( command, "slower" ) )
+    else if (!strcmp(command, "slower"))
     {
         OnSlower();
     }
-    else if ( !strcmp( command, "faster" ) )
+    else if (!strcmp(command, "faster"))
     {
         OnFaster();
     }
-    else if ( !strcmp( command, "load" ) )
+    else if (!strcmp(command, "speedreset"))
     {
-        OnLoad();
+        OnResetSpeed();
     }
-    else if ( !strcmp( command, "stop" ) )
+    else if (!strcmp(command, "jumpback5"))
+    {
+        OnJumpRelative(-5.0);
+    }
+    else if (!strcmp(command, "jumpfwd5"))
+    {
+        OnJumpRelative(+5.0);
+    }
+    else if (!strcmp(command, "stop"))
     {
         OnStop();
     }
-    else if ( !strcmp( command, "events" ) )
+    else if (!strcmp(command, "events"))
     {
         OnEvents();
     }
-    else if ( !strcmp( command, "save" ) )
+    else if (!strcmp(command, "save"))
     {
         OnSave();
     }
 
-
     BaseClass::OnCommand(command);
 }
 
-void CDemoPlayerDialog::ReceiveSignal(ISystemModule * module, unsigned int signal)
+void CDemoPlayerDialog::ReceiveSignal(ISystemModule *module, unsigned int signal)
 {
-    if ( !m_DemoPlayer )
+    if (!m_DemoPlayer)
         return;
 
-    if ( (module->GetSerial() == m_DemoPlayer->GetSerial() ) )
+    if (module->GetSerial() == m_DemoPlayer->GetSerial())
     {
-        switch ( signal )
+        switch (signal)
         {
-            case DIRECTOR_SIGNAL_UPDATE	:	if  ( m_DemoPlayer->IsEditMode() )
-
-                    PostMessage( m_hDemoEventsDialog->GetVPanel(), new KeyValues("UpdateCmdList"));
+            case DIRECTOR_SIGNAL_UPDATE:
+                if (m_DemoPlayer->IsEditMode() && m_hDemoEventsDialog.Get())
+                {
+                    PostMessage(m_hDemoEventsDialog->GetVPanel(), new KeyValues("UpdateCmdList"));
+                }
                 break;
 
-            case DIRECTOR_SIGNAL_LASTCMD :	if  ( m_DemoPlayer->IsEditMode() )
-                    PostMessage( m_hDemoEventsDialog->GetVPanel(), new KeyValues("UpdateLastCmd"));
+            case DIRECTOR_SIGNAL_LASTCMD:
+                if (m_DemoPlayer->IsEditMode() && m_hDemoEventsDialog.Get())
+                {
+                    PostMessage(m_hDemoEventsDialog->GetVPanel(), new KeyValues("UpdateLastCmd"));
+                }
                 break;
 
-            case DIRECTOR_SIGNAL_SHUTDOWN: m_DemoPlayer = NULL; break;	// don't use demo player anymore
+            case DIRECTOR_SIGNAL_SHUTDOWN:
+                m_DemoPlayer = NULL;
+                break;
 
-            default : 	m_System->Printf("CDemoPlayerDialog::ReceiveSignal: unknown signal %i.\n", signal ); break;
+            default:
+                if (m_System)
+                {
+                    m_System->Printf("CDemoPlayerDialog::ReceiveSignal: unknown signal %i.\n", signal);
+                }
+                break;
         }
     }
 }
 
-void CDemoPlayerDialog::DemoSelected(const char* demoname)
+void CDemoPlayerDialog::DemoSelected(const char *demoname)
 {
-    if ( !m_DemoPlayer )
+    if (!m_DemoPlayer || !m_Engine)
         return;
 
     char fullstring[270];
     sprintf(fullstring, "viewdemo \"%s\"\n", demoname);
 
     m_DemoPlayer->Stop();
-    m_Engine->Cbuf_AddText( fullstring );
+    m_Engine->Cbuf_AddText(fullstring);
 }
 
 void CDemoPlayerDialog::ButtonToggled(int state)
 {
-    if ( !m_DemoPlayer )
-        return;
-
-    m_DemoPlayer->SetMasterMode(state);
+    if (m_DemoPlayer)
+    {
+        m_DemoPlayer->SetMasterMode(state);
+    }
 }
 
 void CDemoPlayerDialog::OnStop()
 {
-    m_DemoPlayer->Stop();
-    m_Engine->Cbuf_AddText( "stopdemo\n" );
+    if (m_DemoPlayer)
+    {
+        m_DemoPlayer->Stop();
+    }
+    if (m_Engine)
+    {
+        m_Engine->Cbuf_AddText("stopdemo\n");
+    }
     Update();
 }
 
 void CDemoPlayerDialog::OnLoad()
 {
-    if ( !m_hDemoPlayerFileDialog.Get() )
+    if (!m_hDemoPlayerFileDialog.Get())
     {
-        m_hDemoPlayerFileDialog = new CDemoPlayerFileDialog( this, "DemoPlayerFileDialog" );
-        m_hDemoPlayerFileDialog->AddActionSignalTarget( this );
+        m_hDemoPlayerFileDialog = new CDemoPlayerFileDialog(this, "DemoPlayerFileDialog");
+        m_hDemoPlayerFileDialog->AddActionSignalTarget(this);
     }
     m_hDemoPlayerFileDialog->Activate();
 }
