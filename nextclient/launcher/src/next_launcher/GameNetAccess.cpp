@@ -208,8 +208,7 @@ void ApplyOfflineLease(GameNetAccessStatus& status)
         constexpr uint64_t iran_offset = 12600ULL * 10000000ULL;
         const uint64_t today_start = ((now + iran_offset) / day) * day - iran_offset;
         const int64_t deadline = static_cast<int64_t>(today_start) +
-            static_cast<int64_t>(status.days_remaining) * static_cast<int64_t>(day) +
-            static_cast<int64_t>(lifetime);
+            static_cast<int64_t>(status.days_remaining) * static_cast<int64_t>(day);
         lease.subscription_deadline = deadline <= static_cast<int64_t>(now)
             ? now : static_cast<uint64_t>(deadline);
     }

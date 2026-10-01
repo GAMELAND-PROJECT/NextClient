@@ -5,7 +5,7 @@
 // Production grace period for offline LAN and subscription expiration.
 inline constexpr bool kGameNetOneMinuteTest = false;
 inline constexpr unsigned long long kGameNetGraceSeconds =
-    kGameNetOneMinuteTest ? 60ULL : 10ULL * 86400ULL;
+    kGameNetOneMinuteTest ? 60ULL : 5ULL * 86400ULL;
 
 // Subscription list format: build tag | player name tag | expiry (YYYY/MM/DD).
 // Blank lines and lines beginning with '#' are ignored.
