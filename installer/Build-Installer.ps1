@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$SourceRoot = 'F:\CS 1.6 - AllClient',
+    [string]$SourceRoot = 'D:\Allclient',
     [string]$BuildDirectory = 'build\vs2022',
     [string]$Compiler = 'C:\Program Files\Inno Setup 7\ISCC.exe'
 )
@@ -13,7 +13,7 @@ if (-not [IO.Path]::IsPathRooted($BuildDirectory)) {
 $SourceRoot = (Resolve-Path -LiteralPath $SourceRoot).Path
 $BuildDirectory = (Resolve-Path -LiteralPath $BuildDirectory).Path
 $cache = Get-Content -LiteralPath (Join-Path $BuildDirectory 'CMakeCache.txt')
-$installSetting = @($cache | Where-Object { $_ -match '^NEXTCLIENT_INSTALL_DIR:PATH=' })
+$installSetting = @($cache | Where-Object { $_ -match '^NEXTCLIENT_INSTALL_DIR:(?:PATH|UNINITIALIZED)=' })
 if ($installSetting.Count -ne 1) { throw 'Configure NEXTCLIENT_INSTALL_DIR before packaging.' }
 $installRoot = (Resolve-Path -LiteralPath ($installSetting[0] -replace '^[^=]+=', '')).Path
 if ($installRoot -ne $SourceRoot) {

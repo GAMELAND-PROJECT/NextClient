@@ -2,7 +2,7 @@
 
 `Allclient.iss` builds one graphical Windows installer that:
 
-1. accepts either the rotating Google Apps Script code or the built-in offline code;
+1. verifies installation authorization online against the GameNet management server;
 2. installs the complete game;
 3. updates SmartEmu configuration for the chosen installation path;
 4. creates one Allclient desktop shortcut with automatic microphone detection;
