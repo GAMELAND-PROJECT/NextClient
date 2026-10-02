@@ -70,6 +70,7 @@ public:
 		std::string victim_name;
 		std::string assistant_name;
 		int killer_id;
+		int victim_id;
 		float* killer_color;
 		float* victim_color;
 		float* assistant_color;
@@ -110,19 +111,23 @@ private:
 		HSPRITE_t* sprite, int frame,
 		int x, int y, float scale,
 		int rendermode, vec3_t color, float alpha);
-	int DrawKillRaritySprite(RarityFrame type, int x, int y);
-	int DrawWeaponSprite(int index, int x, int y);
-	int DrawString(const char* text, vec3_t color, int x, int y);
+	int DrawKillRaritySprite(RarityFrame type, int x, int y, float alpha = 1.0f);
+	int DrawWeaponSprite(int index, int x, int y, float alpha = 1.0f);
+	int DrawString(const char* text, vec3_t color, int x, int y, float alpha = 1.0f);
 
-	int GetKillRaritySpriteFullWidth();
+	int GetKillRaritySpriteFullWidth(int frame = 0);
 	int GetWeaponSpriteFullWidth(int index);
 	int GetStringFullWidth(const char* text);
 
 	int GetCustomWeaponSpriteFullWidth(wpn_icon_override_t* icon);
 	int GetCustomWeaponSpriteHeight(wpn_icon_override_t* icon);
-	int DrawCustomWeaponSprite(wpn_icon_override_t* icon, int x, int y);
+	int DrawCustomWeaponSprite(wpn_icon_override_t* icon, int x, int y, float alpha = 1.0f);
 
-	std::map<uint8_t, std::string> last_player_name_;
+	struct cached_player_name_t {
+		std::string name;
+		float expire_time;
+	};
+	std::map<uint8_t, cached_player_name_t> last_player_name_;
 	void SVC_UpdateUserInfo();
 public:
 	explicit HudDeathNotice(nitroapi::NitroApiInterface* nitro_api);
