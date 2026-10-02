@@ -23,6 +23,7 @@
 #include "inspect.h"
 #include "invert_mouse.h"
 #include "recorder/GameVideoRecorder.h"
+#include "hud/ModernChat.h"
 
 using nextclient::client_mini::GameVideoRecorder;
 
@@ -954,6 +955,41 @@ static std::string GetActiveDemoOrMapName()
             }
         }
 
+        if (ModernChat::Instance().IsOpen())
+        {
+            return ModernChat::Instance().HandleKey(down, keynum, pszCurrentBinding);
+        }
+
+        if (down)
+        {
+            if (pszCurrentBinding != nullptr)
+            {
+                if (BindingEquals(pszCurrentBinding, "messagemode2"))
+                {
+                    ModernChat::Instance().Open(ModernChatMode::SayTeam);
+                    return 0;
+                }
+                if (BindingEquals(pszCurrentBinding, "messagemode"))
+                {
+                    ModernChat::Instance().Open(ModernChatMode::SayAll);
+                    return 0;
+                }
+            }
+            else
+            {
+                if (keynum == 'u' || keynum == 'U')
+                {
+                    ModernChat::Instance().Open(ModernChatMode::SayTeam);
+                    return 0;
+                }
+                if (keynum == 'y' || keynum == 'Y')
+                {
+                    ModernChat::Instance().Open(ModernChatMode::SayAll);
+                    return 0;
+                }
+            }
+        }
+
         const bool isViewingDemo = (gEngfuncs.pDemoAPI && gEngfuncs.pDemoAPI->IsPlayingback());
         if (isViewingDemo)
         {
@@ -1422,6 +1458,9 @@ static int HUD_RedrawHandler(float flTime, int iIntermission, HUD_RedrawNext nex
     if (hud_draw_value != 0.0f && !overlay_visible && g_DemoMenuVisible)
         DrawDemoMenu();
 
+    if (hud_draw_value != 0.0f && !overlay_visible && ModernChat::Instance().IsOpen())
+        ModernChat::Instance().Draw(scrW, scrH);
+
     // Render top-right Windows capture style timer widget if match demo is recording
     if (GameVideoRecorder::Instance().IsMatchDemoRecording() && !g_DemoMenuVisible)
     {
@@ -1478,6 +1517,7 @@ static int HUD_RedrawHandler(float flTime, int iIntermission, HUD_RedrawNext nex
 
 static void HUD_ResetHandler(HUD_ResetNext next)
 {
+    ModernChat::Instance().Reset();
     ClearHudTxt();
 
     next->Invoke();
@@ -1505,6 +1545,7 @@ static void HUD_ResetHandler(HUD_ResetNext next)
 
 static int HUD_VidInitHandler(HUD_VidInitNext next)
 {
+    ModernChat::Instance().VidInit();
     ClearHudTxt();
 
     next->Invoke();
@@ -1833,6 +1874,14 @@ public:
         g_Unsub.emplace_back(client_data->UserMsg_InitHUD += UserMsg_InitHUDPost);
         g_Unsub.emplace_back(client_data->UserMsg_TextMsg |= UserMsg_TextMsgHandler);
         g_Unsub.emplace_back(client_data->CL_CreateMove |= CL_CreateMoveHandler);
+
+        ModernChat::Instance().Init(nitro_api);
+        g_Unsub.emplace_back(eng()->Con_MessageMode_f |= [](const auto& /*next*/) {
+            ModernChat::Instance().Open(ModernChatMode::SayAll);
+        });
+        g_Unsub.emplace_back(eng()->Con_MessageMode2_f |= [](const auto& /*next*/) {
+            ModernChat::Instance().Open(ModernChatMode::SayTeam);
+        });
 
         // A capture transition is also an input-state boundary. Clearing once
         // here prevents held buttons and pre-capture mouse motion leaking into
