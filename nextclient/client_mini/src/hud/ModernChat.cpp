@@ -1580,134 +1580,127 @@ void ModernChat::Draw(int scrW, int scrH)
 
     const double curTime = (gEngfuncs.GetClientTime ? gEngfuncs.GetClientTime() : 0.0);
 
-    m_barW = std::min(scrW - 48, static_cast<int>(540.0f * scale + 0.5f));
-    m_barH = static_cast<int>(38.0f * scale + 0.5f);
-    m_barX = 24;
+    // Compact, sleek input bar dimensions
+    m_barW = std::min(scrW - 32, static_cast<int>(390.0f * (scale > 1.3f ? 1.15f : 1.0f)));
+    m_barH = 25;
+    m_barX = 16;
 
-    int targetBarY = scrH - static_cast<int>(180.0f * scale + 0.5f);
+    // Sits in lower-left right above the CS Health & Armor HUD
+    int targetBarY = scrH - 82;
+
+    int slideOffsetY = 0;
+    if (IsOpen())
+    {
+        float enterProgress = std::min(1.0f, static_cast<float>((curTime - m_openTime) / 0.12));
+        float ease = 1.0f - std::pow(1.0f - enterProgress, 3.0f);
+        slideOffsetY = static_cast<int>((1.0f - ease) * 16.0f);
+        m_barY = targetBarY + slideOffsetY;
+    }
 
     // =========================================================================
     // PART A: DYNAMIC RECENT CHAT FEED (سیستم نمایش دو طبقه‌ای مدرن پیام‌ها)
-    // طبقه پایین: پیام‌های سرور و دستورات با استایل مشکی مات (Stealth Black)
-    // طبقه بالا: پیام‌های تیمی و همگانی بازیکنان با کادرهای سبز زمردی و آبسیدین
+    // طبقه پایین: پیام‌های سرور و دستورات با استایل سولار برنز و جت بلک
+    // طبقه بالا: پیام‌های تیمی و همگانی بازیکنان با کادرهای شفاف و باریک
     // =========================================================================
-    int currentMsgBottomY = targetBarY - 8;
+    int currentMsgBottomY = IsOpen() ? (m_barY - 5) : (scrH - 62);
     constexpr double kMessageLifetime = 8.0;
 
     // -------------------------------------------------------------------------
     // Tier 1: LOWER TIER - SERVER MESSAGES & COMMANDS (پایین‌تر از تکست‌های تیمی و آل)
     // -------------------------------------------------------------------------
     int drawnServerCount = 0;
-    for (int i = static_cast<int>(m_messages.size()) - 1; i >= 0 && drawnServerCount < 5; --i)
+    for (int i = static_cast<int>(m_messages.size()) - 1; i >= 0 && drawnServerCount < 4; --i)
     {
         const auto& m = m_messages[i];
         if (!m.isServer && !m.isCommand)
             continue;
 
         double age = curTime - m.timestamp;
-        int alpha = 245;
+        int alpha = 240;
         if (!IsOpen())
         {
             if (age > kMessageLifetime)
                 continue;
             if (age > 6.0)
-                alpha = static_cast<int>(245.0f * (1.0f - static_cast<float>(age - 6.0) / 2.0f));
+                alpha = static_cast<int>(240.0f * (1.0f - static_cast<float>(age - 6.0) / 2.0f));
         }
         if (alpha <= 6)
             continue;
 
-        float enterT = std::min(1.0f, static_cast<float>(age / 0.20f));
+        float enterT = std::min(1.0f, static_cast<float>(age / 0.16f));
         float slideEase = 1.0f - std::pow(1.0f - enterT, 3.0f);
-        int slideOffsetX = static_cast<int>((1.0f - slideEase) * -38.0f);
+        int slideOffsetX = static_cast<int>((1.0f - slideEase) * -24.0f);
 
-        int lineH = static_cast<int>(24.0f * scale + 0.5f);
-        currentMsgBottomY -= (lineH + 4);
+        int lineH = 19;
+        currentMsgBottomY -= (lineH + 2);
 
         int prefixW = 0, senderW = 0, textW = 0, dummyH = 0;
         if (!m.prefix.empty()) GetTextSize(m.prefix.c_str(), prefixW, dummyH);
         if (!m.sender.empty()) GetTextSize(m.sender.c_str(), senderW, dummyH);
         GetTextSize(m.text.c_str(), textW, dummyH);
 
-        int totalContentW = (m.prefix.empty() ? 0 : (prefixW + 14)) +
-                            (m.sender.empty() ? 0 : (senderW + 18)) +
-                            textW + 30;
-        int cardW = std::min(scrW - 48, std::max(static_cast<int>(260.0f * scale), totalContentW));
+        int totalContentW = (m.prefix.empty() ? 0 : (prefixW + 10)) +
+                            (m.sender.empty() ? 0 : (senderW + 12)) +
+                            textW + 18;
+        int cardW = std::min(scrW - 32, std::max(110, totalContentW));
         int cardX = m_barX + slideOffsetX;
 
-        // 1. Soft Outer Ambient Drop-Shadow
-        DrawBox(cardX - 1, currentMsgBottomY - 1, cardW + 2, lineH + 2, 0, 0, 0, (alpha * 160) / 255);
+        // 1. Soft Ambient Drop-Shadow (compact)
+        DrawBox(cardX - 1, currentMsgBottomY - 1, cardW + 2, lineH + 2, 0, 0, 0, (alpha * 120) / 255);
 
         if (m.isServer)
         {
-            // =================================================================
-            // DISTINCT SERVER THEME: Radiant Cyber Amber / Solar Gold Glass
-            // =================================================================
-            // 2. Deep Solar Slate Glass Body
-            DrawBox(cardX, currentMsgBottomY, cardW, lineH, 26, 18, 8, (alpha * 235) / 255);
+            // Solar Bronze Glass (Clean, semi-transparent, non-intrusive)
+            DrawBox(cardX, currentMsgBottomY, cardW, lineH, 22, 15, 8, (alpha * 175) / 255);
+            DrawBox(cardX, currentMsgBottomY, cardW, 1, 255, 175, 35, (alpha * 190) / 255);
+            DrawBox(cardX, currentMsgBottomY + lineH - 1, cardW, 1, 65, 42, 16, (alpha * 130) / 255);
+            DrawBox(cardX + cardW - 1, currentMsgBottomY, 1, lineH, 75, 50, 20, (alpha * 100) / 255);
+            DrawBox(cardX, currentMsgBottomY, 2, lineH, 255, 185, 45, alpha);
 
-            // 3. Top Specular Gold Hairline
-            DrawBox(cardX, currentMsgBottomY, cardW, 1, 255, 175, 35, (alpha * 215) / 255);
-
-            // 4. Bottom Deep Bronze Accent
-            DrawBox(cardX, currentMsgBottomY + lineH - 1, cardW, 1, 65, 42, 16, (alpha * 180) / 255);
-
-            // 5. Right Warm Bronze Edge
-            DrawBox(cardX + cardW - 1, currentMsgBottomY, 1, lineH, 75, 50, 20, (alpha * 130) / 255);
-
-            // 6. Left Indicator Pillar (Luminous Solar Amber)
-            DrawBox(cardX, currentMsgBottomY, 3, lineH, 255, 185, 45, alpha);
-
-            // 7. Base Progress Line (Amber Gold)
             if (!IsOpen())
             {
                 float remaining = std::clamp(1.0f - static_cast<float>(age / kMessageLifetime), 0.0f, 1.0f);
                 int progW = static_cast<int>((cardW - 4) * remaining);
                 if (progW > 0)
                 {
-                    DrawBox(cardX + 2, currentMsgBottomY + lineH - 2, progW, 1, 255, 195, 60, (alpha * 180) / 255);
+                    DrawBox(cardX + 2, currentMsgBottomY + lineH - 1, progW, 1, 255, 195, 60, (alpha * 170) / 255);
                 }
             }
 
-            int posX = cardX + 10;
+            int posX = cardX + 7;
             int textY = currentMsgBottomY + (lineH - 13) / 2;
 
-            // 8. Solar Bronze Badge Pill
             if (!m.prefix.empty())
             {
-                int badgePad = 5;
+                int badgePad = 3;
                 int badgeW = prefixW + (badgePad * 2);
-                int badgeH = lineH - 6;
-                int badgeY = currentMsgBottomY + 3;
+                int badgeH = lineH - 4;
+                int badgeY = currentMsgBottomY + 2;
 
-                DrawBox(posX, badgeY, badgeW, badgeH, 75, 45, 10, (alpha * 230) / 255);
-                DrawBox(posX, badgeY, badgeW, 1, 255, 175, 35, (alpha * 240) / 255);
-                DrawBox(posX, badgeY + badgeH - 1, badgeW, 1, 255, 175, 35, (alpha * 150) / 255);
+                DrawBox(posX, badgeY, badgeW, badgeH, 65, 38, 8, (alpha * 200) / 255);
+                DrawBox(posX, badgeY, badgeW, 1, 255, 175, 35, (alpha * 220) / 255);
 
-                DrawTextWithShadow(posX + badgePad, textY, m.prefix.c_str(), 1.0f, 0.84f, 0.35f); // Luminous Gold text
-                posX += badgeW + 8;
+                DrawTextWithShadow(posX + badgePad, textY, m.prefix.c_str(), 1.0f, 0.84f, 0.35f);
+                posX += badgeW + 6;
             }
 
             if (!m.sender.empty())
             {
                 DrawTextWithShadow(posX, textY, m.sender.c_str(), 1.0f, 0.88f, 0.65f);
-                posX += senderW + 2;
+                posX += senderW + 1;
                 DrawTextWithShadow(posX, textY, ":", 0.90f, 0.75f, 0.40f);
-                posX += 8;
+                posX += 6;
             }
 
-            // 9. Message Text in Warm Crystal Ivory-White
             DrawTextWithShadow(posX, textY, m.text.c_str(), 1.0f, 0.98f, 0.94f);
         }
-        else // m.isCommand (Player Commands like /r, /rs, /top15)
+        else // Command messages
         {
-            // =================================================================
-            // STEALTH COMMAND THEME: Matte Jet-Black Glass
-            // =================================================================
-            DrawBox(cardX, currentMsgBottomY, cardW, lineH, 5, 5, 8, (alpha * 245) / 255);
-            DrawBox(cardX, currentMsgBottomY, cardW, 1, 75, 80, 90, (alpha * 160) / 255);
-            DrawBox(cardX, currentMsgBottomY + lineH - 1, cardW, 1, 30, 32, 38, (alpha * 180) / 255);
-            DrawBox(cardX + cardW - 1, currentMsgBottomY, 1, lineH, 45, 48, 55, (alpha * 130) / 255);
-            DrawBox(cardX, currentMsgBottomY, 3, lineH, 130, 135, 145, alpha);
+            // Stealth Jet Glass
+            DrawBox(cardX, currentMsgBottomY, cardW, lineH, 6, 6, 9, (alpha * 175) / 255);
+            DrawBox(cardX, currentMsgBottomY, cardW, 1, 75, 80, 90, (alpha * 140) / 255);
+            DrawBox(cardX, currentMsgBottomY + lineH - 1, cardW, 1, 30, 32, 38, (alpha * 130) / 255);
+            DrawBox(cardX, currentMsgBottomY, 2, lineH, 130, 135, 145, alpha);
 
             if (!IsOpen())
             {
@@ -1715,33 +1708,33 @@ void ModernChat::Draw(int scrW, int scrH)
                 int progW = static_cast<int>((cardW - 4) * remaining);
                 if (progW > 0)
                 {
-                    DrawBox(cardX + 2, currentMsgBottomY + lineH - 2, progW, 1, 95, 100, 110, (alpha * 180) / 255);
+                    DrawBox(cardX + 2, currentMsgBottomY + lineH - 1, progW, 1, 95, 100, 110, (alpha * 160) / 255);
                 }
             }
 
-            int posX = cardX + 10;
+            int posX = cardX + 7;
             int textY = currentMsgBottomY + (lineH - 13) / 2;
 
             if (!m.prefix.empty())
             {
-                int badgePad = 4;
+                int badgePad = 3;
                 int badgeW = prefixW + (badgePad * 2);
-                int badgeH = lineH - 6;
-                int badgeY = currentMsgBottomY + 3;
+                int badgeH = lineH - 4;
+                int badgeY = currentMsgBottomY + 2;
 
-                DrawBox(posX, badgeY, badgeW, badgeH, 20, 20, 26, (alpha * 230) / 255);
-                DrawBox(posX, badgeY, badgeW, 1, 70, 75, 85, (alpha * 240) / 255);
+                DrawBox(posX, badgeY, badgeW, badgeH, 20, 20, 26, (alpha * 200) / 255);
+                DrawBox(posX, badgeY, badgeW, 1, 70, 75, 85, (alpha * 220) / 255);
 
                 DrawTextWithShadow(posX + badgePad, textY, m.prefix.c_str(), 0.85f, 0.88f, 0.92f);
-                posX += badgeW + 8;
+                posX += badgeW + 6;
             }
 
             if (!m.sender.empty())
             {
                 DrawTextWithShadow(posX, textY, m.sender.c_str(), 0.85f, 0.88f, 0.92f);
-                posX += senderW + 2;
+                posX += senderW + 1;
                 DrawTextWithShadow(posX, textY, ":", 0.70f, 0.73f, 0.78f);
-                posX += 8;
+                posX += 6;
             }
 
             DrawTextWithShadow(posX, textY, m.text.c_str(), 0.98f, 0.98f, 1.0f);
@@ -1752,71 +1745,69 @@ void ModernChat::Draw(int scrW, int scrH)
 
     if (drawnServerCount > 0)
     {
-        currentMsgBottomY -= 4; // Distinct visual tier separator gap
+        currentMsgBottomY -= 3;
     }
 
     // -------------------------------------------------------------------------
     // Tier 2: UPPER TIER - PLAYER CHAT MESSAGES (چت‌های تیمی و همگانی بازیکنان)
     // -------------------------------------------------------------------------
     int drawnPlayerCount = 0;
-    for (int i = static_cast<int>(m_messages.size()) - 1; i >= 0 && drawnPlayerCount < 6; --i)
+    for (int i = static_cast<int>(m_messages.size()) - 1; i >= 0 && drawnPlayerCount < 5; --i)
     {
         const auto& m = m_messages[i];
         if (m.isServer || m.isCommand)
             continue;
 
         double age = curTime - m.timestamp;
-        int alpha = 245;
+        int alpha = 240;
         if (!IsOpen())
         {
             if (age > kMessageLifetime)
                 continue;
             if (age > 6.0)
-                alpha = static_cast<int>(245.0f * (1.0f - static_cast<float>(age - 6.0) / 2.0f));
+                alpha = static_cast<int>(240.0f * (1.0f - static_cast<float>(age - 6.0) / 2.0f));
         }
         if (alpha <= 6)
             continue;
 
-        float enterT = std::min(1.0f, static_cast<float>(age / 0.20f));
+        float enterT = std::min(1.0f, static_cast<float>(age / 0.16f));
         float slideEase = 1.0f - std::pow(1.0f - enterT, 3.0f);
-        int slideOffsetX = static_cast<int>((1.0f - slideEase) * -38.0f);
+        int slideOffsetX = static_cast<int>((1.0f - slideEase) * -24.0f);
 
-        int lineH = static_cast<int>(24.0f * scale + 0.5f);
-        currentMsgBottomY -= (lineH + 4);
+        int lineH = 19;
+        currentMsgBottomY -= (lineH + 2);
 
         int prefixW = 0, senderW = 0, textW = 0, dummyH = 0;
         if (!m.prefix.empty()) GetTextSize(m.prefix.c_str(), prefixW, dummyH);
         if (!m.sender.empty()) GetTextSize(m.sender.c_str(), senderW, dummyH);
         GetTextSize(m.text.c_str(), textW, dummyH);
 
-        int totalContentW = (m.prefix.empty() ? 0 : (prefixW + 14)) +
-                            (m.sender.empty() ? 0 : (senderW + 18)) +
-                            textW + 30;
-        int cardW = std::min(scrW - 48, std::max(static_cast<int>(260.0f * scale), totalContentW));
+        int totalContentW = (m.prefix.empty() ? 0 : (prefixW + 10)) +
+                            (m.sender.empty() ? 0 : (senderW + 12)) +
+                            textW + 18;
+        int cardW = std::min(scrW - 32, std::max(110, totalContentW));
         int cardX = m_barX + slideOffsetX;
 
-        // 1. Soft Outer Ambient Drop-Shadow
-        DrawBox(cardX - 1, currentMsgBottomY - 1, cardW + 2, lineH + 2, 0, 0, 0, (alpha * 140) / 255);
+        // 1. Soft Drop-Shadow
+        DrawBox(cardX - 1, currentMsgBottomY - 1, cardW + 2, lineH + 2, 0, 0, 0, (alpha * 110) / 255);
 
         if (m.isTeam)
         {
-            // Emerald Glass Body for Team Chat
-            DrawBox(cardX, currentMsgBottomY, cardW, lineH, 10, 28, 18, (alpha * 225) / 255);
-            DrawBox(cardX, currentMsgBottomY, cardW, 1, 46, 213, 115, (alpha * 220) / 255);
-            DrawBox(cardX, currentMsgBottomY + lineH - 1, cardW, 1, 46, 213, 115, (alpha * 120) / 255);
-            DrawBox(cardX + cardW - 1, currentMsgBottomY, 1, lineH, 46, 213, 115, (alpha * 150) / 255);
-            DrawBox(cardX, currentMsgBottomY, 3, lineH, 46, 213, 115, alpha);
+            // Emerald Glass Body
+            DrawBox(cardX, currentMsgBottomY, cardW, lineH, 8, 22, 14, (alpha * 175) / 255);
+            DrawBox(cardX, currentMsgBottomY, cardW, 1, 46, 213, 115, (alpha * 190) / 255);
+            DrawBox(cardX, currentMsgBottomY + lineH - 1, cardW, 1, 46, 213, 115, (alpha * 90) / 255);
+            DrawBox(cardX, currentMsgBottomY, 2, lineH, 46, 213, 115, alpha);
         }
         else
         {
-            // Frosted Obsidian Glass Body for All Chat
-            DrawBox(cardX, currentMsgBottomY, cardW, lineH, 12, 16, 26, (alpha * 220) / 255);
-            DrawBox(cardX, currentMsgBottomY, cardW, 1, 255, 255, 255, (alpha * 35) / 255);
-            DrawBox(cardX, currentMsgBottomY, 3, lineH,
+            // Frosted Obsidian Glass Body
+            DrawBox(cardX, currentMsgBottomY, cardW, lineH, 10, 14, 22, (alpha * 170) / 255);
+            DrawBox(cardX, currentMsgBottomY, cardW, 1, 255, 255, 255, (alpha * 30) / 255);
+            DrawBox(cardX, currentMsgBottomY, 2, lineH,
                     static_cast<int>(m.r * 255), static_cast<int>(m.g * 255), static_cast<int>(m.b * 255), alpha);
         }
 
-        // Base progress line
         if (!IsOpen())
         {
             float remaining = std::clamp(1.0f - static_cast<float>(age / kMessageLifetime), 0.0f, 1.0f);
@@ -1826,53 +1817,50 @@ void ModernChat::Draw(int scrW, int scrH)
                 int laserR = m.isTeam ? 46 : static_cast<int>(m.r * 255);
                 int laserG = m.isTeam ? 213 : static_cast<int>(m.g * 255);
                 int laserB = m.isTeam ? 115 : static_cast<int>(m.b * 255);
-                DrawBox(cardX + 2, currentMsgBottomY + lineH - 2, progW, 1,
-                        laserR, laserG, laserB, (alpha * 180) / 255);
+                DrawBox(cardX + 2, currentMsgBottomY + lineH - 1, progW, 1,
+                        laserR, laserG, laserB, (alpha * 160) / 255);
             }
         }
 
-        int posX = cardX + 10;
+        int posX = cardX + 7;
         int textY = currentMsgBottomY + (lineH - 13) / 2;
 
-        // Channel Badge Pill
         if (!m.prefix.empty())
         {
-            int badgePad = 4;
+            int badgePad = 3;
             int badgeW = prefixW + (badgePad * 2);
-            int badgeH = lineH - 6;
-            int badgeY = currentMsgBottomY + 3;
+            int badgeH = lineH - 4;
+            int badgeY = currentMsgBottomY + 2;
 
-            int bgR = m.isTeam ? 20 : static_cast<int>(m.r * 80);
-            int bgG = m.isTeam ? 85 : static_cast<int>(m.g * 80);
-            int bgB = m.isTeam ? 45 : static_cast<int>(m.b * 80);
+            int bgR = m.isTeam ? 18 : static_cast<int>(m.r * 60);
+            int bgG = m.isTeam ? 75 : static_cast<int>(m.g * 60);
+            int bgB = m.isTeam ? 38 : static_cast<int>(m.b * 60);
 
             int borderR = m.isTeam ? 46 : static_cast<int>(m.r * 255);
             int borderG = m.isTeam ? 213 : static_cast<int>(m.g * 255);
             int borderB = m.isTeam ? 115 : static_cast<int>(m.b * 255);
 
-            DrawBox(posX, badgeY, badgeW, badgeH, bgR, bgG, bgB, (alpha * 190) / 255);
-            DrawBox(posX, badgeY, badgeW, 1, borderR, borderG, borderB, (alpha * 220) / 255);
+            DrawBox(posX, badgeY, badgeW, badgeH, bgR, bgG, bgB, (alpha * 180) / 255);
+            DrawBox(posX, badgeY, badgeW, 1, borderR, borderG, borderB, (alpha * 200) / 255);
 
             float prefixR = m.isTeam ? 0.40f : 0.90f;
             float prefixG = m.isTeam ? 1.0f : 0.95f;
             float prefixB = m.isTeam ? 0.60f : 1.0f;
             DrawTextWithShadow(posX + badgePad, textY, m.prefix.c_str(), prefixR, prefixG, prefixB);
-            posX += badgeW + 8;
+            posX += badgeW + 6;
         }
 
-        // Sender Name
         if (!m.sender.empty())
         {
             float senderR = m.isTeam ? 0.35f : m.r;
             float senderG = m.isTeam ? 1.0f : m.g;
             float senderB = m.isTeam ? 0.55f : m.b;
             DrawTextWithShadow(posX, textY, m.sender.c_str(), senderR, senderG, senderB);
-            posX += senderW + 2;
+            posX += senderW + 1;
             DrawTextWithShadow(posX, textY, ":", 0.85f, 0.88f, 0.92f);
-            posX += 8;
+            posX += 6;
         }
 
-        // Message Content
         const char* pDrawMsg = m.text.c_str();
         std::string safeRenderText;
         if (!m.sender.empty())
@@ -1911,21 +1899,15 @@ void ModernChat::Draw(int scrW, int scrH)
     if (!IsOpen())
         return;
 
-    // Fluid ease-out entrance animation (slides up smoothly)
-    float enterProgress = std::min(1.0f, static_cast<float>((curTime - m_openTime) / 0.14));
-    float ease = 1.0f - std::pow(1.0f - enterProgress, 3.0f);
-    int slideOffsetY = static_cast<int>((1.0f - ease) * 24.0f);
-    m_barY = targetBarY + slideOffsetY;
-
     // Dynamic breathing neon pulse for borders and badges
     const float pulse = static_cast<float>(0.5 + 0.5 * std::sin(curTime * 4.2));
     const int pulseAlpha = 190 + static_cast<int>(65.0f * pulse);
 
     // 1. Soft Outer Drop-Shadow
-    DrawBox(m_barX - 2, m_barY - 2, m_barW + 4, m_barH + 4, 0, 0, 0, 160);
+    DrawBox(m_barX - 1, m_barY - 1, m_barW + 2, m_barH + 2, 0, 0, 0, 140);
 
-    // 2. Obsidian Glass Body
-    DrawBox(m_barX, m_barY, m_barW, m_barH, 14, 18, 26, 235);
+    // 2. Obsidian Glass Body (sleek, compact)
+    DrawBox(m_barX, m_barY, m_barW, m_barH, 12, 15, 22, 225);
 
     // 3. Mode-Specific Breathing Header Accent Line
     const bool isTeam = (m_mode == ModernChatMode::SayTeam);
@@ -1939,27 +1921,28 @@ void ModernChat::Draw(int scrW, int scrH)
     }
 
     // 4. Subtle Border Hairlines
-    DrawBox(m_barX, m_barY + m_barH - 1, m_barW, 1, 255, 255, 255, 25);
-    DrawBox(m_barX, m_barY, 1, m_barH, 255, 255, 255, 25);
-    DrawBox(m_barX + m_barW - 1, m_barY, 1, m_barH, 255, 255, 255, 25);
+    DrawBox(m_barX, m_barY + m_barH - 1, m_barW, 1, 255, 255, 255, 20);
+    DrawBox(m_barX, m_barY, 1, m_barH, 255, 255, 255, 20);
+    DrawBox(m_barX + m_barW - 1, m_barY, 1, m_barH, 255, 255, 255, 20);
 
     // 5. Mode Badge with breathing glow:
-    int badgeW = static_cast<int>(82.0f * scale + 0.5f);
-    int badgeH = m_barH - 10;
-    int badgeX = m_barX + 6;
-    int badgeY = m_barY + 5;
+    int badgeW = 66;
+    int badgeH = m_barH - 6;
+    int badgeX = m_barX + 4;
+    int badgeY = m_barY + 3;
+    int badgeTextY = badgeY + (badgeH - 13) / 2;
 
     if (isTeam)
     {
-        DrawBox(badgeX, badgeY, badgeW, badgeH, 25, 110, 60, 200);
+        DrawBox(badgeX, badgeY, badgeW, badgeH, 20, 85, 45, 190);
         DrawBox(badgeX, badgeY, badgeW, 1, 46, 213, 115, pulseAlpha);
-        DrawTextWithShadow(badgeX + 11, badgeY + (badgeH - 13) / 2, "[ TEAM ]", 0.35f, 1.0f, 0.55f);
+        DrawTextWithShadow(badgeX + 8, badgeTextY, "[ TEAM ]", 0.35f, 1.0f, 0.55f);
     }
     else
     {
-        DrawBox(badgeX, badgeY, badgeW, badgeH, 0, 105, 145, 200);
+        DrawBox(badgeX, badgeY, badgeW, badgeH, 0, 85, 120, 190);
         DrawBox(badgeX, badgeY, badgeW, 1, 0, 220, 255, pulseAlpha);
-        DrawTextWithShadow(badgeX + 15, badgeY + (badgeH - 13) / 2, "[ ALL ]", 0.3f, 0.95f, 1.0f);
+        DrawTextWithShadow(badgeX + 11, badgeTextY, "[ ALL ]", 0.3f, 0.95f, 1.0f);
     }
 
     // 6. Player Identity Tag:
@@ -1970,26 +1953,26 @@ void ModernChat::Draw(int scrW, int scrH)
         GetTextSize(pPlayerName, nameW, dummyH);
     }
 
-    int inputX = badgeX + badgeW + 8;
+    int inputX = badgeX + badgeW + 6;
     int inputY = m_barY + (m_barH - 13) / 2;
 
     if (nameW > 0)
     {
         DrawTextWithShadow(inputX, inputY, pPlayerName, 1.0f, 0.82f, 0.25f); // Esports gold name
-        inputX += nameW + 2;
+        inputX += nameW + 1;
         DrawTextWithShadow(inputX, inputY, ":", 0.85f, 0.85f, 0.85f);
-        inputX += 8;
+        inputX += 6;
     }
 
     // 7. Input Text Field with smooth horizontal auto-scroll across full width
-    int inputMaxW = (m_barX + m_barW) - inputX - 16;
+    int inputMaxW = (m_barX + m_barW) - inputX - 10;
     const char* pDrawText = m_buffer.c_str();
     std::string visibleBuffer;
     int textW = 0, textH = 0;
 
     if (m_buffer.empty())
     {
-        DrawTextWithShadow(inputX, inputY, "Say something...", 0.52f, 0.56f, 0.64f);
+        DrawTextWithShadow(inputX, inputY, "Say something...", 0.48f, 0.52f, 0.60f);
     }
     else
     {
@@ -2015,29 +1998,29 @@ void ModernChat::Draw(int scrW, int scrH)
     if (blink)
     {
         int curX = inputX + textW + 2;
-        int curY = m_barY + 8;
+        int curY = m_barY + 5;
         if (isTeam)
-            DrawBox(curX, curY, 2, m_barH - 16, 46, 213, 115, 240);
+            DrawBox(curX, curY, 2, m_barH - 10, 46, 213, 115, 240);
         else
-            DrawBox(curX, curY, 2, m_barH - 16, 0, 220, 255, 240);
+            DrawBox(curX, curY, 2, m_barH - 10, 0, 220, 255, 240);
     }
 
     // 9. Dynamic Character Progress Micro-Bar under Input Field
     float charRatio = std::clamp(static_cast<float>(m_buffer.size()) / 120.0f, 0.0f, 1.0f);
-    int charBarW = static_cast<int>((m_barW - 12) * charRatio);
+    int charBarW = static_cast<int>((m_barW - 8) * charRatio);
     int charBarR = (m_buffer.size() > 100) ? 255 : (m_buffer.size() > 70 ? 255 : (isTeam ? 46 : 0));
     int charBarG = (m_buffer.size() > 100) ? 65  : (m_buffer.size() > 70 ? 190 : (isTeam ? 213 : 220));
     int charBarB = (m_buffer.size() > 100) ? 65  : (m_buffer.size() > 70 ? 40  : (isTeam ? 115 : 255));
     if (charBarW > 0)
     {
-        DrawBox(m_barX + 6, m_barY + m_barH - 2, charBarW, 1, charBarR, charBarG, charBarB, pulseAlpha);
+        DrawBox(m_barX + 4, m_barY + m_barH - 1, charBarW, 1, charBarR, charBarG, charBarB, pulseAlpha);
     }
 
     // 10. Modern Dynamic Helper Ribbon Below
-    int helpY = m_barY + m_barH + 4;
-    int helpH = 18;
-    DrawBox(m_barX, helpY, m_barW, helpH, 10, 14, 20, 200);
-    DrawBox(m_barX, helpY, m_barW, 1, 255, 255, 255, 20);
+    int helpY = m_barY + m_barH + 2;
+    int helpH = 15;
+    DrawBox(m_barX, helpY, m_barW, helpH, 8, 11, 16, 185);
+    DrawBox(m_barX, helpY, m_barW, 1, 255, 255, 255, 18);
 
     // Live character counter e.g. [ 12 / 120 ]
     char countBuf[32]{};
@@ -2045,12 +2028,12 @@ void ModernChat::Draw(int scrW, int scrH)
     int countW = 0;
     GetTextSize(countBuf, countW, dummyH);
 
-    DrawTextWithShadow(m_barX + 10, helpY + 3,
-        "[Enter / Left-Click] Send   *   [Esc / Right-Click] Cancel   *   [Tab] Switch Channel",
-        0.72f, 0.76f, 0.84f);
+    DrawTextWithShadow(m_barX + 8, helpY + 1,
+        "[Enter] Send   *   [Esc] Cancel   *   [Tab] Switch Channel",
+        0.70f, 0.74f, 0.82f);
 
     float countR = (m_buffer.size() > 100) ? 1.0f : 0.50f;
     float countG = (m_buffer.size() > 100) ? 0.35f : 0.75f;
     float countB = (m_buffer.size() > 100) ? 0.35f : 0.90f;
-    DrawTextWithShadow(m_barX + m_barW - countW - 10, helpY + 3, countBuf, countR, countG, countB);
+    DrawTextWithShadow(m_barX + m_barW - countW - 8, helpY + 1, countBuf, countR, countG, countB);
 }
