@@ -205,7 +205,7 @@ void ModernChat::ToggleMode()
         m_mode = ModernChatMode::SayAll;
 }
 
-void ModernChat::AddChatMessage(int clientIndex, const std::string& prefix, const std::string& sender, const std::string& text, float r, float g, float b)
+void ModernChat::AddChatMessage(int clientIndex, const std::string& prefix, const std::string& sender, const std::string& text, float r, float g, float b, bool isTeam)
 {
     if (text.empty() && sender.empty())
         return;
@@ -218,6 +218,7 @@ void ModernChat::AddChatMessage(int clientIndex, const std::string& prefix, cons
     msg.r = r;
     msg.g = g;
     msg.b = b;
+    msg.isTeam = isTeam;
     msg.timestamp = (gEngfuncs.GetClientTime ? gEngfuncs.GetClientTime() : 0.0);
 
     m_messages.push_back(std::move(msg));
@@ -229,43 +230,43 @@ void ModernChat::AddChatMessage(int clientIndex, const std::string& prefix, cons
 
 void ModernChat::OnSayText(int clientIndex, const std::string& str1, const std::string& str2, const std::string& str3, const std::string& /*str4*/)
 {
+    bool isTeam = false;
     float r = 0.98f, g = 0.82f, b = 0.25f; // Esports Gold default
     std::string prefix = "[ALL]";
     std::string sender = str2;
     std::string msg = str3;
 
-    // Check player team from engine extra info if valid
-    if (clientIndex >= 1 && clientIndex <= 32 && g_NitroApi != nullptr)
+    if (str1.find("_T") != std::string::npos || str1.find("Terrorist") != std::string::npos ||
+        str1.find("_CT") != std::string::npos || str1.find("Counter") != std::string::npos)
     {
-        auto* clientData = g_NitroApi->GetClientData();
-        if (clientData != nullptr)
-        {
-            int team = clientData->g_PlayerExtraInfo[clientIndex].teamnumber;
-            if (team == 1) // TEAM_TERRORIST
-            {
-                r = 1.0f; g = 0.28f; b = 0.32f; // Vibrant Phoenix Crimson
-            }
-            else if (team == 2) // TEAM_CT
-            {
-                r = 0.18f; g = 0.76f; b = 1.0f; // Vibrant Sky Azure
-            }
-        }
-    }
-
-    if (str1.find("_T") != std::string::npos || str1.find("Terrorist") != std::string::npos)
-    {
-        r = 1.0f; g = 0.28f; b = 0.32f; // Terrorist vibrant red
+        isTeam = true;
         prefix = "[TEAM]";
-    }
-    else if (str1.find("_CT") != std::string::npos || str1.find("Counter") != std::string::npos)
-    {
-        r = 0.18f; g = 0.76f; b = 1.0f; // CT vibrant sky blue
-        prefix = "[TEAM]";
+        r = 0.18f; g = 0.95f; b = 0.45f; // Vibrant Emerald Green for team chat as requested!
     }
     else if (str1.find("Spec") != std::string::npos)
     {
         r = 0.92f; g = 0.80f; b = 0.30f; // Spectator cyber gold
         prefix = "[SPEC]";
+    }
+    else
+    {
+        // Check player team for All Chat
+        if (clientIndex >= 1 && clientIndex <= 32 && g_NitroApi != nullptr)
+        {
+            auto* clientData = g_NitroApi->GetClientData();
+            if (clientData != nullptr)
+            {
+                int team = clientData->g_PlayerExtraInfo[clientIndex].teamnumber;
+                if (team == 1) // TEAM_TERRORIST
+                {
+                    r = 1.0f; g = 0.28f; b = 0.32f; // Vibrant Phoenix Crimson
+                }
+                else if (team == 2) // TEAM_CT
+                {
+                    r = 0.18f; g = 0.76f; b = 1.0f; // Vibrant Sky Azure
+                }
+            }
+        }
     }
 
     if (str1.find("Dead") != std::string::npos || str1.find("*DEAD*") != std::string::npos)
@@ -301,36 +302,48 @@ void ModernChat::OnSayText(int clientIndex, const std::string& str1, const std::
         }
     }
 
-    AddChatMessage(clientIndex, prefix, sender, msg, r, g, b);
+    AddChatMessage(clientIndex, prefix, sender, msg, r, g, b, isTeam);
 }
 
 void ModernChat::OnLocalPlayerSend(ModernChatMode mode, const std::string& message)
 {
     const char* myName = (gEngfuncs.pfnGetCvarString != nullptr ? gEngfuncs.pfnGetCvarString("name") : "Me");
-    std::string prefix = (mode == ModernChatMode::SayTeam) ? "[TEAM]" : "[ALL]";
-    float r = (mode == ModernChatMode::SayTeam) ? 0.25f : 0.0f;
-    float g = (mode == ModernChatMode::SayTeam) ? 0.95f : 0.85f;
-    float b = (mode == ModernChatMode::SayTeam) ? 0.55f : 1.0f;
+    const bool isTeam = (mode == ModernChatMode::SayTeam);
+    std::string prefix = isTeam ? "[TEAM]" : "[ALL]";
 
-    cl_entity_t* localPlayer = (gEngfuncs.GetLocalPlayer ? gEngfuncs.GetLocalPlayer() : nullptr);
-    if (localPlayer != nullptr && g_NitroApi != nullptr)
+    float r = 0.0f;
+    float g = 0.85f;
+    float b = 1.0f;
+
+    if (isTeam)
     {
-        auto* clientData = g_NitroApi->GetClientData();
-        if (clientData != nullptr && localPlayer->index >= 1 && localPlayer->index <= 32)
+        // When sending with 'u', team chat is strictly vibrant Emerald Green!
+        r = 0.18f;
+        g = 0.95f;
+        b = 0.45f;
+    }
+    else
+    {
+        cl_entity_t* localPlayer = (gEngfuncs.GetLocalPlayer ? gEngfuncs.GetLocalPlayer() : nullptr);
+        if (localPlayer != nullptr && g_NitroApi != nullptr)
         {
-            int team = clientData->g_PlayerExtraInfo[localPlayer->index].teamnumber;
-            if (team == 1) // Terrorist
+            auto* clientData = g_NitroApi->GetClientData();
+            if (clientData != nullptr && localPlayer->index >= 1 && localPlayer->index <= 32)
             {
-                r = 1.0f; g = 0.28f; b = 0.32f;
-            }
-            else if (team == 2) // CT
-            {
-                r = 0.18f; g = 0.76f; b = 1.0f;
+                int team = clientData->g_PlayerExtraInfo[localPlayer->index].teamnumber;
+                if (team == 1) // Terrorist
+                {
+                    r = 1.0f; g = 0.28f; b = 0.32f;
+                }
+                else if (team == 2) // CT
+                {
+                    r = 0.18f; g = 0.76f; b = 1.0f;
+                }
             }
         }
     }
 
-    AddChatMessage(0, prefix, (myName && *myName) ? myName : "Me", message, r, g, b);
+    AddChatMessage(0, prefix, (myName && *myName) ? myName : "Me", message, r, g, b, isTeam);
 }
 
 int ModernChat::HandleKey(int down, int keynum, const char* /*pszCurrentBinding*/)
@@ -524,15 +537,29 @@ void ModernChat::Draw(int scrW, int scrH)
         // 1. Soft Outer Ambient Drop-Shadow
         DrawBox(cardX - 1, currentMsgBottomY - 1, cardW + 2, lineH + 2, 0, 0, 0, (alpha * 140) / 255);
 
-        // 2. Frosted Obsidian Glass Body
-        DrawBox(cardX, currentMsgBottomY, cardW, lineH, 12, 16, 26, (alpha * 220) / 255);
+        if (m.isTeam)
+        {
+            // 2. Emerald Glass Body for Team Chat (کادر و بدنه سبز رنگ چت تیم خودی)
+            DrawBox(cardX, currentMsgBottomY, cardW, lineH, 10, 28, 18, (alpha * 225) / 255);
 
-        // 3. Top Hairline Specular Highlight
-        DrawBox(cardX, currentMsgBottomY, cardW, 1, 255, 255, 255, (alpha * 35) / 255);
+            // 3. Glowing Emerald Frame Borders (کادر سبز رنگ)
+            DrawBox(cardX, currentMsgBottomY, cardW, 1, 46, 213, 115, (alpha * 220) / 255); // Top green accent
+            DrawBox(cardX, currentMsgBottomY + lineH - 1, cardW, 1, 46, 213, 115, (alpha * 120) / 255); // Bottom
+            DrawBox(cardX + cardW - 1, currentMsgBottomY, 1, lineH, 46, 213, 115, (alpha * 150) / 255); // Right
+            DrawBox(cardX, currentMsgBottomY, 3, lineH, 46, 213, 115, alpha); // Left Neon Pillar
+        }
+        else
+        {
+            // 2. Frosted Obsidian Glass Body for All Chat
+            DrawBox(cardX, currentMsgBottomY, cardW, lineH, 12, 16, 26, (alpha * 220) / 255);
 
-        // 4. Dynamic Left Team-Color Neon Pillar
-        DrawBox(cardX, currentMsgBottomY, 3, lineH,
-                static_cast<int>(m.r * 255), static_cast<int>(m.g * 255), static_cast<int>(m.b * 255), alpha);
+            // 3. Top Hairline Specular Highlight
+            DrawBox(cardX, currentMsgBottomY, cardW, 1, 255, 255, 255, (alpha * 35) / 255);
+
+            // 4. Dynamic Left Team-Color Neon Pillar
+            DrawBox(cardX, currentMsgBottomY, 3, lineH,
+                    static_cast<int>(m.r * 255), static_cast<int>(m.g * 255), static_cast<int>(m.b * 255), alpha);
+        }
 
         // 5. Dynamic Kinetic Laser Progress Line at base of card
         if (!IsOpen())
@@ -541,8 +568,11 @@ void ModernChat::Draw(int scrW, int scrH)
             int progW = static_cast<int>((cardW - 4) * remaining);
             if (progW > 0)
             {
+                int laserR = m.isTeam ? 46 : static_cast<int>(m.r * 255);
+                int laserG = m.isTeam ? 213 : static_cast<int>(m.g * 255);
+                int laserB = m.isTeam ? 115 : static_cast<int>(m.b * 255);
                 DrawBox(cardX + 2, currentMsgBottomY + lineH - 2, progW, 1,
-                        static_cast<int>(m.r * 255), static_cast<int>(m.g * 255), static_cast<int>(m.b * 255), (alpha * 160) / 255);
+                        laserR, laserG, laserB, (alpha * 180) / 255);
             }
         }
 
@@ -557,20 +587,31 @@ void ModernChat::Draw(int scrW, int scrH)
             int badgeH = lineH - 6;
             int badgeY = currentMsgBottomY + 3;
 
-            // Sleek badge pill background
-            DrawBox(posX, badgeY, badgeW, badgeH,
-                    static_cast<int>(m.r * 80), static_cast<int>(m.g * 80), static_cast<int>(m.b * 80), (alpha * 180) / 255);
-            DrawBox(posX, badgeY, badgeW, 1,
-                    static_cast<int>(m.r * 255), static_cast<int>(m.g * 255), static_cast<int>(m.b * 255), (alpha * 200) / 255);
+            int bgR = m.isTeam ? 20 : static_cast<int>(m.r * 80);
+            int bgG = m.isTeam ? 85 : static_cast<int>(m.g * 80);
+            int bgB = m.isTeam ? 45 : static_cast<int>(m.b * 80);
 
-            DrawTextWithShadow(posX + badgePad, textY, m.prefix.c_str(), 0.90f, 0.95f, 1.0f);
+            int borderR = m.isTeam ? 46 : static_cast<int>(m.r * 255);
+            int borderG = m.isTeam ? 213 : static_cast<int>(m.g * 255);
+            int borderB = m.isTeam ? 115 : static_cast<int>(m.b * 255);
+
+            DrawBox(posX, badgeY, badgeW, badgeH, bgR, bgG, bgB, (alpha * 190) / 255);
+            DrawBox(posX, badgeY, badgeW, 1, borderR, borderG, borderB, (alpha * 220) / 255);
+
+            float prefixR = m.isTeam ? 0.40f : 0.90f;
+            float prefixG = m.isTeam ? 1.0f : 0.95f;
+            float prefixB = m.isTeam ? 0.60f : 1.0f;
+            DrawTextWithShadow(posX + badgePad, textY, m.prefix.c_str(), prefixR, prefixG, prefixB);
             posX += badgeW + 8;
         }
 
-        // 7. Sender Name in Team Color with Drop-Shadow
+        // 7. Sender Name with Drop-Shadow
         if (!m.sender.empty())
         {
-            DrawTextWithShadow(posX, textY, m.sender.c_str(), m.r, m.g, m.b);
+            float senderR = m.isTeam ? 0.35f : m.r;
+            float senderG = m.isTeam ? 1.0f : m.g;
+            float senderB = m.isTeam ? 0.55f : m.b;
+            DrawTextWithShadow(posX, textY, m.sender.c_str(), senderR, senderG, senderB);
             posX += senderW + 2;
             DrawTextWithShadow(posX, textY, ":", 0.85f, 0.88f, 0.92f);
             posX += 8;

@@ -21,6 +21,7 @@ struct LiveChatMessage
     float g = 1.0f;
     float b = 1.0f;
     double timestamp = 0.0;
+    bool isTeam = false;
 };
 
 class ModernChat
@@ -38,7 +39,7 @@ public:
     void Cancel();
     void ToggleMode();
 
-    void AddChatMessage(int clientIndex, const std::string& prefix, const std::string& sender, const std::string& text, float r, float g, float b);
+    void AddChatMessage(int clientIndex, const std::string& prefix, const std::string& sender, const std::string& text, float r, float g, float b, bool isTeam = false);
     void OnSayText(int clientIndex, const std::string& str1, const std::string& str2, const std::string& str3, const std::string& str4 = "");
     void OnLocalPlayerSend(ModernChatMode mode, const std::string& message);
 
