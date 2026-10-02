@@ -927,38 +927,13 @@ static std::string GetActiveDemoOrMapName()
 
     static int HUD_Key_EventHandler(int down, int keynum, const char* pszCurrentBinding, HUD_Key_EventNext next)
     {
-        if (!down)
-            return next->Invoke(down, keynum, pszCurrentBinding);
-
-        // Anti-AutoBhop / Synthetic Space spam rate-limiter (Layer 2)
-        // Detects rapid spacebar repetition faster than humanly possible (< 35ms / > 30 taps per sec)
-        if (keynum == 32)
-        {
-            static uint64_t s_lastSpaceDownTick = 0;
-            static int s_rapidSpaceCount = 0;
-            uint64_t now = GetTickCount64();
-            uint64_t delta = now - s_lastSpaceDownTick;
-            s_lastSpaceDownTick = now;
-
-            if (delta < 35)
-            {
-                s_rapidSpaceCount++;
-                if (s_rapidSpaceCount >= 2)
-                {
-                    // Synthetic space spam detected -> drop keydown event!
-                    return 0;
-                }
-            }
-            else
-            {
-                s_rapidSpaceCount = 0;
-            }
-        }
-
         if (ModernChat::Instance().IsOpen())
         {
             return ModernChat::Instance().HandleKey(down, keynum, pszCurrentBinding);
         }
+
+        if (!down)
+            return next->Invoke(down, keynum, pszCurrentBinding);
 
         if (down)
         {
@@ -1458,7 +1433,7 @@ static int HUD_RedrawHandler(float flTime, int iIntermission, HUD_RedrawNext nex
     if (hud_draw_value != 0.0f && !overlay_visible && g_DemoMenuVisible)
         DrawDemoMenu();
 
-    if (hud_draw_value != 0.0f && !overlay_visible && ModernChat::Instance().IsOpen())
+    if (hud_draw_value != 0.0f && !overlay_visible)
         ModernChat::Instance().Draw(scrW, scrH);
 
     // Render top-right Windows capture style timer widget if match demo is recording
@@ -1615,6 +1590,7 @@ static void UserMsg_InitHUDPost(const char* name, int size, void* data, int resu
 static pfnEngSrc_pfnHookUserMsg_t g_OriginalHookUserMsg = nullptr;
 static pfnUserMsgHook g_Original_MsgFunc_ShowMenu = nullptr;
 static pfnUserMsgHook g_Original_MsgFunc_VGUIMenu = nullptr;
+static pfnUserMsgHook g_Original_MsgFunc_SayText = nullptr;
 
 static int Hooked_MsgFunc_ShowMenu(const char* pszName, int iSize, void* pbuf)
 {
@@ -1691,6 +1667,31 @@ static int Hooked_MsgFunc_VGUIMenu(const char* pszName, int iSize, void* pbuf)
     return 0;
 }
 
+static int Hooked_MsgFunc_SayText(const char* pszName, int iSize, void* pbuf)
+{
+    if (pbuf != nullptr && iSize > 0)
+    {
+        BEGIN_READ(pbuf, iSize);
+        int clientIndex = READ_BYTE();
+        const char* s1 = READ_STRING();
+        const char* s2 = READ_STRING();
+        const char* s3 = READ_STRING();
+        const char* s4 = READ_STRING();
+
+        ModernChat::Instance().OnSayText(
+            clientIndex,
+            s1 ? s1 : "",
+            s2 ? s2 : "",
+            s3 ? s3 : "",
+            s4 ? s4 : "");
+    }
+
+    if (g_Original_MsgFunc_SayText != nullptr)
+        return g_Original_MsgFunc_SayText(pszName, iSize, pbuf);
+
+    return 0;
+}
+
 static int HookUserMsgInterceptor(const char* pszMsgName, pfnUserMsgHook pfn)
 {
     if (pszMsgName != nullptr)
@@ -1707,6 +1708,13 @@ static int HookUserMsgInterceptor(const char* pszMsgName, pfnUserMsgHook pfn)
             g_Original_MsgFunc_VGUIMenu = pfn;
             if (g_OriginalHookUserMsg != nullptr)
                 return g_OriginalHookUserMsg(pszMsgName, Hooked_MsgFunc_VGUIMenu);
+            return 1;
+        }
+        else if (std::strcmp(pszMsgName, "SayText") == 0)
+        {
+            g_Original_MsgFunc_SayText = pfn;
+            if (g_OriginalHookUserMsg != nullptr)
+                return g_OriginalHookUserMsg(pszMsgName, Hooked_MsgFunc_SayText);
             return 1;
         }
     }
@@ -1777,6 +1785,15 @@ static void CL_CreateMoveHandler(float frametime, usercmd_t* cmd, int active, CL
     next->Invoke(frametime, cmd, active);
 
     CL_CreateMove_InvertMousePost(frametime, cmd, active);
+
+    if (ModernChat::Instance().IsOpen() && cmd != nullptr)
+    {
+        cmd->forwardmove = 0.0f;
+        cmd->sidemove = 0.0f;
+        cmd->upmove = 0.0f;
+        cmd->buttons = 0;
+        cmd->impulse = 0;
+    }
 }
 
 static void HUD_ProcessPlayerStateHandler(entity_state_s* dst, const entity_state_s* src, HUD_ProcessPlayerStateNext next)
