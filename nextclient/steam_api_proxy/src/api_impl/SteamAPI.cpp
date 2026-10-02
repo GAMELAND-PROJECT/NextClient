@@ -1,6 +1,7 @@
 #include <steam/steam_api.h>
 #include <steam/steam_gameserver.h>
 #include <steam_api_proxy/next_steam_api_proxy.h>
+#include "SteamUserProxy.h"
 
 #ifdef _WINDOWS
 #include <Windows.h>
@@ -177,6 +178,7 @@ void UnInitialize()
     SteamAPI_WriteMiniDump_func = nullptr;
     SteamAPI_SetMiniDumpComment_func = nullptr;
     SteamUser_func = nullptr;
+    g_SteamUserVoiceProxy.SetOriginal(nullptr);
     SteamFriends_func = nullptr;
     SteamUtils_func = nullptr;
     SteamMatchmaking_func = nullptr;
@@ -337,7 +339,9 @@ S_API ISteamUser *SteamUser()
     if (!SteamUser_func)
         SteamUser_func = reinterpret_cast<SteamUser_Func>(GetProcAddress(g_ValueModule, "SteamUser"));
 
-    return SteamUser_func();
+    ISteamUser* orig = SteamUser_func ? SteamUser_func() : nullptr;
+    g_SteamUserVoiceProxy.SetOriginal(orig);
+    return &g_SteamUserVoiceProxy;
 }
 
 S_API ISteamFriends *SteamFriends()

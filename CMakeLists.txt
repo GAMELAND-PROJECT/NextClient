@@ -93,6 +93,7 @@ endif ()
 add_subdirectory(dep/cpr)
 add_subdirectory(dep/easyloggingpp)
 add_subdirectory(dep/bzip2)
+add_subdirectory(dep/speex)
 add_subdirectory(dep/glad)
 add_subdirectory(dep/stb)
 
