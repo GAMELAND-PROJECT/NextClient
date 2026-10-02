@@ -4,35 +4,57 @@
 #ifdef _WIN32
 #include <windows.h>
 
-static int DetectCallerClientIndex()
+static int DetectCallerClientIndex(const void* pExpectedCompressed, uint32 cbExpectedCompressed)
 {
+#if defined(_M_IX86)
     __try
     {
-        uintptr_t caller_ebp = 0;
-#if defined(_M_IX86)
+        uintptr_t cur_ebp = 0;
         __asm
         {
             mov eax, [ebp]
-            mov caller_ebp, eax
+            mov cur_ebp, eax
         }
-#endif
-        if (caller_ebp != 0 && !IsBadReadPtr(reinterpret_cast<void*>(caller_ebp), 16))
+
+        // Walk up the EBP chain to locate hw.dll!Voice_AddIncomingData frame
+        for (int depth = 0; depth < 8 && cur_ebp != 0; ++depth)
         {
-            // In hw.dll!Voice_AddIncomingData(int clientIndex, ...), parameter 1 is at [caller_ebp + 8]
-            int candidate = *reinterpret_cast<int*>(caller_ebp + 8);
-            if (candidate >= 0 && candidate < SpeexVoiceManager::kMaxPlayers)
+            if (IsBadReadPtr(reinterpret_cast<void*>(cur_ebp), 32))
+                break;
+
+            // In hw.dll!Voice_AddIncomingData:
+            // [cur_ebp + 8]  = clientIndex (int)
+            // [cur_ebp + 12] = pCompressed (void*)
+            // Note: [cur_ebp + 16] was originally cbCompressed, but hw.dll zeroes it
+            // before calling DecompressVoice (mov [ebp+10h], ebx) and reuses it as
+            // &nBytesWritten. Therefore we must only verify cand_ptr == pExpectedCompressed.
+            const void* cand_ptr = *reinterpret_cast<const void**>(cur_ebp + 12);
+
+            if (cand_ptr == pExpectedCompressed)
             {
-                return candidate;
+                int idx = *reinterpret_cast<int*>(cur_ebp + 8);
+                // 156 / 0x9C / -100 is local microphone loopback
+                if (idx == 156 || idx == 0x9C || idx == -100)
+                {
+                    return SpeexVoiceManager::kLoopbackChannel;
+                }
+                if (idx >= 0 && idx < SpeexVoiceManager::kMaxPlayers)
+                {
+                    return idx;
+                }
             }
+
+            cur_ebp = *reinterpret_cast<uintptr_t*>(cur_ebp);
         }
     }
     __except (EXCEPTION_EXECUTE_HANDLER)
     {
     }
+#endif
     return 0;
 }
 #else
-static int DetectCallerClientIndex()
+static int DetectCallerClientIndex(const void* pExpectedCompressed, uint32 cbExpectedCompressed)
 {
     return 0;
 }
@@ -60,7 +82,7 @@ EVoiceResult SteamUserVoiceProxy::DecompressVoice(
     if (!pCompressed || cbCompressed == 0 || !pDestBuffer || cbDestBufferSize == 0)
         return k_EVoiceResultNoData;
 
-    // 1. Primary path: Attempt original Steam Voice (SILK/Opus) decompression
+    // 1. Primary path: Attempt original Steamworks Voice decompression (if official Steam is running)
     EVoiceResult res = k_EVoiceResultDataCorrupted;
     if (m_pOrig)
     {
@@ -98,10 +120,10 @@ EVoiceResult SteamUserVoiceProxy::DecompressVoice(
         return k_EVoiceResultOK;
     }
 
-    // 2. Fallback path: Native Steam Voice failed or output 0 bytes.
-    // The payload is almost certainly a legacy Speex bitstream from a classic CS 1.6 client (build 4554).
-    int clientIndex = DetectCallerClientIndex();
-    uint32 speexWritten = 0;
+    // 2. Universal Voice Decoder Path:
+    // Decodes Opus, Silk, Speex (builds 3248, 4554, ReVoice, Steam) with per-player isolated channels
+    int clientIndex = DetectCallerClientIndex(pCompressed, cbCompressed);
+    uint32 voiceWritten = 0;
     bool decoded = false;
 
 #if defined(_WIN32) && defined(_MSC_VER)
@@ -113,7 +135,7 @@ EVoiceResult SteamUserVoiceProxy::DecompressVoice(
             cbCompressed,
             pDestBuffer,
             cbDestBufferSize,
-            &speexWritten,
+            &voiceWritten,
             nDesiredSampleRate
         );
     }
@@ -128,15 +150,15 @@ EVoiceResult SteamUserVoiceProxy::DecompressVoice(
         cbCompressed,
         pDestBuffer,
         cbDestBufferSize,
-        &speexWritten,
+        &voiceWritten,
         nDesiredSampleRate
     );
 #endif
 
-    if (decoded && speexWritten > 0)
+    if (decoded && voiceWritten > 0)
     {
         if (nBytesWritten)
-            *nBytesWritten = speexWritten;
+            *nBytesWritten = voiceWritten;
 
         return k_EVoiceResultOK;
     }

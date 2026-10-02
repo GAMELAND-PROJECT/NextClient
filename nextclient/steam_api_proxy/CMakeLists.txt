@@ -51,12 +51,16 @@ target_include_directories(${PROJECT_NAME} PRIVATE
         src
         src/public
         include
+        ${CMAKE_SOURCE_DIR}/dep/opus/include
+        ${CMAKE_SOURCE_DIR}/dep/silk/include
 )
 
 target_link_libraries(${PROJECT_NAME} PRIVATE
         nitro_api::nitro_api
         NextClient::client_mini
         speex::speex
+        opus
+        silk
 )
 
 if (UNIX)
