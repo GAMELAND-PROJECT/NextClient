@@ -3,9 +3,9 @@
 #include "../utils.h"
 #include <parsemsg.h>
 #include "triangleapi.h"
+#include <algorithm>
 
 constexpr static auto KILL_RARITY_SPRITE = "sprites/kill_rarity.spr";
-constexpr static int DEATHNOTICE_TOP = 32;
 constexpr static int DEATHNOTICE_RIGHT = 16;
 
 static int MsgFunc_DeathMsg(const char* pszName, int iSize, void* pbuf) {
@@ -39,22 +39,10 @@ static int MsgFunc_DeathMsg(const char* pszName, int iSize, void* pbuf) {
 
 	auto hud = g_GameHud->get_deathnotice();
 	HudDeathNotice::notice_row_t notice{};
+	notice.killer_id = killer_id;
+	notice.victim_id = victim_id;
 
-	hud->HandleAmxxKillAssistCaseIfSo(killer_id, assistant_id, &notice);
-
-	if(hud->IsValidClientIndex(killer_id)) {
-		hud_player_info_t killer_info;
-		gEngfuncs.pfnGetPlayerInfo(killer_id, &killer_info);
-
-		if(notice.killer_name.empty() && killer_info.name != nullptr)
-			notice.killer_name = killer_info.name;
-
-		notice.killer_color = hud->GetClientColor(killer_id);
-
-		if(killer_info.thisplayer) 
-			notice.is_should_kill_highlight = true;
-	}
-
+	bool is_suicide = (killer_id == 0 || killer_id == victim_id);
 	bool is_local_player_victim = false;
 
 	if(hud->IsValidClientIndex(victim_id)) {
@@ -72,21 +60,72 @@ static int MsgFunc_DeathMsg(const char* pszName, int iSize, void* pbuf) {
 		}
 	}
 
-	if(hud->IsValidClientIndex(assistant_id)) {
-		hud_player_info_t assistant_info;
-		gEngfuncs.pfnGetPlayerInfo(assistant_id, &assistant_info);
+	if(is_suicide) {
+		// In suicides, world damage, drowning, falling, or C4 bomb kills:
+		// Do not show the player killing themselves ("Player [weapon] Player").
+		// Keep killer and assistant empty so it renders purely as "[icon] Victim".
+		notice.killer_name = "";
+		notice.killer_color = nullptr;
+		notice.assistant_name = "";
+		notice.assistant_color = nullptr;
+		notice.is_should_kill_highlight = false;
 
-		if(assistant_info.name != nullptr)
-			notice.assistant_name = assistant_info.name;
+		if(killed_with.empty() || killed_with == "worldspawn" || killed_with == "world" || killed_with == "door" || killed_with == "trigger_hurt") {
+			notice.weapon_sprite_index = hud->GetSkullSpriteIndex();
+		} else {
+			std::string wpn = "d_" + killed_with;
+			int spriteIndex = gHUD->GetSpriteIndex(wpn.c_str());
+			notice.weapon_sprite_index = spriteIndex != -1 ? spriteIndex : hud->GetSkullSpriteIndex();
+		}
+	} else {
+		hud->HandleAmxxKillAssistCaseIfSo(killer_id, assistant_id, &notice);
 
-		notice.assistant_color = hud->GetClientColor(assistant_id);
+		if(hud->IsValidClientIndex(killer_id)) {
+			hud_player_info_t killer_info;
+			gEngfuncs.pfnGetPlayerInfo(killer_id, &killer_info);
 
-		if(assistant_info.thisplayer) 
-			notice.is_should_kill_highlight = true;
+			if(notice.killer_name.empty() && killer_info.name != nullptr)
+				notice.killer_name = killer_info.name;
+
+			notice.killer_color = hud->GetClientColor(killer_id);
+
+			if(killer_info.thisplayer) 
+				notice.is_should_kill_highlight = true;
+		}
+
+		if(hud->IsValidClientIndex(assistant_id)) {
+			hud_player_info_t assistant_info;
+			gEngfuncs.pfnGetPlayerInfo(assistant_id, &assistant_info);
+
+			if(assistant_info.name != nullptr)
+				notice.assistant_name = assistant_info.name;
+
+			notice.assistant_color = hud->GetClientColor(assistant_id);
+
+			if(assistant_info.thisplayer) 
+				notice.is_should_kill_highlight = true;
+		}
+
+		// Detect true teamkill
+		bool is_tk = (killed_with == "teammate");
+		if(!is_tk && hud->IsValidClientIndex(killer_id) && hud->IsValidClientIndex(victim_id)) {
+			int k_team = hud->GetClientTeam(killer_id);
+			int v_team = hud->GetClientTeam(victim_id);
+			if(k_team != TEAM_UNASSIGNED && k_team == v_team) {
+				is_tk = true;
+			}
+		}
+		notice.is_teamkill = is_tk;
+
+		if(notice.is_teamkill && notice.is_should_kill_highlight) {
+			notice.is_should_kill_highlight = false;
+		}
+
+		std::string wpn = "d_" + killed_with;
+		int spriteIndex = gHUD->GetSpriteIndex(wpn.c_str());
+		notice.weapon_sprite_index = spriteIndex != -1 ? spriteIndex : hud->GetSkullSpriteIndex();
 	}
 
-	notice.killer_id = killer_id;
-	notice.is_teamkill = killed_with == "teammate";
 	notice.display_time = *gHUD->m_flTime + hud->GetNoticeDisplayTime();
 
 	if(kill_rarity_flags & KILLRARITY_DOMINATION) {
@@ -94,10 +133,6 @@ static int MsgFunc_DeathMsg(const char* pszName, int iSize, void* pbuf) {
 			kill_rarity_flags &= ~KILLRARITY_DOMINATION;
 	}
 	notice.kill_rarity_flags = (KillRarity)kill_rarity_flags;
-
-	killed_with = "d_" + killed_with;
-	auto spriteIndex = gHUD->GetSpriteIndex(killed_with.c_str());
-	notice.weapon_sprite_index = spriteIndex != -1 ? spriteIndex : hud->GetSkullSpriteIndex();
 
 	hud->PushDeathNotice(std::move(notice));
 
@@ -151,8 +186,9 @@ void HudDeathNotice::SVC_UpdateUserInfo() {
 	auto current_name = client_state()->players[id].name;
 	auto incoming_name = pmove->PM_Info_ValueForKey(userinfo, "name");
 
-	if(current_name[0] && std::string(current_name) != incoming_name)
-		last_player_name_[id + 1] = current_name;
+	if(current_name[0] && std::string(current_name) != incoming_name) {
+		last_player_name_[id + 1] = { current_name, m_flTime + 1.5f };
+	}
 }
 
 float calculateMatchingPercentage(const std::string& old_name, const std::string& new_name, size_t& mismatchPosition) {
@@ -173,12 +209,20 @@ float calculateMatchingPercentage(const std::string& old_name, const std::string
 }
 
 bool HudDeathNotice::HandleAmxxKillAssistCaseIfSo(int killer_id, int& assistant_id, HudDeathNotice::notice_row_t* notice) {
-	if(!last_player_name_.contains(killer_id)) return false;
+	auto it = last_player_name_.find(killer_id);
+	if(it == last_player_name_.end()) return false;
 
-	std::string old_name = last_player_name_[killer_id];
+	// Invalidate if cache expired (more than 1.5s old, meaning it wasn't a deathmsg assist rename)
+	if(m_flTime > it->second.expire_time) {
+		last_player_name_.erase(it);
+		return false;
+	}
+
+	std::string old_name = it->second.name;
 
 	if(assistant_id != 0) {
 		notice->killer_name = old_name;
+		last_player_name_.erase(it);
 		return true;
 	}
 
@@ -207,12 +251,13 @@ bool HudDeathNotice::HandleAmxxKillAssistCaseIfSo(int killer_id, int& assistant_
 		dirty_assistant_name.erase(first_dot_pos + 1);
  
 	for(int i = 1; i < MAX_PLAYERS; i++) {
-		hud_player_info_t player_info;
-		cl_enginefunc()->pfnGetPlayerInfo(i, &player_info);
+		hud_player_info_t a_info;
+		cl_enginefunc()->pfnGetPlayerInfo(i, &a_info);
 
-		if(player_info.name && std::string(player_info.name).starts_with(dirty_assistant_name)) {
+		if(a_info.name && std::string(a_info.name).starts_with(dirty_assistant_name)) {
 			notice->killer_name = old_name;
 			assistant_id = i;
+			last_player_name_.erase(it);
 			return true;
 		}
 	}
@@ -266,10 +311,10 @@ void HudDeathNotice::VidInit() {
 	skull_sprite_index_ = gHUD()->GetSpriteIndex("d_skull");
 	draw_string_font_height_ = DrawConsoleStringHeight();
 
-	kill_rarity_sprite_scale_ = 0.375;
+	kill_rarity_sprite_scale_ = 0.375f;
 	kill_rarity_sprite_width_ = SPR_Width(kill_rarity_sprite_, 0) * kill_rarity_sprite_scale_;
 	kill_rarity_sprite_height_ = SPR_Height(kill_rarity_sprite_, 0) * kill_rarity_sprite_scale_;
-	kill_rarity_sprite_alpha_ = 0.68;
+	kill_rarity_sprite_alpha_ = 0.85f;
 	kill_rarity_sprite_rendermode_ = kRenderTransAdd;
 	kill_rarity_sprite_padding_x_ = 3;
 
@@ -280,7 +325,7 @@ void HudDeathNotice::VidInit() {
 	notice_box_padding_top_ = 3;
 	notice_box_padding_bottom_ = 3;
 	notice_box_outline_width_ = 1;
-	notice_box_padding_x_ = 8;
+	notice_box_padding_x_ = 7;
 	notice_box_height_ = draw_string_font_height_ + notice_box_padding_top_ + notice_box_padding_bottom_;
 
 	notice_rows_.clear();
@@ -320,35 +365,49 @@ int HudDeathNotice::DrawScaledSprite(
 	return x + w;
 }
 
-int HudDeathNotice::DrawKillRaritySprite(RarityFrame type, int x, int y) {
+int HudDeathNotice::DrawKillRaritySprite(RarityFrame type, int x, int y, float alpha) {
 	return DrawScaledSprite(
 		&kill_rarity_sprite_, type,
 		x + kill_rarity_sprite_padding_x_, y, kill_rarity_sprite_scale_, 
-		kill_rarity_sprite_rendermode_, sprite_icons_color_, kill_rarity_sprite_alpha_
+		kill_rarity_sprite_rendermode_, sprite_icons_color_, kill_rarity_sprite_alpha_ * alpha
 	) + kill_rarity_sprite_padding_x_;
 }
 
-int HudDeathNotice::GetKillRaritySpriteFullWidth() {
-	return kill_rarity_sprite_width_ + (kill_rarity_sprite_padding_x_ * 2);
+int HudDeathNotice::GetKillRaritySpriteFullWidth(int frame) {
+	int spr_w = SPR_Width(kill_rarity_sprite_, frame) * kill_rarity_sprite_scale_;
+	return spr_w + (kill_rarity_sprite_padding_x_ * 2);
 }
 
-int HudDeathNotice::DrawWeaponSprite(int index, int x, int y) {
-	SPR_Set(gHUD()->GetSprite(index), 255, 255, 255);
+int HudDeathNotice::DrawWeaponSprite(int index, int x, int y, float alpha) {
+	if(index == -1) index = skull_sprite_index_;
+	if(index == -1) return x;
+
+	byte c = (byte)std::clamp((int)(255.0f * alpha + 0.5f), 0, 255);
+	SPR_Set(gHUD()->GetSprite(index), c, c, c);
 	x += weapon_sprite_padding_x_;
 	SPR_DrawAdditive(0, x, y, &gHUD()->GetSpriteRect(index));
 	return x + gHUD()->GetSpriteWidth(index) + weapon_sprite_padding_x_;
 }
 
 int HudDeathNotice::GetWeaponSpriteFullWidth(int index) {
+	if(index == -1) index = skull_sprite_index_;
+	if(index == -1) return weapon_sprite_padding_x_ * 2;
 	return gHUD()->GetSpriteWidth(index) + weapon_sprite_padding_x_ * 2;
 }
 
-int HudDeathNotice::DrawString(const char* text, vec3_t color, int x, int y) {
-	DrawSetTextColor(color);
+int HudDeathNotice::DrawString(const char* text, vec3_t color, int x, int y, float alpha) {
+	if(!text || !*text) return x;
+	vec3_t faded_color = {
+		std::clamp(color[0] * alpha, 0.0f, 1.0f),
+		std::clamp(color[1] * alpha, 0.0f, 1.0f),
+		std::clamp(color[2] * alpha, 0.0f, 1.0f)
+	};
+	DrawSetTextColor(faded_color);
 	return DrawConsoleString(text, x + string_padding_x_, y) + string_padding_x_;
 }
 
 int HudDeathNotice::GetStringFullWidth(const char* text) {
+	if(!text || !*text) return 0;
 	return DrawConsoleStringLen(text) + string_padding_x_ * 2;
 }
 
@@ -360,21 +419,21 @@ int HudDeathNotice::GetCustomWeaponSpriteHeight(wpn_icon_override_t* icon) {
 	return icon->ideal_h;
 }
 
-int HudDeathNotice::DrawCustomWeaponSprite(wpn_icon_override_t* icon, int x, int y) {
+int HudDeathNotice::DrawCustomWeaponSprite(wpn_icon_override_t* icon, int x, int y, float alpha) {
 	return DrawScaledSprite(
 		&icon->sprite, icon->frame,
 		x + weapon_sprite_padding_x_, y, icon->ideal_scale, 
-		icon->rendermode, icon->color, icon->alpha
+		icon->rendermode, icon->color, icon->alpha * alpha
 	) + weapon_sprite_padding_x_;
 }
 
 void HudDeathNotice::Draw(float flTime) {
 	if(cvar_deathnotice_old_->value) return;
 
-	int x, y, i = 0;
 	int screen_w, screen_h;
 	GetScreenResolution(screen_w, screen_h);
 
+	int i = 0;
 	for(auto notice = notice_rows_.begin(); notice != notice_rows_.end(); ) {
 		if(notice->display_time < flTime) {
 			notice = notice_rows_.erase(notice);
@@ -383,112 +442,163 @@ void HudDeathNotice::Draw(float flTime) {
 
 		notice->display_time = std::min(notice->display_time, m_flTime + cvar_deathnotice_time_->value);
 
-		int weapon_sprite_full_w, weapon_sprite_h;
+		// Calculate smooth fade-out alpha during the last 1.2 seconds
+		float time_remaining = notice->display_time - flTime;
+		float fade_alpha = (time_remaining < 1.2f) ? std::clamp(time_remaining / 1.2f, 0.0f, 1.0f) : 1.0f;
+
+		// Clean modern esports top anchor (not pushed 90px down on 1080p/1440p)
+		int top_offset = std::clamp((int)(20.0f * (screen_h / 720.0f) + 0.5f), 18, 34);
+		if(g_iUser1 != 0)
+			top_offset += 64; // Spectator top banner clearance
+
+		int row_step = notice_box_height_ + (notice_box_outline_width_ * 2) + notice_boxes_gap_;
+		int y = top_offset + (row_step * i);
+
+		// Forward content width calculation
+		int content_w = 0;
+
+		bool has_domination = (notice->kill_rarity_flags & KILLRARITY_DOMINATION);
+		bool has_revenge = (!has_domination && (notice->kill_rarity_flags & KILLRARITY_REVENGE));
+		if(has_domination) content_w += GetKillRaritySpriteFullWidth(RarityFrame::DOMINATION);
+		else if(has_revenge) content_w += GetKillRaritySpriteFullWidth(RarityFrame::REVENGE);
+
+		if(notice->kill_rarity_flags & KILLRARITY_KILLER_BLIND)
+			content_w += GetKillRaritySpriteFullWidth(RarityFrame::KILLER_BLIND);
+
+		if(!notice->killer_name.empty())
+			content_w += GetStringFullWidth(notice->killer_name.c_str());
+
+		bool has_assist = !notice->assistant_name.empty();
+		bool has_assist_flash = (has_assist && (notice->kill_rarity_flags & KILLRARITY_ASSISTEDFLASH));
+		if(has_assist) {
+			content_w += GetStringFullWidth("+");
+			if(has_assist_flash)
+				content_w += GetKillRaritySpriteFullWidth(RarityFrame::ASSIST_FLASH);
+			content_w += GetStringFullWidth(notice->assistant_name.c_str());
+		}
+
+		if(notice->kill_rarity_flags & KILLRARITY_INAIR)
+			content_w += GetKillRaritySpriteFullWidth(RarityFrame::KILLER_INAIR);
+
+		int weapon_sprite_full_w = 0;
+		int weapon_sprite_h = 0;
 		if(notice->custom_weapon_sprite.sprite) {
 			weapon_sprite_full_w = GetCustomWeaponSpriteFullWidth(&notice->custom_weapon_sprite);
 			weapon_sprite_h = GetCustomWeaponSpriteHeight(&notice->custom_weapon_sprite);
+		} else {
+			weapon_sprite_full_w = GetWeaponSpriteFullWidth(notice->weapon_sprite_index);
+			weapon_sprite_h = (notice->weapon_sprite_index != -1) ? gHUD()->GetSpriteHeight(notice->weapon_sprite_index) : 16;
+		}
+		content_w += weapon_sprite_full_w;
+
+		if(notice->kill_rarity_flags & KILLRARITY_NOSCOPE)
+			content_w += GetKillRaritySpriteFullWidth(RarityFrame::NOSCOPE);
+		if(notice->kill_rarity_flags & KILLRARITY_THRUSMOKE)
+			content_w += GetKillRaritySpriteFullWidth(RarityFrame::THROUGH_SMOKE);
+		if(notice->kill_rarity_flags & KILLRARITY_PENETRATED)
+			content_w += GetKillRaritySpriteFullWidth(RarityFrame::PENETRATED);
+		if(notice->kill_rarity_flags & KILLRARITY_HEADSHOT)
+			content_w += GetKillRaritySpriteFullWidth(RarityFrame::HEADSHOT);
+
+		if(!notice->victim_name.empty())
+			content_w += GetStringFullWidth(notice->victim_name.c_str());
+
+		int total_card_w = content_w + (notice_box_padding_x_ * 2);
+		int card_right = screen_w - DEATHNOTICE_RIGHT;
+		int card_left = card_right - total_card_w;
+
+		// Card background & outline with smooth fade-out
+		if(notice->is_should_dead_highlight) {
+			// Local player died: Crimson/burgundy with red border
+			DrawOutlinedRect(
+				card_left, y, card_right, y + notice_box_height_,
+				125, 15, 25, (byte)(160 * fade_alpha),
+				notice_box_outline_width_,
+				200, 35, 35, (byte)(210 * fade_alpha)
+			);
+		}
+		else if(notice->is_should_kill_highlight) {
+			// Local player kill: Sleek esports dark card with glowing golden/amber border
+			DrawOutlinedRect(
+				card_left, y, card_right, y + notice_box_height_,
+				16, 18, 22, (byte)(180 * fade_alpha),
+				notice_box_outline_width_,
+				255, 185, 20, (byte)(255 * fade_alpha)
+			);
+		}
+		else if(notice->is_teamkill) {
+			// Teamkill: Dark card with warning orange outline
+			DrawOutlinedRect(
+				card_left, y, card_right, y + notice_box_height_,
+				25, 15, 10, (byte)(160 * fade_alpha),
+				notice_box_outline_width_,
+				230, 90, 10, (byte)(200 * fade_alpha)
+			);
 		}
 		else {
-			weapon_sprite_full_w = GetWeaponSpriteFullWidth(notice->weapon_sprite_index);
-			weapon_sprite_h = gHUD()->GetSpriteHeight(notice->weapon_sprite_index);
+			// Regular kill: Translucent dark card with subtle charcoal border
+			DrawOutlinedRect(
+				card_left, y, card_right, y + notice_box_height_,
+				12, 14, 18, (byte)(140 * fade_alpha),
+				notice_box_outline_width_,
+				45, 50, 60, (byte)(130 * fade_alpha)
+			);
 		}
-
-		y = (DEATHNOTICE_TOP * (screen_h / 480.0f) + 0.5f) 
-			+ ((notice_box_height_ + notice_box_outline_width_ * 2 + notice_boxes_gap_) * i);
-		x = screen_w - DEATHNOTICE_RIGHT - weapon_sprite_full_w;
-
-		if(g_iUser1 != 0)
-			y += 80;
 
 		int weapon_sprite_optimal_y = y + ((notice_box_height_ - weapon_sprite_h) / 2);
 		int kill_rarity_sprite_optimal_y = y + ((notice_box_height_ - kill_rarity_sprite_height_) / 2);
 		int draw_string_optimal_y = y + notice_box_padding_top_;
-		
-		if(notice->killer_name.length())
-			x -= GetStringFullWidth(notice->killer_name.c_str());
 
-		if(notice->victim_name.length())
-			x -= GetStringFullWidth(notice->victim_name.c_str());
+		int cur_x = card_left + notice_box_padding_x_;
 
-		if(notice->assistant_name.length())
-			x -= GetStringFullWidth(notice->assistant_name.c_str()) + GetStringFullWidth("+");
-		
-		for(int flag = KILLRARITY_HEADSHOT; flag <= KILLRARITY_ASSISTEDFLASH; flag <<= 1) {
-			if(notice->kill_rarity_flags & flag)
-				x -= GetKillRaritySpriteFullWidth();
-		}
-
-		if(notice->kill_rarity_flags & (KILLRARITY_DOMINATION|KILLRARITY_REVENGE))
-			x -= GetKillRaritySpriteFullWidth();
-
-		if(notice->kill_rarity_flags & KILLRARITY_INAIR)
-			x -= GetKillRaritySpriteFullWidth();
-
-		if(notice->is_should_dead_highlight) {
-			DrawRect(
-				x - notice_box_padding_x_, y, 
-				screen_w - DEATHNOTICE_RIGHT + notice_box_padding_x_, y + notice_box_height_,
-				150, 0, 20, 100
-			);
-		}
-		else if(notice->is_should_kill_highlight) {
-			DrawOutlinedRect(
-				x - notice_box_padding_x_, y, 
-				screen_w - DEATHNOTICE_RIGHT + notice_box_padding_x_, y + notice_box_height_, 
-				0, 0, 0, 100, 
-				notice_box_outline_width_, 230, 20, 0, 255
-			);
-		}
-		else {
-			DrawRect(
-				x - notice_box_padding_x_, y, 
-				screen_w - DEATHNOTICE_RIGHT + notice_box_padding_x_, y + notice_box_height_,
-				0, 0, 0, 100
-			);
-		}
-
-		if(notice->kill_rarity_flags & KILLRARITY_DOMINATION)
-			x = DrawKillRaritySprite(RarityFrame::DOMINATION, x, kill_rarity_sprite_optimal_y);
-		else if(notice->kill_rarity_flags & KILLRARITY_REVENGE)
-			x = DrawKillRaritySprite(RarityFrame::REVENGE, x, kill_rarity_sprite_optimal_y);
+		if(has_domination)
+			cur_x = DrawKillRaritySprite(RarityFrame::DOMINATION, cur_x, kill_rarity_sprite_optimal_y, fade_alpha);
+		else if(has_revenge)
+			cur_x = DrawKillRaritySprite(RarityFrame::REVENGE, cur_x, kill_rarity_sprite_optimal_y, fade_alpha);
 
 		if(notice->kill_rarity_flags & KILLRARITY_KILLER_BLIND)
-			x = DrawKillRaritySprite(RarityFrame::KILLER_BLIND, x, kill_rarity_sprite_optimal_y);
+			cur_x = DrawKillRaritySprite(RarityFrame::KILLER_BLIND, cur_x, kill_rarity_sprite_optimal_y, fade_alpha);
 
-		if(notice->killer_name.length())
-			x = DrawString(notice->killer_name.c_str(), notice->killer_color, x, draw_string_optimal_y);
-
-		if(notice->assistant_name.length()) {
-			x = DrawString("+", sprite_icons_color_, x, draw_string_optimal_y);
-
-			if(notice->kill_rarity_flags & KILLRARITY_ASSISTEDFLASH)
-				x = DrawKillRaritySprite(RarityFrame::ASSIST_FLASH, x, kill_rarity_sprite_optimal_y);
-
-			x = DrawString(notice->assistant_name.c_str(), notice->assistant_color, x, draw_string_optimal_y);
+		if(!notice->killer_name.empty()) {
+			float* k_color = notice->killer_color ? notice->killer_color : sprite_icons_color_;
+			cur_x = DrawString(notice->killer_name.c_str(), k_color, cur_x, draw_string_optimal_y, fade_alpha);
 		}
 
+		if(has_assist) {
+			cur_x = DrawString("+", sprite_icons_color_, cur_x, draw_string_optimal_y, fade_alpha);
+
+			if(has_assist_flash)
+				cur_x = DrawKillRaritySprite(RarityFrame::ASSIST_FLASH, cur_x, kill_rarity_sprite_optimal_y, fade_alpha);
+
+			float* a_color = notice->assistant_color ? notice->assistant_color : sprite_icons_color_;
+			cur_x = DrawString(notice->assistant_name.c_str(), a_color, cur_x, draw_string_optimal_y, fade_alpha);
+		}
+
+		// In-air icon: vertically centered without unnatural negative offset!
 		if(notice->kill_rarity_flags & KILLRARITY_INAIR)
-			x = DrawKillRaritySprite(RarityFrame::KILLER_INAIR, x, kill_rarity_sprite_optimal_y - (kill_rarity_sprite_height_ / 2));
+			cur_x = DrawKillRaritySprite(RarityFrame::KILLER_INAIR, cur_x, kill_rarity_sprite_optimal_y, fade_alpha);
 
 		if(notice->custom_weapon_sprite.sprite)
-			x = DrawCustomWeaponSprite(&notice->custom_weapon_sprite, x, weapon_sprite_optimal_y);
+			cur_x = DrawCustomWeaponSprite(&notice->custom_weapon_sprite, cur_x, weapon_sprite_optimal_y, fade_alpha);
 		else
-			x = DrawWeaponSprite(notice->weapon_sprite_index, x, weapon_sprite_optimal_y);
+			cur_x = DrawWeaponSprite(notice->weapon_sprite_index, cur_x, weapon_sprite_optimal_y, fade_alpha);
 
 		if(notice->kill_rarity_flags & KILLRARITY_NOSCOPE)
-			x = DrawKillRaritySprite(RarityFrame::NOSCOPE, x, kill_rarity_sprite_optimal_y);
+			cur_x = DrawKillRaritySprite(RarityFrame::NOSCOPE, cur_x, kill_rarity_sprite_optimal_y, fade_alpha);
 
 		if(notice->kill_rarity_flags & KILLRARITY_THRUSMOKE)
-			x = DrawKillRaritySprite(RarityFrame::THROUGH_SMOKE, x, kill_rarity_sprite_optimal_y);
+			cur_x = DrawKillRaritySprite(RarityFrame::THROUGH_SMOKE, cur_x, kill_rarity_sprite_optimal_y, fade_alpha);
 
 		if(notice->kill_rarity_flags & KILLRARITY_PENETRATED)
-			x = DrawKillRaritySprite(RarityFrame::PENETRATED, x, kill_rarity_sprite_optimal_y);
+			cur_x = DrawKillRaritySprite(RarityFrame::PENETRATED, cur_x, kill_rarity_sprite_optimal_y, fade_alpha);
 
 		if(notice->kill_rarity_flags & KILLRARITY_HEADSHOT)
-			x = DrawKillRaritySprite(RarityFrame::HEADSHOT, x, kill_rarity_sprite_optimal_y);
+			cur_x = DrawKillRaritySprite(RarityFrame::HEADSHOT, cur_x, kill_rarity_sprite_optimal_y, fade_alpha);
 
-		if(notice->victim_name.length())
-			x = DrawString(notice->victim_name.c_str(), notice->victim_color, x, draw_string_optimal_y);
+		if(!notice->victim_name.empty()) {
+			float* v_color = notice->victim_color ? notice->victim_color : sprite_icons_color_;
+			cur_x = DrawString(notice->victim_name.c_str(), v_color, cur_x, draw_string_optimal_y, fade_alpha);
+		}
 
 		i++;
 		notice++;

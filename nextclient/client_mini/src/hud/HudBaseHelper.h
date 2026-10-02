@@ -77,6 +77,11 @@ public:
 		}
 	}
 
+	int GetClientTeam(int clientIndex) {
+		if (!IsValidClientIndex(clientIndex)) return TEAM_UNASSIGNED;
+		return cl()->g_PlayerExtraInfo[clientIndex].teamnumber;
+	}
+
 	int DrawConsoleStringLen(const char *string) {
 		int width, height;
 		cl_enginefunc()->pfnDrawConsoleStringLen(string, &width, &height);
@@ -109,16 +114,20 @@ public:
 	) {
 		DrawRect(x1, y1, x2, y2, r, g, b, a);
 
+		// Top
 		DrawRect(x1 - outline_width, y1 - outline_width, x2 + outline_width, y1,
 			outline_r, outline_g, outline_b, outline_a);
 
-		DrawRect(x2 + outline_width, y1, x2, y2 + outline_width,
+		// Right
+		DrawRect(x2, y1, x2 + outline_width, y2,
 			outline_r, outline_g, outline_b, outline_a);
 
-		DrawRect(x2, y2 + outline_width, x1 - outline_width, y2,
+		// Bottom
+		DrawRect(x1 - outline_width, y2, x2 + outline_width, y2 + outline_width,
 			outline_r, outline_g, outline_b, outline_a);
 
-		DrawRect(x1 - outline_width, y2, x1, y1,
+		// Left
+		DrawRect(x1 - outline_width, y1, x1, y2,
 			outline_r, outline_g, outline_b, outline_a);
 	}
 };
