@@ -1671,19 +1671,17 @@ static int Hooked_MsgFunc_SayText(const char* pszName, int iSize, void* pbuf)
 {
     if (pbuf != nullptr && iSize > 1)
     {
-        const unsigned char* bytes = static_cast<const unsigned char*>(pbuf);
-        int clientIndex = bytes[0];
+        BEGIN_READ(pbuf, iSize);
+        int clientIndex = READ_BYTE();
 
         std::vector<std::string> strings;
-        const char* p = static_cast<const char*>(pbuf) + 1;
-        const char* end = static_cast<const char*>(pbuf) + iSize;
-        while (p < end)
+        for (int i = 0; i < 4; ++i)
         {
-            const char* strEnd = p;
-            while (strEnd < end && *strEnd != '\0')
-                strEnd++;
-            strings.emplace_back(p, strEnd - p);
-            p = (strEnd < end) ? strEnd + 1 : end;
+            const char* s = READ_STRING();
+            if (s != nullptr && *s != '\0')
+            {
+                strings.emplace_back(s);
+            }
         }
 
         if (!strings.empty())
@@ -1692,7 +1690,8 @@ static int Hooked_MsgFunc_SayText(const char* pszName, int iSize, void* pbuf)
         }
     }
 
-    // Unconditionally suppress legacy SayText so it NEVER prints to the old yellow HUD!
+    // In CS 1.6, SayText is exclusively player chat.
+    // Unconditionally suppress legacy SayText so player chat NEVER prints to the old yellow HUD!
     return 1;
 }
 
@@ -1702,48 +1701,35 @@ static int Hooked_MsgFunc_TextMsg(const char* pszName, int iSize, void* pbuf)
 {
     if (pbuf != nullptr && iSize > 0)
     {
-        const unsigned char* bytes = static_cast<const unsigned char*>(pbuf);
-        int destType = bytes[0];
+        BEGIN_READ(pbuf, iSize);
+        int destType = READ_BYTE();
 
         if (destType == 3) // HUD_PRINTTALK (In-game Chat, All Chat, Team Chat, Server broadcasts, / commands)
         {
             std::vector<std::string> strings;
-            const char* p = static_cast<const char*>(pbuf) + 1;
-            const char* end = static_cast<const char*>(pbuf) + iSize;
-            while (p < end)
+            for (int i = 0; i < 5; ++i)
             {
-                const char* strEnd = p;
-                while (strEnd < end && *strEnd != '\0')
-                    strEnd++;
-                strings.emplace_back(p, strEnd - p);
-                p = (strEnd < end) ? strEnd + 1 : end;
+                const char* s = READ_STRING();
+                if (s != nullptr && *s != '\0')
+                {
+                    strings.emplace_back(s);
+                }
             }
 
             if (!strings.empty())
             {
                 ModernChat::Instance().OnTextMsgPacket(strings);
             }
-
-            // Unconditionally suppress legacy HUD_PRINTTALK so it NEVER prints to the old yellow HUD!
+            // Unconditionally suppress HUD_PRINTTALK from legacy HUD!
             return 1;
         }
         else if (destType == 2) // HUD_PRINTCONSOLE
         {
-            // Filter internal client_chat_* commands so they don't print "unknown command"
-            std::vector<std::string> strings;
-            const char* p = static_cast<const char*>(pbuf) + 1;
-            const char* end = static_cast<const char*>(pbuf) + iSize;
-            while (p < end)
+            std::string msg = READ_STRING();
+            if (msg == "#Game_unknown_command")
             {
-                const char* strEnd = p;
-                while (strEnd < end && *strEnd != '\0')
-                    strEnd++;
-                strings.emplace_back(p, strEnd - p);
-                p = (strEnd < end) ? strEnd + 1 : end;
-            }
-            if (strings.size() >= 2 && strings[0] == "#Game_unknown_command")
-            {
-                if (strings[1].starts_with("client_chat_"))
+                std::string cmd = READ_STRING();
+                if (cmd.starts_with("client_chat_"))
                     return 1;
             }
         }
@@ -1835,24 +1821,23 @@ static int UserMsg_TextMsgHandler(const char* name, int size, void* data, UserMs
         }
         else if (destType == 3) // HUD_PRINTTALK (In-game Chat & Server announcements)
         {
+            BEGIN_READ(data, size);
+            READ_BYTE(); // destType
             std::vector<std::string> strings;
-            const char* p = static_cast<const char*>(data) + 1;
-            const char* end = static_cast<const char*>(data) + size;
-            while (p < end)
+            for (int i = 0; i < 5; ++i)
             {
-                const char* strEnd = p;
-                while (strEnd < end && *strEnd != '\0')
-                    strEnd++;
-                strings.emplace_back(p, strEnd - p);
-                p = (strEnd < end) ? strEnd + 1 : end;
+                const char* s = READ_STRING();
+                if (s != nullptr && *s != '\0')
+                {
+                    strings.emplace_back(s);
+                }
             }
 
             if (!strings.empty())
             {
                 ModernChat::Instance().OnTextMsgPacket(strings);
             }
-
-            // Unconditionally suppress legacy HUD_PRINTTALK so it NEVER prints to the old yellow HUD!
+            // Unconditionally suppress HUD_PRINTTALK from legacy HUD!
             return 1;
         }
     }
