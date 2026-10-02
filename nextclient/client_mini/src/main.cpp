@@ -1674,8 +1674,6 @@ static int Hooked_MsgFunc_SayText(const char* pszName, int iSize, void* pbuf)
         const unsigned char* bytes = static_cast<const unsigned char*>(pbuf);
         int clientIndex = bytes[0];
 
-        // Safely extract null-terminated strings directly from the packet buffer
-        // without relying on static global buffers that can overwrite each other.
         std::vector<std::string> strings;
         const char* p = static_cast<const char*>(pbuf) + 1;
         const char* end = static_cast<const char*>(pbuf) + iSize;
@@ -1688,27 +1686,74 @@ static int Hooked_MsgFunc_SayText(const char* pszName, int iSize, void* pbuf)
             p = (strEnd < end) ? strEnd + 1 : end;
         }
 
-        std::string s1 = (strings.size() > 0) ? strings[0] : "";
-        std::string s2 = (strings.size() > 1) ? strings[1] : "";
-        std::string s3 = (strings.size() > 2) ? strings[2] : "";
-        std::string s4 = (strings.size() > 3) ? strings[3] : "";
-
-        ModernChat::Instance().OnSayText(clientIndex, s1, s2, s3, s4);
-
-        if (gEngfuncs.pfnConsolePrint != nullptr)
+        if (!strings.empty())
         {
-            std::string conLine;
-            if (!s2.empty() && !s3.empty())
-                conLine = s2 + " : " + s3 + "\n";
-            else if (!s1.empty())
-                conLine = s1 + "\n";
-            if (!conLine.empty())
-                gEngfuncs.pfnConsolePrint(conLine.c_str());
+            ModernChat::Instance().OnSayTextPacket(clientIndex, strings);
         }
     }
 
-    // Suppress the old simple yellow chat display above the radar so it only displays once in the modern graphical feed
+    // Unconditionally suppress legacy SayText so it NEVER prints to the old yellow HUD!
     return 1;
+}
+
+static pfnUserMsgHook g_Original_MsgFunc_TextMsg = nullptr;
+
+static int Hooked_MsgFunc_TextMsg(const char* pszName, int iSize, void* pbuf)
+{
+    if (pbuf != nullptr && iSize > 0)
+    {
+        const unsigned char* bytes = static_cast<const unsigned char*>(pbuf);
+        int destType = bytes[0];
+
+        if (destType == 3) // HUD_PRINTTALK (In-game Chat, All Chat, Team Chat, Server broadcasts, / commands)
+        {
+            std::vector<std::string> strings;
+            const char* p = static_cast<const char*>(pbuf) + 1;
+            const char* end = static_cast<const char*>(pbuf) + iSize;
+            while (p < end)
+            {
+                const char* strEnd = p;
+                while (strEnd < end && *strEnd != '\0')
+                    strEnd++;
+                strings.emplace_back(p, strEnd - p);
+                p = (strEnd < end) ? strEnd + 1 : end;
+            }
+
+            if (!strings.empty())
+            {
+                ModernChat::Instance().OnTextMsgPacket(strings);
+            }
+
+            // Unconditionally suppress legacy HUD_PRINTTALK so it NEVER prints to the old yellow HUD!
+            return 1;
+        }
+        else if (destType == 2) // HUD_PRINTCONSOLE
+        {
+            // Filter internal client_chat_* commands so they don't print "unknown command"
+            std::vector<std::string> strings;
+            const char* p = static_cast<const char*>(pbuf) + 1;
+            const char* end = static_cast<const char*>(pbuf) + iSize;
+            while (p < end)
+            {
+                const char* strEnd = p;
+                while (strEnd < end && *strEnd != '\0')
+                    strEnd++;
+                strings.emplace_back(p, strEnd - p);
+                p = (strEnd < end) ? strEnd + 1 : end;
+            }
+            if (strings.size() >= 2 && strings[0] == "#Game_unknown_command")
+            {
+                if (strings[1].starts_with("client_chat_"))
+                    return 1;
+            }
+        }
+    }
+
+    // destType == 4 (HUD_PRINTCENTER) and other non-chat messages pass to original client handler
+    if (g_Original_MsgFunc_TextMsg != nullptr)
+        return g_Original_MsgFunc_TextMsg(pszName, iSize, pbuf);
+
+    return 0;
 }
 
 static int HookUserMsgInterceptor(const char* pszMsgName, pfnUserMsgHook pfn)
@@ -1734,6 +1779,13 @@ static int HookUserMsgInterceptor(const char* pszMsgName, pfnUserMsgHook pfn)
             g_Original_MsgFunc_SayText = pfn;
             if (g_OriginalHookUserMsg != nullptr)
                 return g_OriginalHookUserMsg(pszMsgName, Hooked_MsgFunc_SayText);
+            return 1;
+        }
+        else if (std::strcmp(pszMsgName, "TextMsg") == 0)
+        {
+            g_Original_MsgFunc_TextMsg = pfn;
+            if (g_OriginalHookUserMsg != nullptr)
+                return g_OriginalHookUserMsg(pszMsgName, Hooked_MsgFunc_TextMsg);
             return 1;
         }
     }
@@ -1781,9 +1833,8 @@ static int UserMsg_TextMsgHandler(const char* name, int size, void* data, UserMs
                 }
             }
         }
-        else if (destType == 3) // HUD_PRINTTALK (In-game Chat)
+        else if (destType == 3) // HUD_PRINTTALK (In-game Chat & Server announcements)
         {
-            // Extract all strings safely
             std::vector<std::string> strings;
             const char* p = static_cast<const char*>(data) + 1;
             const char* end = static_cast<const char*>(data) + size;
@@ -1798,30 +1849,16 @@ static int UserMsg_TextMsgHandler(const char* name, int size, void* data, UserMs
 
             if (!strings.empty())
             {
-                std::string formatted = strings[0];
-                for (size_t i = 1; i < strings.size(); ++i)
-                {
-                    std::string token = "%s" + std::to_string(i);
-                    size_t pos = formatted.find(token);
-                    if (pos != std::string::npos)
-                    {
-                        formatted.replace(pos, token.length(), strings[i]);
-                    }
-                    else
-                    {
-                        if (!formatted.empty()) formatted += " ";
-                        formatted += strings[i];
-                    }
-                }
-
-                ModernChat::Instance().OnTextMsg(formatted);
+                ModernChat::Instance().OnTextMsgPacket(strings);
             }
 
-            // Suppress the old simple yellow chat display above the radar
+            // Unconditionally suppress legacy HUD_PRINTTALK so it NEVER prints to the old yellow HUD!
             return 1;
         }
     }
 
+    // Pass any unhandled TextMsg messages (e.g. HUD_PRINTCENTER big titles)
+    // directly to the original client handler so they display on screen as normal!
     return next->Invoke(name, size, data);
 }
 

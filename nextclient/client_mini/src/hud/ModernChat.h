@@ -1,6 +1,7 @@
 #pragma once
 
 #include <string>
+#include <vector>
 #include <deque>
 #include <nitroapi/NitroApiInterface.h>
 
@@ -22,6 +23,7 @@ struct LiveChatMessage
     float b = 1.0f;
     double timestamp = 0.0;
     bool isTeam = false;
+    bool isServer = false;
 };
 
 class ModernChat
@@ -39,7 +41,9 @@ public:
     void Cancel();
     void ToggleMode();
 
-    void AddChatMessage(int clientIndex, const std::string& prefix, const std::string& sender, const std::string& text, float r, float g, float b, bool isTeam = false);
+    void AddChatMessage(int clientIndex, const std::string& prefix, const std::string& sender, const std::string& text, float r, float g, float b, bool isTeam = false, bool isServer = false);
+    bool OnSayTextPacket(int clientIndex, const std::vector<std::string>& strings);
+    bool OnTextMsgPacket(const std::vector<std::string>& strings);
     void OnSayText(int clientIndex, const std::string& str1, const std::string& str2, const std::string& str3, const std::string& str4 = "");
     void OnTextMsg(const std::string& formattedMsg);
     void OnLocalPlayerSend(ModernChatMode mode, const std::string& message);

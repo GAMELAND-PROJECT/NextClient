@@ -189,6 +189,12 @@ namespace
         stripKnownPrefix(sender, "*DEAD*");
         stripKnownPrefix(sender, "(DEAD)");
         stripKnownPrefix(sender, "[DEAD]");
+        stripKnownPrefix(sender, "(Terrorist)");
+        stripKnownPrefix(sender, "[Terrorist]");
+        stripKnownPrefix(sender, "(Counter-Terrorist)");
+        stripKnownPrefix(sender, "[Counter-Terrorist]");
+        stripKnownPrefix(sender, "(Spectator)");
+        stripKnownPrefix(sender, "[Spectator]");
         stripKnownPrefix(sender, "(ALL)");
         stripKnownPrefix(sender, "[ALL]");
         TrimString(sender);
@@ -364,8 +370,22 @@ void ModernChat::Send()
             if (gEngfuncs.pfnClientCmd != nullptr)
                 gEngfuncs.pfnClientCmd(cmd);
 
-            // Add to live modern chat feed immediately for instantaneous feedback
-            OnLocalPlayerSend(m_mode, escaped);
+            // Add to live modern chat feed immediately:
+            // Slash commands (e.g. /rs, /top15) route directly to the lower black card tier!
+            std::string_view sv = escaped;
+            while (!sv.empty() && (sv.front() == ' ' || sv.front() == '\t'))
+                sv.remove_prefix(1);
+
+            if (sv.starts_with("/"))
+            {
+                const char* myName = (gEngfuncs.pfnGetCvarString != nullptr ? gEngfuncs.pfnGetCvarString("name") : "");
+                std::string sender = (myName != nullptr && *myName != 0) ? myName : "Me";
+                AddChatMessage(0, "[CMD]", sender, escaped, 0.85f, 0.88f, 0.92f, false, true);
+            }
+            else
+            {
+                OnLocalPlayerSend(m_mode, escaped);
+            }
         }
     }
 
@@ -385,11 +405,18 @@ void ModernChat::ToggleMode()
         m_mode = ModernChatMode::SayAll;
 }
 
-void ModernChat::AddChatMessage(int clientIndex, const std::string& prefix, const std::string& sender, const std::string& text, float r, float g, float b, bool isTeam)
+void ModernChat::AddChatMessage(int clientIndex, const std::string& prefix, const std::string& sender, const std::string& text, float r, float g, float b, bool isTeam, bool isServer)
 {
     std::string cleanText = StripColorCodes(text);
     std::string cleanSender = StripColorCodes(sender);
     std::string cleanPrefix = StripColorCodes(prefix);
+
+    TrimString(cleanPrefix);
+    TrimString(cleanSender);
+    TrimString(cleanText);
+
+    if (cleanText.empty())
+        return;
 
     std::string realPlayerName;
     if (clientIndex >= 1 && clientIndex <= 32 && gEngfuncs.pfnGetPlayerInfo != nullptr)
@@ -399,13 +426,25 @@ void ModernChat::AddChatMessage(int clientIndex, const std::string& prefix, cons
         if (pinfo.name != nullptr && pinfo.name[0] != '\0')
         {
             realPlayerName = StripColorCodes(pinfo.name);
+            TrimString(realPlayerName);
         }
     }
 
-    CleanChatMessage(cleanSender, cleanText, realPlayerName);
+    if (!isServer)
+    {
+        CleanChatMessage(cleanSender, cleanText, realPlayerName);
 
-    if (cleanText.empty() && cleanSender.empty())
-        return;
+        // Fallback if sender became empty
+        if (cleanSender.empty())
+        {
+            if (!realPlayerName.empty())
+                cleanSender = realPlayerName;
+            else if (isTeam)
+                cleanSender = "Teammate";
+            else
+                cleanSender = "Player";
+        }
+    }
 
     const double curTime = (gEngfuncs.GetClientTime ? gEngfuncs.GetClientTime() : 0.0);
 
@@ -415,70 +454,123 @@ void ModernChat::AddChatMessage(int clientIndex, const std::string& prefix, cons
         if (curTime - it->timestamp > 3.5)
             break;
 
-        // Check if text matches exactly or as substring
-        if (it->text == cleanText ||
-            (!cleanText.empty() && !it->text.empty() &&
-             (it->text.find(cleanText) != std::string::npos || cleanText.find(it->text) != std::string::npos)))
+        if (it->isServer == isServer)
         {
-            // If sender matches, or one of them is empty, or one contains the other:
-            bool senderMatch = (it->sender == cleanSender || cleanSender.empty() || it->sender.empty() ||
-                                it->sender.find(cleanSender) != std::string::npos || cleanSender.find(it->sender) != std::string::npos);
-
-            if (senderMatch)
+            if (it->text == cleanText)
             {
-                // If the new one has a better sender (not empty) and old was empty:
-                if (it->sender.empty() && !cleanSender.empty())
+                bool senderMatch = (it->sender == cleanSender || cleanSender.empty() || it->sender.empty());
+
+                if (senderMatch)
                 {
-                    it->sender = cleanSender;
+                    if (it->sender.empty() && !cleanSender.empty())
+                    {
+                        it->sender = cleanSender;
+                    }
+                    if (it->prefix == "[CHAT]" && (cleanPrefix == "[ALL]" || cleanPrefix == "[TEAM]"))
+                    {
+                        it->prefix = cleanPrefix;
+                        it->isTeam = isTeam;
+                        it->r = r; it->g = g; it->b = b;
+                    }
+                    return; // Drop duplicate!
                 }
-                // If existing has generic [CHAT] but new one has specific [ALL] or [TEAM], upgrade prefix:
-                if (it->prefix == "[CHAT]" && (cleanPrefix == "[ALL]" || cleanPrefix == "[TEAM]"))
-                {
-                    it->prefix = cleanPrefix;
-                    it->isTeam = isTeam;
-                    it->r = r; it->g = g; it->b = b;
-                }
-                // Drop duplicate!
-                return;
             }
         }
     }
 
     LiveChatMessage msg;
     msg.clientIndex = clientIndex;
-    msg.prefix = cleanPrefix;
+    msg.prefix = cleanPrefix.empty() ? (isServer ? "[SERVER]" : (isTeam ? "[TEAM]" : "[ALL]")) : cleanPrefix;
     msg.sender = cleanSender;
     msg.text = cleanText;
     msg.r = r;
     msg.g = g;
     msg.b = b;
     msg.isTeam = isTeam;
+    msg.isServer = isServer;
     msg.timestamp = curTime;
 
     m_messages.push_back(std::move(msg));
-    while (m_messages.size() > 10)
+    while (m_messages.size() > 16)
     {
         m_messages.pop_front();
     }
+
+    // Mirror to game console (~):
+    if (gEngfuncs.pfnConsolePrint != nullptr)
+    {
+        std::string con = cleanSender.empty() ? (cleanText + "\n") : (cleanSender + " : " + cleanText + "\n");
+        gEngfuncs.pfnConsolePrint(con.c_str());
+    }
 }
 
-void ModernChat::OnSayText(int clientIndex, const std::string& str1, const std::string& str2, const std::string& str3, const std::string& str4)
+namespace
 {
-    std::string clean1 = StripColorCodes(str1);
-    std::string clean2 = StripColorCodes(str2);
-    std::string clean3 = StripColorCodes(str3);
-    std::string clean4 = StripColorCodes(str4);
-
-    bool isTeam = false;
-    float r = 0.98f, g = 0.82f, b = 0.25f; // Esports Gold default
-    std::string prefix = "[ALL]";
-
-    // Fetch canonical in-game player name from clientIndex (1..32)
-    std::string realPlayerName;
-    int playerTeam = 0;
-    if (clientIndex >= 1 && clientIndex <= 32)
+    bool IsSlashCommand(std::string_view str)
     {
-        if (g_NitroApi != nullptr)
+        while (!str.empty() && (str.front() == ' ' || str.front() == '\t' || str.front() == '"' || str.front() == '\''))
+            str.remove_prefix(1);
+        return !str.empty() && str.front() == '/';
+    }
+
+    bool IsConnectedPlayer(int clientIndex, const std::string& senderName)
+    {
+        if (gEngfuncs.pfnGetPlayerInfo == nullptr)
+            return false;
+
+        // 1. If clientIndex is in valid range 1..32, check that specific client
+        if (clientIndex >= 1 && clientIndex <= 32)
+        {
+            hud_player_info_t pinfo{};
+            gEngfuncs.pfnGetPlayerInfo(clientIndex, &pinfo);
+            if (pinfo.name != nullptr && pinfo.name[0] != '\0')
+            {
+                if (senderName.empty())
+                    return true;
+
+                std::string pName = StripColorCodes(pinfo.name);
+                TrimString(pName);
+                if (EqualsCI(pName, senderName) ||
+                    senderName.find(pName) != std::string::npos ||
+                    pName.find(senderName) != std::string::npos)
+                {
+                    return true;
+                }
+            }
+        }
+
+        // 2. Check all connected players 1..32 for senderName
+        if (!senderName.empty())
+        {
+            for (int i = 1; i <= 32; ++i)
+            {
+                hud_player_info_t pinfo{};
+                gEngfuncs.pfnGetPlayerInfo(i, &pinfo);
+                if (pinfo.name != nullptr && pinfo.name[0] != '\0')
+                {
+                    std::string pName = StripColorCodes(pinfo.name);
+                    TrimString(pName);
+                    if (!pName.empty())
+                    {
+                        if (EqualsCI(pName, senderName) ||
+                            senderName.find(pName) != std::string::npos ||
+                            pName.find(senderName) != std::string::npos)
+                        {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+
+        return false;
+    }
+
+    void ResolvePlayerTeamColor(int clientIndex, const std::string& sender, float& r, float& g, float& b)
+    {
+        int playerTeam = 0;
+
+        if (clientIndex >= 1 && clientIndex <= 32 && g_NitroApi != nullptr)
         {
             auto* clientData = g_NitroApi->GetClientData();
             if (clientData != nullptr && clientData->g_PlayerExtraInfo != nullptr)
@@ -487,84 +579,48 @@ void ModernChat::OnSayText(int clientIndex, const std::string& str1, const std::
             }
         }
 
-        if (gEngfuncs.pfnGetPlayerInfo != nullptr)
+        if (playerTeam == 0 && gEngfuncs.pfnGetPlayerInfo != nullptr)
         {
-            hud_player_info_t pinfo{};
-            gEngfuncs.pfnGetPlayerInfo(clientIndex, &pinfo);
-            if (pinfo.name != nullptr && pinfo.name[0] != '\0')
+            for (int i = 1; i <= 32; ++i)
             {
-                realPlayerName = StripColorCodes(pinfo.name);
-            }
-
-            if (playerTeam == 0 && pinfo.model != nullptr)
-            {
-                std::string model = pinfo.model;
-                for (char& c : model) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-                if (model.find("terror") != std::string::npos || model.find("leet") != std::string::npos ||
-                    model.find("arctic") != std::string::npos || model.find("guerilla") != std::string::npos)
+                hud_player_info_t pinfo{};
+                gEngfuncs.pfnGetPlayerInfo(i, &pinfo);
+                if (pinfo.name != nullptr && pinfo.name[0] != '\0')
                 {
-                    playerTeam = 1;
-                }
-                else if (model.find("urban") != std::string::npos || model.find("gsg9") != std::string::npos ||
-                         model.find("gign") != std::string::npos || model.find("sas") != std::string::npos ||
-                         model.find("vip") != std::string::npos)
-                {
-                    playerTeam = 2;
+                    std::string pName = StripColorCodes(pinfo.name);
+                    TrimString(pName);
+                    if (EqualsCI(pName, sender) || sender.find(pName) != std::string::npos || pName.find(sender) != std::string::npos)
+                    {
+                        if (g_NitroApi != nullptr)
+                        {
+                            auto* clientData = g_NitroApi->GetClientData();
+                            if (clientData != nullptr && clientData->g_PlayerExtraInfo != nullptr)
+                            {
+                                playerTeam = clientData->g_PlayerExtraInfo[i].teamnumber;
+                            }
+                        }
+                        if (playerTeam == 0 && pinfo.model != nullptr)
+                        {
+                            std::string model = pinfo.model;
+                            for (char& c : model) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+                            if (model.find("terror") != std::string::npos || model.find("leet") != std::string::npos ||
+                                model.find("arctic") != std::string::npos || model.find("guerilla") != std::string::npos)
+                            {
+                                playerTeam = 1;
+                            }
+                            else if (model.find("urban") != std::string::npos || model.find("gsg9") != std::string::npos ||
+                                     model.find("gign") != std::string::npos || model.find("sas") != std::string::npos ||
+                                     model.find("vip") != std::string::npos)
+                            {
+                                playerTeam = 2;
+                            }
+                        }
+                        break;
+                    }
                 }
             }
         }
-    }
 
-    std::string sender;
-    std::string msg;
-
-    // 1. Team Chat detection
-    if (clean1.find("_T") != std::string::npos || clean1.find("Terrorist") != std::string::npos ||
-        clean1.find("_CT") != std::string::npos || clean1.find("Counter") != std::string::npos)
-    {
-        isTeam = true;
-        prefix = "[TEAM]";
-        r = 0.18f; g = 0.95f; b = 0.45f; // Vibrant Emerald Green for friendly team chat
-
-        // Always resolve sender cleanly: prefer canonical player name so teammate is NEVER anonymous
-        if (!realPlayerName.empty())
-        {
-            sender = realPlayerName;
-            if (!clean3.empty())
-                msg = clean3;
-            else if (!clean2.empty() && clean2 != realPlayerName)
-                msg = clean2;
-            else
-                msg = clean3;
-        }
-        else
-        {
-            sender = !clean2.empty() ? clean2 : "Teammate";
-            msg = clean3;
-        }
-
-        // CS 1.6 location format: if str4 (or str3) contains location (e.g. #Cstrike_Chat_T_Loc)
-        std::string loc = clean4;
-        if (loc.empty() && clean1.find("_Loc") != std::string::npos && !clean3.empty() && clean3 != msg)
-        {
-            loc = clean3;
-        }
-        if (!loc.empty())
-        {
-            sender += " (" + loc + ")";
-        }
-    }
-    else if (clean1.find("Spec") != std::string::npos)
-    {
-        r = 0.92f; g = 0.80f; b = 0.30f; // Spectator cyber gold
-        prefix = "[SPEC]";
-        sender = !realPlayerName.empty() ? realPlayerName : (!clean2.empty() ? clean2 : "Spectator");
-        msg = !clean3.empty() ? clean3 : clean2;
-    }
-    else
-    {
-        // 2. All Chat - resolve sender's team color (Terrorist / CT / Spec)
-        prefix = "[ALL]";
         if (playerTeam == 1) // Terrorist (Phoenix Crimson)
         {
             r = 1.0f; g = 0.28f; b = 0.32f;
@@ -576,190 +632,604 @@ void ModernChat::OnSayText(int clientIndex, const std::string& str1, const std::
         else if (playerTeam == 3) // Spectator
         {
             r = 0.92f; g = 0.80f; b = 0.30f;
-            prefix = "[SPEC]";
+        }
+        else
+        {
+            // Esports Gold default
+            r = 0.98f; g = 0.82f; b = 0.25f;
+        }
+    }
+
+    void FormatServerMessage(LiveChatMessage& outMsg, std::string text)
+    {
+        outMsg.isServer = true;
+        outMsg.isTeam = false;
+        outMsg.sender.clear();
+        outMsg.r = 0.85f;
+        outMsg.g = 0.88f;
+        outMsg.b = 0.92f;
+
+        TrimString(text);
+        if (text.empty())
+            return;
+
+        std::string prefix = "[SERVER]";
+
+        // Detect known bracketed prefixes like [AMX], [AMXX], [INFO], [VIP], [ADMIN], [RULES], [NOTICE], [TOP15], [RANK]
+        if (text.front() == '[')
+        {
+            size_t closeBracket = text.find(']');
+            if (closeBracket != std::string::npos && closeBracket <= 16)
+            {
+                prefix = text.substr(0, closeBracket + 1);
+                text = text.substr(closeBracket + 1);
+                TrimString(text);
+            }
+        }
+        else if (text.starts_with("* "))
+        {
+            prefix = "[NOTICE]";
+            text = text.substr(2);
+            TrimString(text);
+        }
+        else if (text.starts_with("/"))
+        {
+            prefix = "[CMD]";
         }
 
-        // Determine sender name
-        if (!clean2.empty() && clean2 != clean3 && clean2 != clean4)
-        {
-            sender = clean2;
-        }
-        else if (!realPlayerName.empty())
-        {
-            sender = realPlayerName;
-        }
-        else if (!clean2.empty())
-        {
-            sender = clean2;
-        }
+        outMsg.prefix = prefix;
+        outMsg.text = text;
+    }
 
-        // Determine message body across all packet formats
-        if (!clean4.empty())
+    bool ParseChatPacket(int clientIndex, const std::vector<std::string>& strings, LiveChatMessage& outMsg)
+    {
+        if (strings.empty())
+            return false;
+
+        std::string s1 = (strings.size() > 0) ? strings[0] : "";
+        std::string s2 = (strings.size() > 1) ? strings[1] : "";
+        std::string s3 = (strings.size() > 2) ? strings[2] : "";
+        std::string s4 = (strings.size() > 3) ? strings[3] : "";
+
+        std::string clean1 = StripColorCodes(s1);
+        std::string clean2 = StripColorCodes(s2);
+        std::string clean3 = StripColorCodes(s3);
+        std::string clean4 = StripColorCodes(s4);
+
+        TrimString(clean1);
+        TrimString(clean2);
+        TrimString(clean3);
+        TrimString(clean4);
+
+        if (clean1.empty() && clean2.empty() && clean3.empty() && clean4.empty())
+            return false;
+
+        // 1. Tokens starting with '#'
+        if (clean1.starts_with("#"))
         {
-            msg = clean4;
-            if (!clean3.empty() && clean3 != sender && clean3 != realPlayerName)
+            if (clean1 == "#Cstrike_Name_Change")
             {
-                sender += " (" + clean3 + ")";
+                FormatServerMessage(outMsg, clean2 + " is now known as " + clean3);
+                outMsg.prefix = "[INFO]";
+                return true;
             }
-        }
-        else if (!clean3.empty())
-        {
-            msg = clean3;
-        }
-        else if (!clean2.empty())
-        {
-            // Could be "sender : message" in clean2
-            size_t colonPos = clean2.find(" : ");
-            if (colonPos == std::string::npos) colonPos = clean2.find("  :  ");
-            if (colonPos == std::string::npos) colonPos = clean2.find(":");
-            if (colonPos != std::string::npos)
+
+            if (clean1 == "#Fire_in_the_hole")
             {
-                sender = clean2.substr(0, colonPos);
-                size_t startMsg = colonPos + 1;
-                while (startMsg < clean2.length() && (clean2[startMsg] == ' ' || clean2[startMsg] == '\t' || clean2[startMsg] == ':'))
-                    startMsg++;
-                msg = clean2.substr(startMsg);
+                FormatServerMessage(outMsg, clean2 + " (RADIO): Fire in the hole!");
+                outMsg.prefix = "[RADIO]";
+                return true;
             }
-            else if (clean2 != realPlayerName && !realPlayerName.empty())
+
+            // Non-chat '#' tokens are server events, radio commands, or game notices!
+            if (!clean1.starts_with("#Cstrike_Chat_"))
             {
-                msg = clean2;
+                std::string notice;
+                if (clean1 == "#Game_join_terrorist" || clean1 == "#Cstrike_TitlesTXT_Game_join_terrorist")
+                    notice = clean2 + " joined Terrorists";
+                else if (clean1 == "#Game_join_ct" || clean1 == "#Cstrike_TitlesTXT_Game_join_ct")
+                    notice = clean2 + " joined Counter-Terrorists";
+                else if (clean1 == "#Game_connected")
+                    notice = clean2 + " connected";
+                else if (clean1 == "#Game_disconnected")
+                    notice = clean2 + " disconnected";
+                else if (clean1 == "#Game_bomb_drop")
+                    notice = clean2 + " dropped the bomb";
+                else if (clean1 == "#Game_bomb_pickup")
+                    notice = clean2 + " picked up the bomb";
+                else if (clean1 == "#Game_scoring")
+                    notice = clean2 + " killed " + clean3 + (clean4.empty() ? "" : (" with " + clean4));
+                else
+                {
+                    notice = clean1.substr(1);
+                    for (char& c : notice) if (c == '_') c = ' ';
+                    if (!clean2.empty()) notice += " " + clean2;
+                    if (!clean3.empty()) notice += " " + clean3;
+                }
+
+                FormatServerMessage(outMsg, notice);
+                return true;
             }
-        }
-        else if (!clean1.empty() && !clean1.starts_with("#"))
-        {
-            // Single-string format in clean1 (AMX Mod X ColorChat)
-            size_t colonPos = clean1.find(" : ");
-            if (colonPos == std::string::npos) colonPos = clean1.find("  :  ");
-            if (colonPos == std::string::npos) colonPos = clean1.find(":");
-            if (colonPos != std::string::npos)
+
+            // Standard CS 1.6 player chat token
+            bool isTeam = (clean1.find("_T") != std::string::npos || clean1.find("_CT") != std::string::npos);
+            bool isDead = (clean1.find("Dead") != std::string::npos || clean1.find("*DEAD*") != std::string::npos);
+            bool isSpec = (clean1.find("Spec") != std::string::npos);
+
+            std::string prefix;
+            if (isSpec) prefix = "[SPEC]";
+            else if (isTeam) prefix = "[TEAM]";
+            else prefix = "[ALL]";
+            if (isDead) prefix = "*DEAD* " + prefix;
+
+            std::string sender = clean2;
+            std::string text = clean3;
+
+            if (clean1.find("_Loc") != std::string::npos && !clean4.empty())
             {
-                sender = clean1.substr(0, colonPos);
-                size_t startMsg = colonPos + 1;
-                while (startMsg < clean1.length() && (clean1[startMsg] == ' ' || clean1[startMsg] == '\t' || clean1[startMsg] == ':'))
-                    startMsg++;
-                msg = clean1.substr(startMsg);
+                if (!clean3.empty()) sender += " (" + clean3 + ")";
+                text = clean4;
+            }
+
+            if (text.empty() && !clean2.empty())
+            {
+                text = clean2;
+                sender.clear();
+            }
+
+            if (IsSlashCommand(text))
+            {
+                FormatServerMessage(outMsg, text);
+                outMsg.sender = sender;
+                return true;
+            }
+
+            float r = 0.98f, g = 0.82f, b = 0.25f;
+            if (isTeam)
+            {
+                r = 0.18f; g = 0.95f; b = 0.45f; // Emerald Green
+            }
+            else if (isSpec)
+            {
+                r = 0.92f; g = 0.80f; b = 0.30f;
             }
             else
             {
-                prefix = "[SERVER]";
-                sender.clear();
-                msg = clean1;
-                r = 0.15f; g = 0.95f; b = 0.55f;
+                ResolvePlayerTeamColor(clientIndex, sender, r, g, b);
+            }
+
+            outMsg.clientIndex = clientIndex;
+            outMsg.prefix = prefix;
+            outMsg.sender = sender;
+            outMsg.text = text;
+            outMsg.r = r; outMsg.g = g; outMsg.b = b;
+            outMsg.isTeam = isTeam;
+            outMsg.isServer = false;
+            return true;
+        }
+
+        // 2. Pure server notices, server commands, announcements
+        std::string lower1 = clean1;
+        for (char& c : lower1) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+
+        if (lower1.starts_with("[server]") || lower1.starts_with("[info]") ||
+            lower1.starts_with("[notice]") || lower1.starts_with("[announcement]") ||
+            lower1.starts_with("[amx]") || lower1.starts_with("[amxx]") ||
+            lower1.starts_with("[host]") || lower1.starts_with("[rules]") ||
+            lower1.starts_with("[top15]") || lower1.starts_with("[rank]") ||
+            lower1.starts_with("[war]") || lower1.starts_with("[match]") ||
+            lower1.starts_with("[vip]") || lower1.starts_with("[admin]") ||
+            lower1.starts_with("server") || lower1.starts_with("console") ||
+            lower1.starts_with("* ") || lower1.starts_with("/"))
+        {
+            std::string fullMsg = clean1;
+            if (!clean2.empty()) fullMsg += " " + clean2;
+            if (!clean3.empty()) fullMsg += " " + clean3;
+            FormatServerMessage(outMsg, fullMsg);
+            return true;
+        }
+
+        // 3. Formatted tokens with %s or %s1 (e.g. "%s1 :  %s2", "%s : %s")
+        if (clean1.find("%s") != std::string::npos)
+        {
+            std::string sender = clean2;
+            std::string text = clean3;
+            if (text.empty() && !clean4.empty()) text = clean4;
+            if (text.empty() && !clean2.empty())
+            {
+                size_t cPos = clean2.find(" : ");
+                if (cPos != std::string::npos)
+                {
+                    sender = clean2.substr(0, cPos);
+                    text = clean2.substr(cPos + 3);
+                }
+            }
+
+            if (IsSlashCommand(text))
+            {
+                FormatServerMessage(outMsg, text);
+                outMsg.sender = sender;
+                return true;
+            }
+
+            if (!IsConnectedPlayer(clientIndex, sender))
+            {
+                std::string fullMsg = clean2;
+                if (!clean3.empty()) fullMsg += " " + clean3;
+                FormatServerMessage(outMsg, fullMsg);
+                return true;
+            }
+
+            bool isTeam = (clean1.find("Terrorist") != std::string::npos || clean1.find("Counter") != std::string::npos || clean1.find("TEAM") != std::string::npos);
+            bool isDead = (clean1.find("*DEAD*") != std::string::npos || clean1.find("Dead") != std::string::npos);
+            bool isSpec = (clean1.find("Spec") != std::string::npos);
+
+            std::string prefix;
+            if (isSpec) prefix = "[SPEC]";
+            else if (isTeam) prefix = "[TEAM]";
+            else prefix = "[ALL]";
+            if (isDead) prefix = "*DEAD* " + prefix;
+
+            float r = 0.98f, g = 0.82f, b = 0.25f;
+            if (isTeam)
+            {
+                r = 0.18f; g = 0.95f; b = 0.45f;
+            }
+            else if (isSpec)
+            {
+                r = 0.92f; g = 0.80f; b = 0.30f;
+            }
+            else
+            {
+                ResolvePlayerTeamColor(clientIndex, sender, r, g, b);
+            }
+
+            outMsg.clientIndex = clientIndex;
+            outMsg.prefix = prefix;
+            outMsg.sender = sender;
+            outMsg.text = text;
+            outMsg.r = r; outMsg.g = g; outMsg.b = b;
+            outMsg.isTeam = isTeam;
+            outMsg.isServer = false;
+            return true;
+        }
+
+        // 4. Three-string player chat (clean1 = format/channel, clean2 = sender, clean3 = message)
+        if (!clean2.empty() && !clean3.empty())
+        {
+            if (IsSlashCommand(clean3))
+            {
+                FormatServerMessage(outMsg, clean3);
+                outMsg.sender = clean2;
+                return true;
+            }
+
+            std::string lowerSender = clean2;
+            for (char& c : lowerSender) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+
+            if (lowerSender.starts_with("[server]") || lowerSender.starts_with("[info]") ||
+                lowerSender.starts_with("[notice]") || lowerSender.starts_with("[announcement]") ||
+                lowerSender.starts_with("[amx]") || lowerSender.starts_with("[amxx]") ||
+                lowerSender.starts_with("[vip]") || lowerSender.starts_with("[admin]") ||
+                lowerSender.starts_with("[host]") || lowerSender.starts_with("[rules]") ||
+                lowerSender.starts_with("[top15]") || lowerSender.starts_with("[rank]") ||
+                lowerSender.starts_with("server") || lowerSender.starts_with("console") ||
+                lowerSender.starts_with("* ") || lowerSender.starts_with("/"))
+            {
+                FormatServerMessage(outMsg, clean2 + " " + clean3);
+                return true;
+            }
+
+            bool isTeam = (clean1.find("Terrorist") != std::string::npos || clean1.find("Counter") != std::string::npos ||
+                           clean1.find("TEAM") != std::string::npos || clean2.find("(Terrorist)") != std::string::npos ||
+                           clean2.find("(Counter-Terrorist)") != std::string::npos);
+            bool isDead = (clean1.find("*DEAD*") != std::string::npos || clean2.find("*DEAD*") != std::string::npos);
+            bool isSpec = (clean1.find("Spec") != std::string::npos || clean2.find("(Spectator)") != std::string::npos);
+
+            std::string cleanPlayerSender = clean2;
+            auto stripTag = [](std::string& s, std::string_view tag) {
+                size_t pos = s.find(tag);
+                if (pos != std::string::npos) s.erase(pos, tag.length());
+            };
+            stripTag(cleanPlayerSender, "*DEAD*");
+            stripTag(cleanPlayerSender, "(DEAD)");
+            stripTag(cleanPlayerSender, "[DEAD]");
+            stripTag(cleanPlayerSender, "(Terrorist)");
+            stripTag(cleanPlayerSender, "[Terrorist]");
+            stripTag(cleanPlayerSender, "(Counter-Terrorist)");
+            stripTag(cleanPlayerSender, "[Counter-Terrorist]");
+            stripTag(cleanPlayerSender, "(Spectator)");
+            stripTag(cleanPlayerSender, "[Spectator]");
+            stripTag(cleanPlayerSender, "(ALL)");
+            stripTag(cleanPlayerSender, "[ALL]");
+            TrimString(cleanPlayerSender);
+
+            std::string prefix;
+            if (isSpec) prefix = "[SPEC]";
+            else if (isTeam) prefix = "[TEAM]";
+            else prefix = "[ALL]";
+            if (isDead) prefix = "*DEAD* " + prefix;
+
+            float r = 0.98f, g = 0.82f, b = 0.25f;
+            if (isTeam)
+            {
+                r = 0.18f; g = 0.95f; b = 0.45f;
+            }
+            else if (isSpec)
+            {
+                r = 0.92f; g = 0.80f; b = 0.30f;
+            }
+            else
+            {
+                ResolvePlayerTeamColor(clientIndex, cleanPlayerSender, r, g, b);
+            }
+
+            outMsg.clientIndex = clientIndex;
+            outMsg.prefix = prefix;
+            outMsg.sender = cleanPlayerSender.empty() ? clean2 : cleanPlayerSender;
+            outMsg.text = clean3;
+            outMsg.r = r; outMsg.g = g; outMsg.b = b;
+            outMsg.isTeam = isTeam;
+            outMsg.isServer = false;
+            return true;
+        }
+
+        // 5. Two-string player chat (clean1 = sender, clean2 = message)
+        if (!clean1.empty() && !clean2.empty() && clean3.empty())
+        {
+            if (IsSlashCommand(clean2))
+            {
+                FormatServerMessage(outMsg, clean2);
+                outMsg.sender = clean1;
+                return true;
+            }
+
+            std::string lowerSender = clean1;
+            for (char& c : lowerSender) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+
+            // Verify clean1 is not a server notification header
+            if (lowerSender.starts_with("[server]") || lowerSender.starts_with("[info]") ||
+                lowerSender.starts_with("[notice]") || lowerSender.starts_with("[announcement]") ||
+                lowerSender.starts_with("[amx]") || lowerSender.starts_with("[amxx]") ||
+                lowerSender.starts_with("[vip]") || lowerSender.starts_with("[admin]") ||
+                lowerSender.starts_with("[host]") || lowerSender.starts_with("[rules]") ||
+                lowerSender.starts_with("[top15]") || lowerSender.starts_with("[rank]") ||
+                lowerSender.starts_with("[war]") || lowerSender.starts_with("[match]") ||
+                lowerSender.starts_with("server") || lowerSender.starts_with("console") ||
+                lowerSender.starts_with("* ") || lowerSender.starts_with("/"))
+            {
+                FormatServerMessage(outMsg, clean1 + " " + clean2);
+                return true;
+            }
+
+            bool isTeam = (clean1.find("(Terrorist)") != std::string::npos || clean1.find("(Counter-Terrorist)") != std::string::npos);
+            bool isDead = (clean1.find("*DEAD*") != std::string::npos || clean1.find("Dead") != std::string::npos);
+            bool isSpec = (clean1.find("(Spectator)") != std::string::npos || clean1.find("Spec") != std::string::npos);
+
+            std::string cleanPlayerSender = clean1;
+            auto stripTag = [](std::string& s, std::string_view tag) {
+                size_t pos = s.find(tag);
+                if (pos != std::string::npos) s.erase(pos, tag.length());
+            };
+            stripTag(cleanPlayerSender, "*DEAD*");
+            stripTag(cleanPlayerSender, "(DEAD)");
+            stripTag(cleanPlayerSender, "[DEAD]");
+            stripTag(cleanPlayerSender, "(Terrorist)");
+            stripTag(cleanPlayerSender, "[Terrorist]");
+            stripTag(cleanPlayerSender, "(Counter-Terrorist)");
+            stripTag(cleanPlayerSender, "[Counter-Terrorist]");
+            stripTag(cleanPlayerSender, "(Spectator)");
+            stripTag(cleanPlayerSender, "[Spectator]");
+            stripTag(cleanPlayerSender, "(ALL)");
+            stripTag(cleanPlayerSender, "[ALL]");
+            TrimString(cleanPlayerSender);
+
+            std::string prefix;
+            if (isSpec) prefix = "[SPEC]";
+            else if (isTeam) prefix = "[TEAM]";
+            else prefix = "[ALL]";
+            if (isDead) prefix = "*DEAD* " + prefix;
+
+            float r = 0.98f, g = 0.82f, b = 0.25f;
+            if (isTeam)
+            {
+                r = 0.18f; g = 0.95f; b = 0.45f;
+            }
+            else if (isSpec)
+            {
+                r = 0.92f; g = 0.80f; b = 0.30f;
+            }
+            else
+            {
+                ResolvePlayerTeamColor(clientIndex, cleanPlayerSender, r, g, b);
+            }
+
+            outMsg.clientIndex = clientIndex;
+            outMsg.prefix = prefix;
+            outMsg.sender = cleanPlayerSender.empty() ? clean1 : cleanPlayerSender;
+            outMsg.text = clean2;
+            outMsg.r = r; outMsg.g = g; outMsg.b = b;
+            outMsg.isTeam = isTeam;
+            outMsg.isServer = false;
+            return true;
+        }
+
+        // 6. Single-string player chat with " : " or ": "
+        std::string fullLine = !clean1.empty() ? clean1 : clean2;
+        size_t colonPos = fullLine.find(" : ");
+        size_t sepLen = 3;
+        if (colonPos == std::string::npos)
+        {
+            colonPos = fullLine.find("  :  ");
+            sepLen = 5;
+        }
+        if (colonPos == std::string::npos)
+        {
+            colonPos = fullLine.find(": ");
+            sepLen = 2;
+        }
+
+        if (colonPos != std::string::npos && colonPos > 0 && colonPos < 64)
+        {
+            std::string rawSender = fullLine.substr(0, colonPos);
+            std::string rawMsg = fullLine.substr(colonPos + sepLen);
+            TrimString(rawSender);
+            TrimString(rawMsg);
+
+            if (IsSlashCommand(rawMsg))
+            {
+                FormatServerMessage(outMsg, rawMsg);
+                outMsg.sender = rawSender;
+                return true;
+            }
+
+            std::string lowerSender = rawSender;
+            for (char& c : lowerSender) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            if (lowerSender.starts_with("[server]") || lowerSender.starts_with("[info]") ||
+                lowerSender.starts_with("[amx]") || lowerSender.starts_with("[host]") ||
+                lowerSender.starts_with("[vip]") || lowerSender.starts_with("[admin]"))
+            {
+                FormatServerMessage(outMsg, fullLine);
+                return true;
+            }
+
+            if (!IsConnectedPlayer(clientIndex, rawSender))
+            {
+                FormatServerMessage(outMsg, fullLine);
+                return true;
+            }
+
+            bool isTeam = (rawSender.find("(Terrorist)") != std::string::npos ||
+                           rawSender.find("(Counter-Terrorist)") != std::string::npos);
+            bool isDead = (rawSender.find("*DEAD*") != std::string::npos);
+            bool isSpec = (rawSender.find("(Spectator)") != std::string::npos);
+
+            std::string prefix;
+            if (isSpec) prefix = "[SPEC]";
+            else if (isTeam) prefix = "[TEAM]";
+            else prefix = "[ALL]";
+            if (isDead) prefix = "*DEAD* " + prefix;
+
+            float r = 0.98f, g = 0.82f, b = 0.25f;
+            if (isTeam)
+            {
+                r = 0.18f; g = 0.95f; b = 0.45f;
+            }
+            else if (isSpec)
+            {
+                r = 0.92f; g = 0.80f; b = 0.30f;
+            }
+            else
+            {
+                ResolvePlayerTeamColor(clientIndex, rawSender, r, g, b);
+            }
+
+            outMsg.clientIndex = clientIndex;
+            outMsg.prefix = prefix;
+            outMsg.sender = rawSender;
+            outMsg.text = rawMsg;
+            outMsg.r = r; outMsg.g = g; outMsg.b = b;
+            outMsg.isTeam = isTeam;
+            outMsg.isServer = false;
+            return true;
+        }
+
+        // 7. Any single-string or remaining message is formatted as a server notice!
+        FormatServerMessage(outMsg, fullLine);
+        return !outMsg.text.empty();
+    }
+}
+
+bool ModernChat::OnSayTextPacket(int clientIndex, const std::vector<std::string>& strings)
+{
+    LiveChatMessage msg;
+    if (!ParseChatPacket(clientIndex, strings, msg))
+        return false;
+
+    if (msg.text.empty())
+        return false;
+
+    if (!msg.isServer)
+    {
+        // Safe deduplication against local player's recent send
+        cl_entity_t* localPlayer = (gEngfuncs.GetLocalPlayer ? gEngfuncs.GetLocalPlayer() : nullptr);
+        int localIndex = (localPlayer != nullptr) ? localPlayer->index : -1;
+        const double curTime = (gEngfuncs.GetClientTime ? gEngfuncs.GetClientTime() : 0.0);
+        const char* myName = (gEngfuncs.pfnGetCvarString != nullptr ? gEngfuncs.pfnGetCvarString("name") : "");
+
+        bool isLocalSender = false;
+        if (localIndex > 0 && (clientIndex == localIndex || msg.clientIndex == localIndex))
+            isLocalSender = true;
+        if (myName != nullptr && *myName != 0)
+        {
+            if (EqualsCI(msg.sender, myName) ||
+                msg.sender.find(myName) != std::string::npos ||
+                std::string(myName).find(msg.sender) != std::string::npos)
+            {
+                isLocalSender = true;
+            }
+        }
+
+        if (isLocalSender && !m_lastLocalSentText.empty() && (curTime - m_lastLocalSentTime) < 3.5)
+        {
+            if (msg.text == m_lastLocalSentText ||
+                msg.text.find(m_lastLocalSentText) != std::string::npos ||
+                m_lastLocalSentText.find(msg.text) != std::string::npos)
+            {
+                return true; // Already displayed locally, suppress old radar display
             }
         }
     }
 
-    if (clean1.find("Dead") != std::string::npos || clean1.find("*DEAD*") != std::string::npos)
-    {
-        prefix = "*DEAD* " + prefix;
-    }
+    AddChatMessage(clientIndex, msg.prefix, msg.sender, msg.text, msg.r, msg.g, msg.b, msg.isTeam, msg.isServer);
+    return true;
+}
 
-    // 3. Special CS format tokens
-    if (clean1 == "#Cstrike_Name_Change")
-    {
-        prefix = "[INFO]";
-        sender.clear();
-        msg = clean2 + " is now known as " + clean3;
-        r = 0.85f; g = 0.88f; b = 0.92f;
-    }
+bool ModernChat::OnTextMsgPacket(const std::vector<std::string>& strings)
+{
+    LiveChatMessage msg;
+    if (!ParseChatPacket(0, strings, msg))
+        return false;
 
-    // 4. Safe echo deduplication: if server echoed our own recent message within 3.0s, skip duplicate
-    cl_entity_t* localPlayer = (gEngfuncs.GetLocalPlayer ? gEngfuncs.GetLocalPlayer() : nullptr);
-    int localIndex = (localPlayer != nullptr) ? localPlayer->index : -1;
-    if (clientIndex == localIndex && localIndex > 0)
+    if (msg.text.empty())
+        return false;
+
+    if (!msg.isServer)
     {
+        // Safe deduplication against local player's recent send
         const double curTime = (gEngfuncs.GetClientTime ? gEngfuncs.GetClientTime() : 0.0);
-        if (!m_lastLocalSentText.empty() && (curTime - m_lastLocalSentTime) < 3.0 && msg == m_lastLocalSentText)
+        const char* myName = (gEngfuncs.pfnGetCvarString != nullptr ? gEngfuncs.pfnGetCvarString("name") : "");
+
+        if (myName != nullptr && *myName != 0 && EqualsCI(msg.sender, myName))
         {
-            return;
+            if (!m_lastLocalSentText.empty() && (curTime - m_lastLocalSentTime) < 3.5 &&
+                (msg.text == m_lastLocalSentText || msg.text.find(m_lastLocalSentText) != std::string::npos ||
+                 m_lastLocalSentText.find(msg.text) != std::string::npos))
+            {
+                return true; // Already displayed locally, suppress old radar display
+            }
         }
     }
 
-    CleanChatMessage(sender, msg, realPlayerName);
-    AddChatMessage(clientIndex, prefix, sender, msg, r, g, b, isTeam);
+    AddChatMessage(msg.clientIndex, msg.prefix, msg.sender, msg.text, msg.r, msg.g, msg.b, msg.isTeam, msg.isServer);
+    return true;
+}
+
+void ModernChat::OnSayText(int clientIndex, const std::string& str1, const std::string& str2, const std::string& str3, const std::string& str4)
+{
+    std::vector<std::string> strings;
+    strings.push_back(str1);
+    if (!str2.empty() || !str3.empty() || !str4.empty()) strings.push_back(str2);
+    if (!str3.empty() || !str4.empty()) strings.push_back(str3);
+    if (!str4.empty()) strings.push_back(str4);
+
+    OnSayTextPacket(clientIndex, strings);
 }
 
 void ModernChat::OnTextMsg(const std::string& formattedMsg)
 {
-    std::string cleaned = StripColorCodes(formattedMsg);
-    if (cleaned.empty())
-        return;
-
-    bool isTeam = false;
-    float r = 0.98f, g = 0.82f, b = 0.25f;
-    std::string prefix = "[ALL]";
-    std::string sender;
-    std::string msg;
-
-    if (cleaned.find("(Terrorist)") != std::string::npos || cleaned.find("(Counter-Terrorist)") != std::string::npos)
-    {
-        isTeam = true;
-        prefix = "[TEAM]";
-        r = 0.18f; g = 0.95f; b = 0.45f;
-    }
-
-    bool isDead = (cleaned.find("*DEAD*") != std::string::npos);
-
-    // Look for separator " : " or "  :  " or ": "
-    size_t colonPos = cleaned.find(" : ");
-    size_t sepLen = 3;
-    if (colonPos == std::string::npos)
-    {
-        colonPos = cleaned.find("  :  ");
-        sepLen = 5;
-    }
-    if (colonPos == std::string::npos)
-    {
-        colonPos = cleaned.find(": ");
-        sepLen = 2;
-    }
-
-    if (colonPos != std::string::npos)
-    {
-        std::string rawSender = cleaned.substr(0, colonPos);
-        msg = cleaned.substr(colonPos + sepLen);
-
-        // Strip team prefix tags from rawSender so only the clean player name remains
-        size_t tagPos = rawSender.find("(Terrorist)");
-        if (tagPos != std::string::npos) rawSender.erase(tagPos, 11);
-        tagPos = rawSender.find("(Counter-Terrorist)");
-        if (tagPos != std::string::npos) rawSender.erase(tagPos, 19);
-        tagPos = rawSender.find("(Spectator)");
-        if (tagPos != std::string::npos) rawSender.erase(tagPos, 11);
-        tagPos = rawSender.find("*DEAD*");
-        if (tagPos != std::string::npos) rawSender.erase(tagPos, 6);
-
-        // Trim whitespace
-        while (!rawSender.empty() && (rawSender.front() == ' ' || rawSender.front() == '\t'))
-            rawSender.erase(0, 1);
-        while (!rawSender.empty() && (rawSender.back() == ' ' || rawSender.back() == '\t'))
-            rawSender.pop_back();
-
-        sender = rawSender;
-    }
-    else
-    {
-        prefix = "[SERVER]";
-        sender.clear();
-        msg = cleaned;
-        r = 0.15f; g = 0.95f; b = 0.55f;
-    }
-
-    if (isDead)
-    {
-        prefix = "*DEAD* " + prefix;
-    }
-
-    CleanChatMessage(sender, msg);
-
-    // AddChatMessage will automatically deduplicate if SayText or local send already added this text!
-    AddChatMessage(0, prefix, sender, msg, r, g, b, isTeam);
-
-    if (gEngfuncs.pfnConsolePrint != nullptr)
-    {
-        std::string con = cleaned + "\n";
-        gEngfuncs.pfnConsolePrint(con.c_str());
-    }
+    std::vector<std::string> strings = { formattedMsg };
+    OnTextMsgPacket(strings);
 }
 
 void ModernChat::OnLocalPlayerSend(ModernChatMode mode, const std::string& message)
@@ -768,9 +1238,9 @@ void ModernChat::OnLocalPlayerSend(ModernChatMode mode, const std::string& messa
     const bool isTeam = (mode == ModernChatMode::SayTeam);
     std::string prefix = isTeam ? "[TEAM]" : "[ALL]";
 
-    float r = 0.0f;
-    float g = 0.85f;
-    float b = 1.0f;
+    float r = 0.98f;
+    float g = 0.82f;
+    float b = 0.25f;
 
     cl_entity_t* localPlayer = (gEngfuncs.GetLocalPlayer ? gEngfuncs.GetLocalPlayer() : nullptr);
     int localIndex = (localPlayer != nullptr) ? localPlayer->index : 0;
@@ -794,22 +1264,7 @@ void ModernChat::OnLocalPlayerSend(ModernChatMode mode, const std::string& messa
     }
     else
     {
-        if (localPlayer != nullptr && g_NitroApi != nullptr)
-        {
-            auto* clientData = g_NitroApi->GetClientData();
-            if (clientData != nullptr && clientData->g_PlayerExtraInfo != nullptr && localIndex >= 1 && localIndex <= 32)
-            {
-                int team = clientData->g_PlayerExtraInfo[localIndex].teamnumber;
-                if (team == 1) // Terrorist
-                {
-                    r = 1.0f; g = 0.28f; b = 0.32f;
-                }
-                else if (team == 2) // CT
-                {
-                    r = 0.18f; g = 0.76f; b = 1.0f;
-                }
-            }
-        }
+        ResolvePlayerTeamColor(localIndex, (myName && *myName) ? myName : "Me", r, g, b);
     }
 
     AddChatMessage(localIndex, prefix, (myName && *myName) ? myName : "Me", message, r, g, b, isTeam);
@@ -959,32 +1414,142 @@ void ModernChat::Draw(int scrW, int scrH)
     int targetBarY = scrH - static_cast<int>(180.0f * scale + 0.5f);
 
     // =========================================================================
-    // PART A: DYNAMIC RECENT CHAT FEED (سیستم نمایش زنده و پویای پیام‌ها)
+    // PART A: DYNAMIC RECENT CHAT FEED (سیستم نمایش دو طبقه‌ای مدرن پیام‌ها)
+    // طبقه پایین: پیام‌های سرور و دستورات با استایل مشکی مات (Stealth Black)
+    // طبقه بالا: پیام‌های تیمی و همگانی بازیکنان با کادرهای سبز زمردی و آبسیدین
     // =========================================================================
     int currentMsgBottomY = targetBarY - 8;
-    int drawnMessages = 0;
     constexpr double kMessageLifetime = 8.0;
 
-    for (int i = static_cast<int>(m_messages.size()) - 1; i >= 0 && drawnMessages < 6; --i)
+    // -------------------------------------------------------------------------
+    // Tier 1: LOWER TIER - SERVER MESSAGES (پایین‌تر از تکست‌های تیمی و آل)
+    // -------------------------------------------------------------------------
+    int drawnServerCount = 0;
+    for (int i = static_cast<int>(m_messages.size()) - 1; i >= 0 && drawnServerCount < 4; --i)
     {
         const auto& m = m_messages[i];
-        double age = curTime - m.timestamp;
+        if (!m.isServer)
+            continue;
 
+        double age = curTime - m.timestamp;
         int alpha = 245;
         if (!IsOpen())
         {
             if (age > kMessageLifetime)
                 continue;
             if (age > 6.0)
-            {
                 alpha = static_cast<int>(245.0f * (1.0f - static_cast<float>(age - 6.0) / 2.0f));
-            }
         }
-
         if (alpha <= 6)
             continue;
 
-        // Smooth kinetic ease-out slide-in from the left on arrival
+        float enterT = std::min(1.0f, static_cast<float>(age / 0.20f));
+        float slideEase = 1.0f - std::pow(1.0f - enterT, 3.0f);
+        int slideOffsetX = static_cast<int>((1.0f - slideEase) * -38.0f);
+
+        int lineH = static_cast<int>(24.0f * scale + 0.5f);
+        currentMsgBottomY -= (lineH + 4);
+
+        int prefixW = 0, senderW = 0, textW = 0, dummyH = 0;
+        if (!m.prefix.empty()) GetTextSize(m.prefix.c_str(), prefixW, dummyH);
+        if (!m.sender.empty()) GetTextSize(m.sender.c_str(), senderW, dummyH);
+        GetTextSize(m.text.c_str(), textW, dummyH);
+
+        int totalContentW = (m.prefix.empty() ? 0 : (prefixW + 14)) +
+                            (m.sender.empty() ? 0 : (senderW + 18)) +
+                            textW + 30;
+        int cardW = std::min(scrW - 48, std::max(static_cast<int>(260.0f * scale), totalContentW));
+        int cardX = m_barX + slideOffsetX;
+
+        // 1. Soft Outer Ambient Drop-Shadow
+        DrawBox(cardX - 1, currentMsgBottomY - 1, cardW + 2, lineH + 2, 0, 0, 0, (alpha * 160) / 255);
+
+        // 2. Pure Stealth Jet-Black Body (کادر مشکی کامل و مات طبق درخواست کاربر)
+        DrawBox(cardX, currentMsgBottomY, cardW, lineH, 5, 5, 8, (alpha * 245) / 255);
+
+        // 3. Top Specular Hairline (حاشیه استیل مات)
+        DrawBox(cardX, currentMsgBottomY, cardW, 1, 75, 80, 90, (alpha * 160) / 255);
+
+        // 4. Bottom Hairline Accent
+        DrawBox(cardX, currentMsgBottomY + lineH - 1, cardW, 1, 30, 32, 38, (alpha * 180) / 255);
+
+        // 5. Right Subtle Edge
+        DrawBox(cardX + cardW - 1, currentMsgBottomY, 1, lineH, 45, 48, 55, (alpha * 130) / 255);
+
+        // 6. Left Indicator Pillar
+        DrawBox(cardX, currentMsgBottomY, 3, lineH, 130, 135, 145, alpha);
+
+        // 7. Base Progress Line
+        if (!IsOpen())
+        {
+            float remaining = std::clamp(1.0f - static_cast<float>(age / kMessageLifetime), 0.0f, 1.0f);
+            int progW = static_cast<int>((cardW - 4) * remaining);
+            if (progW > 0)
+            {
+                DrawBox(cardX + 2, currentMsgBottomY + lineH - 2, progW, 1, 95, 100, 110, (alpha * 180) / 255);
+            }
+        }
+
+        int posX = cardX + 10;
+        int textY = currentMsgBottomY + (lineH - 13) / 2;
+
+        // 8. Stealth Black/Graphite Badge Pill
+        if (!m.prefix.empty())
+        {
+            int badgePad = 4;
+            int badgeW = prefixW + (badgePad * 2);
+            int badgeH = lineH - 6;
+            int badgeY = currentMsgBottomY + 3;
+
+            DrawBox(posX, badgeY, badgeW, badgeH, 20, 20, 26, (alpha * 230) / 255);
+            DrawBox(posX, badgeY, badgeW, 1, 70, 75, 85, (alpha * 240) / 255);
+
+            DrawTextWithShadow(posX + badgePad, textY, m.prefix.c_str(), 0.85f, 0.88f, 0.92f);
+            posX += badgeW + 8;
+        }
+
+        // Sender in Tier 1 (if present, e.g. for player commands: "Player : /rs")
+        if (!m.sender.empty())
+        {
+            DrawTextWithShadow(posX, textY, m.sender.c_str(), 0.85f, 0.88f, 0.92f);
+            posX += senderW + 2;
+            DrawTextWithShadow(posX, textY, ":", 0.70f, 0.73f, 0.78f);
+            posX += 8;
+        }
+
+        // 9. Message Text in Crisp Crystal Silver-White
+        DrawTextWithShadow(posX, textY, m.text.c_str(), 0.98f, 0.98f, 1.0f);
+
+        drawnServerCount++;
+    }
+
+    if (drawnServerCount > 0)
+    {
+        currentMsgBottomY -= 4; // Distinct visual tier separator gap
+    }
+
+    // -------------------------------------------------------------------------
+    // Tier 2: UPPER TIER - PLAYER CHAT MESSAGES (چت‌های تیمی و همگانی بازیکنان)
+    // -------------------------------------------------------------------------
+    int drawnPlayerCount = 0;
+    for (int i = static_cast<int>(m_messages.size()) - 1; i >= 0 && drawnPlayerCount < 6; --i)
+    {
+        const auto& m = m_messages[i];
+        if (m.isServer)
+            continue;
+
+        double age = curTime - m.timestamp;
+        int alpha = 245;
+        if (!IsOpen())
+        {
+            if (age > kMessageLifetime)
+                continue;
+            if (age > 6.0)
+                alpha = static_cast<int>(245.0f * (1.0f - static_cast<float>(age - 6.0) / 2.0f));
+        }
+        if (alpha <= 6)
+            continue;
+
         float enterT = std::min(1.0f, static_cast<float>(age / 0.20f));
         float slideEase = 1.0f - std::pow(1.0f - enterT, 3.0f);
         int slideOffsetX = static_cast<int>((1.0f - slideEase) * -38.0f);
@@ -1008,29 +1573,23 @@ void ModernChat::Draw(int scrW, int scrH)
 
         if (m.isTeam)
         {
-            // 2. Emerald Glass Body for Team Chat (کادر و بدنه سبز رنگ چت تیم خودی)
+            // Emerald Glass Body for Team Chat
             DrawBox(cardX, currentMsgBottomY, cardW, lineH, 10, 28, 18, (alpha * 225) / 255);
-
-            // 3. Glowing Emerald Frame Borders (کادر سبز رنگ)
-            DrawBox(cardX, currentMsgBottomY, cardW, 1, 46, 213, 115, (alpha * 220) / 255); // Top green accent
-            DrawBox(cardX, currentMsgBottomY + lineH - 1, cardW, 1, 46, 213, 115, (alpha * 120) / 255); // Bottom
-            DrawBox(cardX + cardW - 1, currentMsgBottomY, 1, lineH, 46, 213, 115, (alpha * 150) / 255); // Right
-            DrawBox(cardX, currentMsgBottomY, 3, lineH, 46, 213, 115, alpha); // Left Neon Pillar
+            DrawBox(cardX, currentMsgBottomY, cardW, 1, 46, 213, 115, (alpha * 220) / 255);
+            DrawBox(cardX, currentMsgBottomY + lineH - 1, cardW, 1, 46, 213, 115, (alpha * 120) / 255);
+            DrawBox(cardX + cardW - 1, currentMsgBottomY, 1, lineH, 46, 213, 115, (alpha * 150) / 255);
+            DrawBox(cardX, currentMsgBottomY, 3, lineH, 46, 213, 115, alpha);
         }
         else
         {
-            // 2. Frosted Obsidian Glass Body for All Chat
+            // Frosted Obsidian Glass Body for All Chat
             DrawBox(cardX, currentMsgBottomY, cardW, lineH, 12, 16, 26, (alpha * 220) / 255);
-
-            // 3. Top Hairline Specular Highlight
             DrawBox(cardX, currentMsgBottomY, cardW, 1, 255, 255, 255, (alpha * 35) / 255);
-
-            // 4. Dynamic Left Team-Color Neon Pillar
             DrawBox(cardX, currentMsgBottomY, 3, lineH,
                     static_cast<int>(m.r * 255), static_cast<int>(m.g * 255), static_cast<int>(m.b * 255), alpha);
         }
 
-        // 5. Dynamic Kinetic Laser Progress Line at base of card
+        // Base progress line
         if (!IsOpen())
         {
             float remaining = std::clamp(1.0f - static_cast<float>(age / kMessageLifetime), 0.0f, 1.0f);
@@ -1048,7 +1607,7 @@ void ModernChat::Draw(int scrW, int scrH)
         int posX = cardX + 10;
         int textY = currentMsgBottomY + (lineH - 13) / 2;
 
-        // 6. Channel / Status Badge Pill
+        // Channel Badge Pill
         if (!m.prefix.empty())
         {
             int badgePad = 4;
@@ -1074,7 +1633,7 @@ void ModernChat::Draw(int scrW, int scrH)
             posX += badgeW + 8;
         }
 
-        // 7. Sender Name with Drop-Shadow
+        // Sender Name
         if (!m.sender.empty())
         {
             float senderR = m.isTeam ? 0.35f : m.r;
@@ -1086,7 +1645,7 @@ void ModernChat::Draw(int scrW, int scrH)
             posX += 8;
         }
 
-        // 8. Message Content in Crystal Diamond White with Drop-Shadow
+        // Message Content
         const char* pDrawMsg = m.text.c_str();
         std::string safeRenderText;
         if (!m.sender.empty())
@@ -1116,8 +1675,7 @@ void ModernChat::Draw(int scrW, int scrH)
         }
 
         DrawTextWithShadow(posX, textY, pDrawMsg, 0.96f, 0.97f, 1.0f);
-
-        drawnMessages++;
+        drawnPlayerCount++;
     }
 
     // =========================================================================
