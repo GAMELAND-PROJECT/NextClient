@@ -147,10 +147,6 @@ void ModernChat::Open(ModernChatMode mode)
     m_buffer.clear();
     m_openTime = (gEngfuncs.GetClientTime ? gEngfuncs.GetClientTime() : 0.0);
 
-    // Audio feedback: crisp subtle cyber blip
-    if (gEngfuncs.pfnPlaySoundByName != nullptr)
-        gEngfuncs.pfnPlaySoundByName("buttons/blip1.wav", 0.8f);
-
     // NOTE: Mouse look/turning remains 100% ACTIVE!
     // We intentionally NEVER call IN_DeactivateMouse() so the player can freely aim & look 360 degrees while typing.
 }
@@ -190,10 +186,6 @@ void ModernChat::Send()
 
             // Add to live modern chat feed immediately for instantaneous feedback
             OnLocalPlayerSend(m_mode, escaped);
-
-            // Sound feedback for successful send
-            if (gEngfuncs.pfnPlaySoundByName != nullptr)
-                gEngfuncs.pfnPlaySoundByName("buttons/blip2.wav", 0.9f);
         }
     }
 
@@ -202,10 +194,6 @@ void ModernChat::Send()
 
 void ModernChat::Cancel()
 {
-    // Sound feedback for cancel
-    if (gEngfuncs.pfnPlaySoundByName != nullptr)
-        gEngfuncs.pfnPlaySoundByName("buttons/button2.wav", 0.5f);
-
     Close();
 }
 
@@ -215,9 +203,6 @@ void ModernChat::ToggleMode()
         m_mode = ModernChatMode::SayTeam;
     else if (m_mode == ModernChatMode::SayTeam)
         m_mode = ModernChatMode::SayAll;
-
-    if (gEngfuncs.pfnPlaySoundByName != nullptr)
-        gEngfuncs.pfnPlaySoundByName("buttons/lightswitch2.wav", 0.7f);
 }
 
 void ModernChat::AddChatMessage(int clientIndex, const std::string& prefix, const std::string& sender, const std::string& text, float r, float g, float b)
@@ -635,32 +620,7 @@ void ModernChat::Draw(int scrW, int scrH)
     DrawBox(m_barX, m_barY, 1, m_barH, 255, 255, 255, 25);
     DrawBox(m_barX + m_barW - 1, m_barY, 1, m_barH, 255, 255, 255, 25);
 
-    // 5. Action Badges (SEND & CANCEL)
-    int btnW = static_cast<int>(78.0f * scale + 0.5f);
-    int btnH = m_barH - 10;
-    int btnY = m_barY + 5;
-
-    m_cancelBtnX = m_barX + m_barW - btnW - 6;
-    m_cancelBtnY = btnY;
-    m_cancelBtnW = btnW;
-    m_cancelBtnH = btnH;
-
-    m_sendBtnX = m_cancelBtnX - btnW - 6;
-    m_sendBtnY = btnY;
-    m_sendBtnW = btnW;
-    m_sendBtnH = btnH;
-
-    // SEND Action Indicator:
-    DrawBox(m_sendBtnX, m_sendBtnY, m_sendBtnW, m_sendBtnH, 0, 130, 180, 180);
-    DrawBox(m_sendBtnX, m_sendBtnY, m_sendBtnW, 1, 0, 220, 255, pulseAlpha);
-    DrawTextWithShadow(m_sendBtnX + 10, m_sendBtnY + (btnH - 13) / 2, "SEND [L]", 0.3f, 0.95f, 1.0f);
-
-    // CANCEL Action Indicator:
-    DrawBox(m_cancelBtnX, m_cancelBtnY, m_cancelBtnW, m_cancelBtnH, 55, 60, 70, 170);
-    DrawBox(m_cancelBtnX, m_cancelBtnY, m_cancelBtnW, 1, 220, 80, 95, 120);
-    DrawTextWithShadow(m_cancelBtnX + 6, m_cancelBtnY + (btnH - 13) / 2, "CANCEL [R]", 0.95f, 0.55f, 0.60f);
-
-    // 6. Mode Badge with breathing glow:
+    // 5. Mode Badge with breathing glow:
     int badgeW = static_cast<int>(82.0f * scale + 0.5f);
     int badgeH = m_barH - 10;
     int badgeX = m_barX + 6;
@@ -679,7 +639,7 @@ void ModernChat::Draw(int scrW, int scrH)
         DrawTextWithShadow(badgeX + 15, badgeY + (badgeH - 13) / 2, "[ ALL ]", 0.3f, 0.95f, 1.0f);
     }
 
-    // 7. Player Identity Tag:
+    // 6. Player Identity Tag:
     const char* pPlayerName = (gEngfuncs.pfnGetCvarString != nullptr ? gEngfuncs.pfnGetCvarString("name") : "");
     int nameW = 0, dummyH = 0;
     if (pPlayerName != nullptr && *pPlayerName != 0)
@@ -698,15 +658,15 @@ void ModernChat::Draw(int scrW, int scrH)
         inputX += 8;
     }
 
-    // 8. Input Text Field with smooth horizontal auto-scroll
-    int inputMaxW = m_sendBtnX - inputX - 12;
+    // 7. Input Text Field with smooth horizontal auto-scroll across full width
+    int inputMaxW = (m_barX + m_barW) - inputX - 16;
     const char* pDrawText = m_buffer.c_str();
     std::string visibleBuffer;
     int textW = 0, textH = 0;
 
     if (m_buffer.empty())
     {
-        DrawTextWithShadow(inputX, inputY, "Type your message... [Left-Click/Enter to Send, Right-Click to Cancel]", 0.55f, 0.60f, 0.68f);
+        DrawTextWithShadow(inputX, inputY, "Say something...", 0.52f, 0.56f, 0.64f);
     }
     else
     {
@@ -727,7 +687,7 @@ void ModernChat::Draw(int scrW, int scrH)
         DrawTextWithShadow(inputX, inputY, pDrawText, 0.98f, 0.98f, 1.0f);
     }
 
-    // 9. Pulsing Glowing Cursor '|'
+    // 8. Pulsing Glowing Cursor '|'
     bool blink = (static_cast<int>(curTime * 3.2) % 2) == 0;
     if (blink)
     {
@@ -739,7 +699,7 @@ void ModernChat::Draw(int scrW, int scrH)
             DrawBox(curX, curY, 2, m_barH - 16, 0, 220, 255, 240);
     }
 
-    // 10. Dynamic Character Progress Micro-Bar under Input Field
+    // 9. Dynamic Character Progress Micro-Bar under Input Field
     float charRatio = std::clamp(static_cast<float>(m_buffer.size()) / 120.0f, 0.0f, 1.0f);
     int charBarW = static_cast<int>((m_barW - 12) * charRatio);
     int charBarR = (m_buffer.size() > 100) ? 255 : (m_buffer.size() > 70 ? 255 : (isTeam ? 46 : 0));
@@ -750,7 +710,7 @@ void ModernChat::Draw(int scrW, int scrH)
         DrawBox(m_barX + 6, m_barY + m_barH - 2, charBarW, 1, charBarR, charBarG, charBarB, pulseAlpha);
     }
 
-    // 11. Modern Dynamic Helper Ribbon Below
+    // 10. Modern Dynamic Helper Ribbon Below
     int helpY = m_barY + m_barH + 4;
     int helpH = 18;
     DrawBox(m_barX, helpY, m_barW, helpH, 10, 14, 20, 200);
@@ -763,8 +723,8 @@ void ModernChat::Draw(int scrW, int scrH)
     GetTextSize(countBuf, countW, dummyH);
 
     DrawTextWithShadow(m_barX + 10, helpY + 3,
-        "[Left-Click / Enter] Send   *   [Right-Click / Esc] Cancel   *   [Tab] Switch Mode   *   [Ctrl+V] Paste",
-        0.75f, 0.80f, 0.88f);
+        "[Enter / Left-Click] Send   *   [Esc / Right-Click] Cancel   *   [Tab] Switch Channel",
+        0.72f, 0.76f, 0.84f);
 
     float countR = (m_buffer.size() > 100) ? 1.0f : 0.50f;
     float countG = (m_buffer.size() > 100) ? 0.35f : 0.75f;

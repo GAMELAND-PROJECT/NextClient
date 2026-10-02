@@ -1684,12 +1684,20 @@ static int Hooked_MsgFunc_SayText(const char* pszName, int iSize, void* pbuf)
             s2 ? s2 : "",
             s3 ? s3 : "",
             s4 ? s4 : "");
+
+        if (gEngfuncs.pfnConsolePrint != nullptr && s1 != nullptr && *s1 != 0)
+        {
+            char conBuf[512]{};
+            if (s2 != nullptr && *s2 != 0 && s3 != nullptr && *s3 != 0)
+                std::snprintf(conBuf, sizeof(conBuf), "%s : %s\n", s2, s3);
+            else
+                std::snprintf(conBuf, sizeof(conBuf), "%s\n", s1);
+            gEngfuncs.pfnConsolePrint(conBuf);
+        }
     }
 
-    if (g_Original_MsgFunc_SayText != nullptr)
-        return g_Original_MsgFunc_SayText(pszName, iSize, pbuf);
-
-    return 0;
+    // Suppress the old simple yellow chat display above the radar so it only displays once in the modern graphical feed
+    return 1;
 }
 
 static int HookUserMsgInterceptor(const char* pszMsgName, pfnUserMsgHook pfn)
@@ -1788,11 +1796,8 @@ static void CL_CreateMoveHandler(float frametime, usercmd_t* cmd, int active, CL
 
     if (ModernChat::Instance().IsOpen() && cmd != nullptr)
     {
-        cmd->forwardmove = 0.0f;
-        cmd->sidemove = 0.0f;
-        cmd->upmove = 0.0f;
-        cmd->buttons = 0;
-        cmd->impulse = 0;
+        // Keep running and walking momentum fluid; only prevent weapon firing on mouse click
+        cmd->buttons &= ~(IN_ATTACK | IN_ATTACK2);
     }
 }
 

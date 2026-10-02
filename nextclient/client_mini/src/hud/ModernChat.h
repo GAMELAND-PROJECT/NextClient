@@ -61,14 +61,4 @@ private:
     int m_barY = 0;
     int m_barW = 0;
     int m_barH = 0;
-
-    int m_sendBtnX = 0;
-    int m_sendBtnY = 0;
-    int m_sendBtnW = 0;
-    int m_sendBtnH = 0;
-
-    int m_cancelBtnX = 0;
-    int m_cancelBtnY = 0;
-    int m_cancelBtnW = 0;
-    int m_cancelBtnH = 0;
 };
