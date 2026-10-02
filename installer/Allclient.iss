@@ -4,11 +4,7 @@
 #endif
 #define AppPublisher "GAMELAND PROJECT"
 #define AppExeName "cstrike.exe"
-#ifndef BuildTag
-  #define TagFile FileOpen("..\client_tags.txt")
-  #define BuildTag Trim(FileRead(TagFile))
-  #expr FileClose(TagFile)
-#endif
+
 
 #ifndef SourceRoot
   #define SourceRoot "F:\Allclient"
@@ -53,23 +49,24 @@ Source: "runtime\vc_redist.x64.exe"; Flags: dontcopy
 Source: "runtime\vcredist2010_x86.exe"; Flags: dontcopy
 Source: "runtime\vcredist2010_x64.exe"; Flags: dontcopy
 ; 1. Base files excluding maps and user config (so custom maps are never overwritten)
-Source: "{#SourceRoot}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "cstrike\maps\*,cstrike\userconfig.cfg,backups\*,cstrike_downloads\*,crashes\*,htmlcache\*,*.log,*.mdmp,debug.log,install.bat,unins000.exe,unins000.dat,*.bak*,*.bak_gameland*,update\*,demos\*,videos\*,*.pdb,*.git*,build-info.txt,hitbox_vis.asi*,*.asi.disabled,auto_launcher_tests.exe,allclient-install.ini,gameland_license.dat"
+Source: "{#SourceRoot}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "cstrike\maps\*,cstrike\userconfig.cfg,backups\*,cstrike_downloads\*,crashes\*,htmlcache\*,*.log,*.mdmp,debug.log,install.bat,unins000.exe,unins000.dat,*.bak*,*.bak_gameland*,update\*,demos\*,videos\*,*.pdb,*.git*,build-info.txt,hitbox_vis.asi*,*.asi.disabled,auto_launcher_tests.exe,allclient-install.ini,gameland_license.dat,client_tags.txt"
 ; 2. Game maps - NEVER overwrite existing maps! Custom and downloaded maps are 100% preserved
 Source: "{#SourceRoot}\cstrike\maps\*"; DestDir: "{app}\cstrike\maps"; Flags: onlyifdoesntexist recursesubdirs createallsubdirs; Excludes: "*.log,*.bak*,*.bak_gameland*"
 ; 3. User config template - only install if not already existing
 Source: "{#SourceRoot}\cstrike\userconfig.cfg"; DestDir: "{app}\cstrike"; Flags: onlyifdoesntexist;
 ; 4. Overlay latest compiled binaries and configs
-Source: "{#BinaryRoot}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "cstrike\maps\*,*.log,*.mdmp,debug.log,hitbox_vis.asi*,*.asi.disabled,auto_launcher_tests.exe,allclient-install.ini,*.pdb,*.git*,build-info.txt,*.bak*,*.bak_gameland*,gameland_license.dat"
+Source: "{#BinaryRoot}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "cstrike\maps\*,*.log,*.mdmp,debug.log,hitbox_vis.asi*,*.asi.disabled,auto_launcher_tests.exe,allclient-install.ini,*.pdb,*.git*,build-info.txt,*.bak*,*.bak_gameland*,gameland_license.dat,client_tags.txt"
 
 [INI]
 Filename: "{app}\allclient-install.ini"; Section: "Allclient"; Key: "Schema"; String: "1"
 Filename: "{app}\allclient-install.ini"; Section: "Allclient"; Key: "ClientType"; String: "Home"
-Filename: "{app}\allclient-install.ini"; Section: "Allclient"; Key: "GameNetTag"; String: ""
 Filename: "{app}\allclient-install.ini"; Section: "Allclient"; Key: "DeviceHash"; String: "{code:GetDeviceHash}"
 Filename: "{app}\allclient-install.ini"; Section: "Allclient"; Key: "PhoneNumber"; String: "{code:GetUserPhoneNumber}"
 
 [Registry]
-Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Uninstall\{{D9E46BD1-52F8-470F-8639-FF31FE7C5E48}_is1"; ValueType: string; ValueName: "GameNetTag"; ValueData: "{code:GetActiveGameNetTag}"; Flags: uninsdeletevalue
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Uninstall\{{D9E46BD1-52F8-470F-8639-FF31FE7C5E48}_is1"; ValueType: string; ValueName: "ClientType"; ValueData: "Home"; Flags: uninsdeletevalue
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Uninstall\{{D9E46BD1-52F8-470F-8639-FF31FE7C5E48}_is1"; ValueType: string; ValueName: "DeviceHash"; ValueData: "{code:GetDeviceHash}"; Flags: uninsdeletevalue
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Uninstall\{{D9E46BD1-52F8-470F-8639-FF31FE7C5E48}_is1"; ValueType: string; ValueName: "PhoneNumber"; ValueData: "{code:GetUserPhoneNumber}"; Flags: uninsdeletevalue
 Root: HKCU; Subkey: "Software\NextClient"; ValueType: string; ValueName: "InstallID"; ValueData: "{code:GetHardwareID}"; Flags: uninsdeletevalue
 Root: HKLM; Subkey: "Software\NextClient"; ValueType: string; ValueName: "InstallID"; ValueData: "{code:GetHardwareID}"; Flags: uninsdeletevalue noerror
 
@@ -137,7 +134,6 @@ var
   DetectedInstallDirectory: String;
   DetectedInstallRoot: Integer;
   DependenciesReady: Boolean;
-  ActiveGameNetTag: String;
   IsPatchMode: Boolean;
 
 function GetDeviceHash(Param: String): String;
@@ -311,13 +307,7 @@ begin
   end;
 end;
 
-function GetActiveGameNetTag(Param: String): String;
-begin
-  if Trim(ActiveGameNetTag) <> '' then
-    Result := Trim(ActiveGameNetTag)
-  else
-    Result := '{#BuildTag}';
-end;
+
 
 function URLDownloadToFile(Caller: NativeInt; URL, FileName: String;
   Reserved: DWORD; StatusCallback: NativeInt): HResult;
@@ -1038,41 +1028,10 @@ begin
   end;
 end;
 
-function ReadInstalledGameNetTag(const Directory: String; var Tag: String): Boolean;
-var
-  IdentityFile, RegistryTag: String;
-  RawTag: AnsiString;
-begin
-  Tag := '';
-  IdentityFile := AddBackslash(Directory) + 'allclient-install.ini';
-  RegQueryStringValue(DetectedInstallRoot, AllclientUninstallKey, 'GameNetTag', Tag);
-  RegistryTag := Trim(Tag);
-
-  if FileExists(IdentityFile) then
-  begin
-    Tag := Trim(GetIniString('Allclient', 'GameNetTag', '', IdentityFile));
-  end;
-
-  if Tag = '' then
-    Tag := RegistryTag;
-
-  if (Tag = '') and FileExists(AddBackslash(Directory) + 'client_tags.txt') then
-  begin
-    Tag := Trim(GetIniString('', '', '', AddBackslash(Directory) + 'client_tags.txt'));
-    if Tag = '' then
-    begin
-      RawTag := '';
-      if LoadStringFromFile(AddBackslash(Directory) + 'client_tags.txt', RawTag) then
-        Tag := Trim(String(RawTag));
-    end;
-  end;
-
-  Result := (Tag <> '');
-end;
-
 procedure CheckInstalledSubscription;
 var
-  Directory, Version, InstalledTag, Response: String;
+  Directory, Version, SavedPhone, SavedHash, Response: String;
+  IdentityFile: String;
 begin
   if not UpdateAccessChecked then
   begin
@@ -1081,19 +1040,29 @@ begin
        FileExists(AddBackslash(Directory) + 'cstrike.exe') and
        PreviousInstallPathIsSafe(Directory) then
     begin
-      InstalledTag := '';
-      if not ReadInstalledGameNetTag(Directory, InstalledTag) or (InstalledTag = '') then
-        InstalledTag := '{#BuildTag}';
-
-      if FetchAccessResponse('http://gameland.cam/update_access.php?tag=' + InstalledTag, Response) then
+      SavedPhone := '';
+      SavedHash := '';
+      IdentityFile := AddBackslash(Directory) + 'allclient-install.ini';
+      if FileExists(IdentityFile) then
       begin
-        SubscriptionUpdate := (Pos('ACTIVE', Response) = 1);
-        if SubscriptionUpdate then
+        SavedPhone := Trim(GetIniString('Allclient', 'PhoneNumber', '', IdentityFile));
+        SavedHash := Trim(GetIniString('Allclient', 'DeviceHash', '', IdentityFile));
+      end;
+      if SavedHash = '' then
+        SavedHash := DeviceHash24;
+
+      if (SavedHash <> '') and (SavedPhone <> '') then
+      begin
+        if FetchAccessApi('?action=check_home_subscription&hash=' + SavedHash + '&phone=' + SavedPhone, Response) then
         begin
-          ActiveGameNetTag := InstalledTag;
-          AccessApproved := True;
-          DetectedInstallDirectory := Directory;
-          WizardForm.DirEdit.Text := Directory;
+          if Pos('"valid":true', Lowercase(Response)) > 0 then
+          begin
+            SubscriptionUpdate := True;
+            AccessApproved := True;
+            UserPhoneNumber := SavedPhone;
+            DetectedInstallDirectory := Directory;
+            WizardForm.DirEdit.Text := Directory;
+          end;
         end;
       end;
     end;
@@ -1365,7 +1334,6 @@ begin
 
 
     SetIniString('Allclient', 'ClientType', 'Home', ExpandConstant('{app}\allclient-install.ini'));
-    SetIniString('Allclient', 'GameNetTag', '', ExpandConstant('{app}\allclient-install.ini'));
     SetIniString('Allclient', 'DeviceHash', DeviceHash24, ExpandConstant('{app}\allclient-install.ini'));
     SetIniString('Allclient', 'PhoneNumber', UserPhoneNumber, ExpandConstant('{app}\allclient-install.ini'));
     ConfigureSmartEmu(ExpandConstant('{app}\platform\steam\games\SmartEmu\config.xml'));
