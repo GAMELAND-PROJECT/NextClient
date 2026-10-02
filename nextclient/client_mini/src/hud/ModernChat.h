@@ -41,6 +41,7 @@ public:
 
     void AddChatMessage(int clientIndex, const std::string& prefix, const std::string& sender, const std::string& text, float r, float g, float b, bool isTeam = false);
     void OnSayText(int clientIndex, const std::string& str1, const std::string& str2, const std::string& str3, const std::string& str4 = "");
+    void OnTextMsg(const std::string& formattedMsg);
     void OnLocalPlayerSend(ModernChatMode mode, const std::string& message);
 
     [[nodiscard]] bool IsOpen() const { return m_mode != ModernChatMode::Closed; }
@@ -57,6 +58,9 @@ private:
     double m_openTime = 0.0;
 
     std::deque<LiveChatMessage> m_messages;
+
+    std::string m_lastLocalSentText;
+    double m_lastLocalSentTime = 0.0;
 
     int m_barX = 0;
     int m_barY = 0;

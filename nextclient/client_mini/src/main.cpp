@@ -1669,30 +1669,41 @@ static int Hooked_MsgFunc_VGUIMenu(const char* pszName, int iSize, void* pbuf)
 
 static int Hooked_MsgFunc_SayText(const char* pszName, int iSize, void* pbuf)
 {
-    if (pbuf != nullptr && iSize > 0)
+    if (pbuf != nullptr && iSize > 1)
     {
-        BEGIN_READ(pbuf, iSize);
-        int clientIndex = READ_BYTE();
-        const char* s1 = READ_STRING();
-        const char* s2 = READ_STRING();
-        const char* s3 = READ_STRING();
-        const char* s4 = READ_STRING();
+        const unsigned char* bytes = static_cast<const unsigned char*>(pbuf);
+        int clientIndex = bytes[0];
 
-        ModernChat::Instance().OnSayText(
-            clientIndex,
-            s1 ? s1 : "",
-            s2 ? s2 : "",
-            s3 ? s3 : "",
-            s4 ? s4 : "");
-
-        if (gEngfuncs.pfnConsolePrint != nullptr && s1 != nullptr && *s1 != 0)
+        // Safely extract null-terminated strings directly from the packet buffer
+        // without relying on static global buffers that can overwrite each other.
+        std::vector<std::string> strings;
+        const char* p = static_cast<const char*>(pbuf) + 1;
+        const char* end = static_cast<const char*>(pbuf) + iSize;
+        while (p < end)
         {
-            char conBuf[512]{};
-            if (s2 != nullptr && *s2 != 0 && s3 != nullptr && *s3 != 0)
-                std::snprintf(conBuf, sizeof(conBuf), "%s : %s\n", s2, s3);
-            else
-                std::snprintf(conBuf, sizeof(conBuf), "%s\n", s1);
-            gEngfuncs.pfnConsolePrint(conBuf);
+            const char* strEnd = p;
+            while (strEnd < end && *strEnd != '\0')
+                strEnd++;
+            strings.emplace_back(p, strEnd - p);
+            p = (strEnd < end) ? strEnd + 1 : end;
+        }
+
+        std::string s1 = (strings.size() > 0) ? strings[0] : "";
+        std::string s2 = (strings.size() > 1) ? strings[1] : "";
+        std::string s3 = (strings.size() > 2) ? strings[2] : "";
+        std::string s4 = (strings.size() > 3) ? strings[3] : "";
+
+        ModernChat::Instance().OnSayText(clientIndex, s1, s2, s3, s4);
+
+        if (gEngfuncs.pfnConsolePrint != nullptr)
+        {
+            std::string conLine;
+            if (!s2.empty() && !s3.empty())
+                conLine = s2 + " : " + s3 + "\n";
+            else if (!s1.empty())
+                conLine = s1 + "\n";
+            if (!conLine.empty())
+                gEngfuncs.pfnConsolePrint(conLine.c_str());
         }
     }
 
@@ -1751,19 +1762,63 @@ static int UserMsg_TextMsgHandler(const char* name, int size, void* data, UserMs
         "client_chat_close\n",
     };
 
-    BEGIN_READ(data, size);
-
-    const int destType = READ_BYTE();
-    if (destType == 2)
+    if (data != nullptr && size > 0)
     {
-        std::string message = READ_STRING();
-        if (message == "#Game_unknown_command")
+        const unsigned char* bytes = static_cast<const unsigned char*>(data);
+        const int destType = bytes[0];
+
+        if (destType == 2) // HUD_PRINTCONSOLE
         {
-            std::string command = READ_STRING();
-            if (std::ranges::contains(hiddenServerCmds, command))
+            BEGIN_READ(data, size);
+            READ_BYTE(); // destType
+            std::string message = READ_STRING();
+            if (message == "#Game_unknown_command")
             {
-                return 1;
+                std::string command = READ_STRING();
+                if (std::ranges::contains(hiddenServerCmds, command))
+                {
+                    return 1;
+                }
             }
+        }
+        else if (destType == 3) // HUD_PRINTTALK (In-game Chat)
+        {
+            // Extract all strings safely
+            std::vector<std::string> strings;
+            const char* p = static_cast<const char*>(data) + 1;
+            const char* end = static_cast<const char*>(data) + size;
+            while (p < end)
+            {
+                const char* strEnd = p;
+                while (strEnd < end && *strEnd != '\0')
+                    strEnd++;
+                strings.emplace_back(p, strEnd - p);
+                p = (strEnd < end) ? strEnd + 1 : end;
+            }
+
+            if (!strings.empty())
+            {
+                std::string formatted = strings[0];
+                for (size_t i = 1; i < strings.size(); ++i)
+                {
+                    std::string token = "%s" + std::to_string(i);
+                    size_t pos = formatted.find(token);
+                    if (pos != std::string::npos)
+                    {
+                        formatted.replace(pos, token.length(), strings[i]);
+                    }
+                    else
+                    {
+                        if (!formatted.empty()) formatted += " ";
+                        formatted += strings[i];
+                    }
+                }
+
+                ModernChat::Instance().OnTextMsg(formatted);
+            }
+
+            // Suppress the old simple yellow chat display above the radar
+            return 1;
         }
     }
 
