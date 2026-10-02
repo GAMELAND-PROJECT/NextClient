@@ -11,6 +11,8 @@
 #include <magic_enum/magic_enum.hpp>
 #include <string>
 #include <thread>
+#include <atomic>
+#include <chrono>
 #include <mmsystem.h>
 
 #ifdef SENTRY_ENABLE
@@ -240,10 +242,40 @@ void ClientLauncher::Run()
     {
         EngineSessionResult run_result = EngineSessionResult::Exit;
 
+        // In-game lightweight heartbeat thread (pulses every 90 seconds to maintain single active session lease)
+        std::atomic<bool> stop_heartbeat{false};
+        std::thread heartbeat_thread;
+        if (IsUserAuthenticated())
+        {
+            // Pulse once right at engine start
+            SendUserHeartbeat();
+
+            heartbeat_thread = std::thread([&stop_heartbeat] {
+                while (!stop_heartbeat.load())
+                {
+                    for (int i = 0; i < 90 && !stop_heartbeat.load(); ++i)
+                    {
+                        std::this_thread::sleep_for(std::chrono::seconds(1));
+                    }
+                    if (stop_heartbeat.load())
+                        break;
+
+                    SendUserHeartbeat();
+                }
+            });
+        }
+
         try
         {
             run_result = RunEngine();
-    SyncPlayerConfig();
+            if (run_result == EngineSessionResult::Exit)
+            {
+                SyncPlayerConfig();
+            }
+            else
+            {
+                LOG(WARNING) << "Engine terminated abnormally (" << static_cast<int>(run_result) << "), skipping cloud config sync to prevent corruption.";
+            }
         }
         catch (const std::exception& e)
         {
@@ -262,6 +294,12 @@ void ClientLauncher::Run()
             {
                 next_process_ = BuildRestartProcess();
             }
+        }
+
+        stop_heartbeat.store(true);
+        if (heartbeat_thread.joinable())
+        {
+            heartbeat_thread.join();
         }
 
         if (run_result == EngineSessionResult::Restart)
@@ -916,7 +954,12 @@ void ClientLauncher::RestoreGameConfigOnFreshLaunch()
     constexpr char kDefaultConfig[] = "default/config.cfg";
     EnsureDefaultGameConfig(kDefaultConfig);
 
-    // On fresh launch, if no user is authenticated (guest mode), cleanly reset to default!
+    // If home client, NEVER wipe user's local config! Home users have their own PC.
+    const GameNetAccessStatus online_access = QueryGameNetOnlineAccess();
+    if (online_access.is_home_client)
+        return;
+
+    // On fresh launch, if no user is authenticated (guest mode in LAN game center), cleanly reset to default!
     if (!IsUserAuthenticated())
     {
         ResetGuestConfigToDefault();

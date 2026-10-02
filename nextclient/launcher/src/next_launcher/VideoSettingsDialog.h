@@ -12,3 +12,4 @@ void SyncPlayerConfig();
 
 bool IsUserAuthenticated();
 void ResetGuestConfigToDefault();
+void SendUserHeartbeat();

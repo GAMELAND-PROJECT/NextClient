@@ -1,4 +1,5 @@
-﻿#include <Windows.h>
+#include <Windows.h>
+#include <wincrypt.h>
 #include <CommCtrl.h>
 #include <WinInet.h>
 #include <windowsx.h>
@@ -22,6 +23,7 @@
 #include "../next_launcher/EmbeddedDefaultConfig.h"
 #include "../next_launcher/VideoSettingsDialog.h"
 #pragma comment(lib, "msimg32.lib")
+#pragma comment(lib, "advapi32.lib")
 
 namespace
 {
@@ -160,6 +162,7 @@ HWND g_userRegisterBtn{};
 HWND g_userStatusLabel{};
 std::wstring g_activeUserPhone;
 std::string g_activeUserToken;
+static bool s_restoringSession = false;
 
 HWND g_regMobile{};
 HWND g_regRequestOtpBtn{};
@@ -1426,6 +1429,45 @@ std::wstring DecodeJsonString(const std::string& str)
     return WidenUtf8(str);
 }
 
+static std::string g_lastLoadedConfigHash;
+
+static std::string ComputeStringSha256(const std::string& input)
+{
+    HCRYPTPROV hProv = 0;
+    HCRYPTHASH hHash = 0;
+    std::string hexResult;
+    if (CryptAcquireContext(&hProv, nullptr, nullptr, PROV_RSA_AES, CRYPT_VERIFYCONTEXT))
+    {
+        if (CryptCreateHash(hProv, CALG_SHA_256, 0, 0, &hHash))
+        {
+            if (CryptHashData(hHash, reinterpret_cast<const BYTE*>(input.data()), static_cast<DWORD>(input.size()), 0))
+            {
+                BYTE hashBuf[32]{};
+                DWORD hashLen = sizeof(hashBuf);
+                if (CryptGetHashParam(hHash, HP_HASHVAL, hashBuf, &hashLen, 0))
+                {
+                    char hex[65]{};
+                    for (DWORD i = 0; i < hashLen; ++i)
+                        sprintf_s(hex + (i * 2), 3, "%02x", hashBuf[i]);
+                    hexResult = hex;
+                }
+            }
+            CryptDestroyHash(hHash);
+        }
+        CryptReleaseContext(hProv, 0);
+    }
+    return hexResult;
+}
+
+static bool IsValidConfigContent(const std::string& content)
+{
+    if (content.size() < 150)
+        return false;
+    if (content.find("bind ") == std::string::npos && content.find("bind\t") == std::string::npos)
+        return false;
+    return true;
+}
+
 bool PushUserConfigToCloud(const std::string& token);
 
 bool PullUserConfigFromCloud(const std::string& token)
@@ -1442,6 +1484,7 @@ bool PullUserConfigFromCloud(const std::string& token)
 
     const auto gameDir = ExecutableRoot() / L"cstrike";
     const auto gameCfg = gameDir / L"config.cfg";
+    const auto gameCfgBak = gameDir / L"config.cfg.bak";
     const auto defaultCfg = ExecutableRoot() / L"default" / L"config.cfg";
 
     std::error_code ec;
@@ -1450,30 +1493,50 @@ bool PullUserConfigFromCloud(const std::string& token)
     if (success == "true" && exists == "true")
     {
         const std::string cfgContent = ExtractJsonStringDecoded(response, "cfg_content");
-        if (cfgContent.size() >= 20)
+        if (IsValidConfigContent(cfgContent))
         {
+            // Create local safety backup before replacing
+            if (std::filesystem::exists(gameCfg, ec) && std::filesystem::file_size(gameCfg, ec) >= 150)
+            {
+                std::filesystem::copy_file(gameCfg, gameCfgBak, std::filesystem::copy_options::overwrite_existing, ec);
+            }
+
             std::ofstream out(gameCfg, std::ios::binary | std::ios::trunc);
             if (out)
             {
                 out.write(cfgContent.data(), cfgContent.size());
                 out.close();
+                g_lastLoadedConfigHash = ComputeStringSha256(cfgContent);
+                return true;
             }
-            return true;
         }
     }
 
-    // If cloud has no config yet, but user already has config.cfg locally:
-    // Keep user's local config and upload to cloud!
-    if (std::filesystem::exists(gameCfg, ec) && std::filesystem::file_size(gameCfg, ec) > 50)
+    // If cloud has no config yet, but user already has a valid config.cfg locally:
+    // Keep user's local config and upload to cloud as initial backup!
+    if (std::filesystem::exists(gameCfg, ec))
     {
-        PushUserConfigToCloud(token);
-        return true;
+        std::ifstream localIn(gameCfg, std::ios::binary);
+        if (localIn)
+        {
+            std::string localContent((std::istreambuf_iterator<char>(localIn)), std::istreambuf_iterator<char>());
+            localIn.close();
+            if (IsValidConfigContent(localContent))
+            {
+                g_lastLoadedConfigHash = ComputeStringSha256(localContent);
+                PushUserConfigToCloud(token);
+                return true;
+            }
+        }
     }
 
-    // Only if user has NO config locally and NO config in cloud:
-    if (std::filesystem::is_regular_file(defaultCfg, ec))
+    // Only if user has NO valid config locally and NO config in cloud:
+    if (!std::filesystem::exists(gameCfg, ec) || std::filesystem::file_size(gameCfg, ec) < 50)
     {
-        std::filesystem::copy_file(defaultCfg, gameCfg, std::filesystem::copy_options::overwrite_existing, ec);
+        if (std::filesystem::is_regular_file(defaultCfg, ec))
+        {
+            std::filesystem::copy_file(defaultCfg, gameCfg, std::filesystem::copy_options::overwrite_existing, ec);
+        }
     }
     return true;
 }
@@ -1483,23 +1546,170 @@ bool PushUserConfigToCloud(const std::string& token)
     if (token.empty())
         return false;
     const auto cfgPath = ExecutableRoot() / L"cstrike" / L"config.cfg";
+    const auto cfgBak = ExecutableRoot() / L"cstrike" / L"config.cfg.bak";
     std::error_code ec;
-    if (!std::filesystem::exists(cfgPath, ec) || std::filesystem::file_size(cfgPath, ec) < 50)
+    if (!std::filesystem::exists(cfgPath, ec) || std::filesystem::file_size(cfgPath, ec) < 150)
+    {
+        // Corrupted or truncated local file; restore from local backup if available!
+        if (std::filesystem::exists(cfgBak, ec) && std::filesystem::file_size(cfgBak, ec) >= 150)
+        {
+            std::filesystem::copy_file(cfgBak, cfgPath, std::filesystem::copy_options::overwrite_existing, ec);
+        }
         return false;
+    }
 
     std::ifstream in(cfgPath, std::ios::binary);
     if (!in)
         return false;
     std::string cfgContent((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
-    if (cfgContent.size() < 50)
+    in.close();
+
+    if (!IsValidConfigContent(cfgContent))
+    {
+        // Don't push corrupted file; restore from backup
+        if (std::filesystem::exists(cfgBak, ec) && std::filesystem::file_size(cfgBak, ec) >= 150)
+        {
+            std::filesystem::copy_file(cfgBak, cfgPath, std::filesystem::copy_options::overwrite_existing, ec);
+        }
         return false;
+    }
+
+    const std::string currentHash = ComputeStringSha256(cfgContent);
+    // Optimization: If config hash hasn't changed since last pull/push, DO NOT send HTTP request to host!
+    if (!g_lastLoadedConfigHash.empty() && currentHash == g_lastLoadedConfigHash)
+    {
+        return true;
+    }
 
     const std::string body = std::string("action=push&token=") + UrlEncode(token) + "&cfg_content=" + UrlEncode(cfgContent);
     std::string response;
     if (!PostUrlEncoded(kCfgSyncPath, body, response))
         return false;
     const std::string success = ExtractJsonString(response, "success");
-    return success == "true";
+    if (success == "true")
+    {
+        g_lastLoadedConfigHash = currentHash;
+        std::filesystem::copy_file(cfgPath, cfgBak, std::filesystem::copy_options::overwrite_existing, ec);
+        return true;
+    }
+    return false;
+}
+
+void SaveUserSession(const std::wstring& phone, const std::wstring& password, const std::string& token)
+{
+    if (!g_accessStatus.is_home_client)
+        return; // Gamenet PCs are shared! Never save session to registry.
+
+    RegistryKey regKey(HKEY_CURRENT_USER, kLauncherKey, KEY_SET_VALUE);
+    regKey.WriteString(L"SavedUserPhone", phone);
+    if (!password.empty())
+        regKey.WriteString(L"SavedUserPassword", password);
+    if (!token.empty())
+        regKey.WriteString(L"SavedUserToken", WidenUtf8(token));
+    regKey.WriteDword(L"SavedUserLoggedIn", 1);
+}
+
+void ClearUserSession(bool clearCredentials = false)
+{
+    RegistryKey regKey(HKEY_CURRENT_USER, kLauncherKey, KEY_SET_VALUE);
+    regKey.WriteString(L"SavedUserToken", L"");
+    regKey.WriteDword(L"SavedUserLoggedIn", 0);
+    if (clearCredentials)
+    {
+        regKey.WriteString(L"SavedUserPhone", L"");
+        regKey.WriteString(L"SavedUserPassword", L"");
+    }
+}
+
+void RestoreUserSession(HWND window)
+{
+    if (!g_accessStatus.is_home_client)
+    {
+        // Gamenet PCs are shared! Never auto-fill credentials or auto-login with previous customer's session.
+        return;
+    }
+
+    s_restoringSession = true;
+    RegistryKey regKey(HKEY_CURRENT_USER, kLauncherKey, KEY_QUERY_VALUE);
+    const std::wstring phone = regKey.ReadString(L"SavedUserPhone");
+    const std::wstring password = regKey.ReadString(L"SavedUserPassword");
+    const std::string token = NarrowUtf8(regKey.ReadString(L"SavedUserToken"));
+    const DWORD loggedIn = regKey.ReadDword(L"SavedUserLoggedIn", 0);
+
+    if (!phone.empty() && g_userPhone)
+        SetWindowTextW(g_userPhone, phone.c_str());
+
+    if (!password.empty() && g_userPassword)
+        SetWindowTextW(g_userPassword, password.c_str());
+
+    if (loggedIn != 0 && !token.empty() && !phone.empty())
+    {
+        // Validate active session with host & ensure no other device has taken over
+        const std::string deviceHash = Compute24CharDeviceHash();
+        const std::string checkBody = std::string("action=check_token&token=") + UrlEncode(token) +
+                                      "&device_hash=" + UrlEncode(deviceHash);
+        std::string checkResp;
+        const bool checkOk = PostUrlEncoded(kAuthOtpPath, checkBody, checkResp);
+        const std::string checkSuccess = ExtractJsonString(checkResp, "success");
+        const std::string checkConflict = ExtractJsonString(checkResp, "session_conflict");
+
+        if (checkOk && checkSuccess == "true")
+        {
+            g_activeUserPhone = phone;
+            g_activeUserToken = token;
+
+            if (g_userStatusLabel)
+            {
+                const std::wstring status = L"وارد شده: \u200e" + phone;
+                SetWindowTextW(g_userStatusLabel, status.c_str());
+                InvalidateRect(g_userStatusLabel, nullptr, TRUE);
+            }
+            if (g_userLoginBtn)
+            {
+                SetWindowTextW(g_userLoginBtn, L"خروج از اکانت");
+                InvalidateRect(g_userLoginBtn, nullptr, TRUE);
+            }
+            if (g_userRegisterBtn)
+            {
+                SetWindowTextW(g_userRegisterBtn, L"ریست کردن کانفیگ");
+                InvalidateRect(g_userRegisterBtn, nullptr, TRUE);
+            }
+
+            // Auto-login: safely pull user's cloud config to local cstrike/config.cfg
+            PullUserConfigFromCloud(token);
+        }
+        else
+        {
+            // Token invalid or another device is actively using this account!
+            g_activeUserToken.clear();
+            g_activeUserPhone.clear();
+            ClearUserSession(false);
+
+            if (g_userStatusLabel)
+            {
+                if (checkConflict == "true")
+                {
+                    SetWindowTextW(g_userStatusLabel, L"حساب در سیستم دیگری فعال است (ورود همزمان ناممکن)");
+                }
+                else
+                {
+                    SetWindowTextW(g_userStatusLabel, L"وارد نشده‌اید (مهمان: کانفیگ پیش‌فرض لود می‌شود)");
+                }
+                InvalidateRect(g_userStatusLabel, nullptr, TRUE);
+            }
+            if (g_userLoginBtn)
+            {
+                SetWindowTextW(g_userLoginBtn, L"ورود");
+                InvalidateRect(g_userLoginBtn, nullptr, TRUE);
+            }
+            if (g_userRegisterBtn)
+            {
+                SetWindowTextW(g_userRegisterBtn, L"ثبت‌نام / فراموشی رمز");
+                InvalidateRect(g_userRegisterBtn, nullptr, TRUE);
+            }
+        }
+    }
+    s_restoringSession = false;
 }
 
 void PerformUserLogin(HWND window)
@@ -1523,7 +1733,10 @@ void PerformUserLogin(HWND window)
 
     SetWindowTextW(g_userStatusLabel, L"در حال بررسی ورود...");
     EnableWindow(g_userLoginBtn, FALSE);
-    const std::string body = std::string("action=login&mobile=") + UrlEncode(NarrowUtf8(phone)) + "&password=" + UrlEncode(NarrowUtf8(password));
+    const std::string devHash = Compute24CharDeviceHash();
+    const std::string body = std::string("action=login&mobile=") + UrlEncode(NarrowUtf8(phone)) +
+                             "&password=" + UrlEncode(NarrowUtf8(password)) +
+                             "&device_hash=" + UrlEncode(devHash);
     std::string response;
     const bool ok = PostUrlEncoded(kAuthOtpPath, body, response);
     EnableWindow(g_userLoginBtn, TRUE);
@@ -1531,10 +1744,12 @@ void PerformUserLogin(HWND window)
     const std::string success = ExtractJsonString(response, "success");
     const std::string message = ExtractJsonStringDecoded(response, "message");
     const std::string token = ExtractJsonString(response, "token");
+    const std::string errorCode = ExtractJsonString(response, "error_code");
     if (ok && success == "true" && !token.empty())
     {
         g_activeUserPhone = phone;
         g_activeUserToken = token;
+        SaveUserSession(phone, password, token);
         const std::wstring status = L"وارد شده: \u200e" + phone;
         SetWindowTextW(g_userStatusLabel, status.c_str());
         InvalidateRect(g_userStatusLabel, nullptr, TRUE);
@@ -1553,7 +1768,8 @@ void PerformUserLogin(HWND window)
         const std::wstring err = message.empty() ? L"شماره موبایل یا رمز عبور اشتباه است." : WidenUtf8(message);
         SetWindowTextW(g_userStatusLabel, err.c_str());
         InvalidateRect(g_userStatusLabel, nullptr, TRUE);
-        MessageBoxW(window, err.c_str(), L"خطا در ورود", MB_OK | MB_ICONERROR);
+        const wchar_t* title = (errorCode == "ACTIVE_SESSION_EXISTS") ? L"حساب فعال در سیستم دیگر" : L"خطا در ورود";
+        MessageBoxW(window, err.c_str(), title, MB_OK | (errorCode == "ACTIVE_SESSION_EXISTS" ? MB_ICONWARNING : MB_ICONERROR));
     }
 }
 
@@ -1570,8 +1786,16 @@ void PerformUserLogout(HWND window)
         return;
     }
 
+    // Notify server to immediately release the single active session lock
+    const std::string devHash = Compute24CharDeviceHash();
+    const std::string body = std::string("action=logout&token=") + UrlEncode(g_activeUserToken) +
+                             "&device_hash=" + UrlEncode(devHash);
+    std::string response;
+    PostUrlEncoded(kAuthOtpPath, body, response);
+
     g_activeUserToken.clear();
     g_activeUserPhone.clear();
+    ClearUserSession(false);
 
     if (g_userPassword)
         SetWindowTextW(g_userPassword, L"");
@@ -1986,9 +2210,11 @@ LRESULT CALLBACK OtpRegisterProc(HWND window, UINT message, WPARAM wParam, LPARA
 
             SetWindowTextW(g_regStatusLabel, L"\u062f\u0631 \u062d\u0627\u0644 \u0628\u0631\u0631\u0633\u06cc \u06a9\u062f \u0648 \u0628\u0627\u0632\u06cc\u0627\u0628\u06cc...");
             EnableWindow(g_regSubmitBtn, FALSE);
+            const std::string devHash = Compute24CharDeviceHash();
             const std::string body = std::string("action=verify_otp&mobile=") + UrlEncode(NarrowUtf8(mobile)) +
                                      "&otp=" + UrlEncode(NarrowUtf8(otp)) +
-                                     "&password=" + UrlEncode(NarrowUtf8(password));
+                                     "&password=" + UrlEncode(NarrowUtf8(password)) +
+                                     "&device_hash=" + UrlEncode(devHash);
             std::string response;
             const bool ok = PostUrlEncoded(kAuthOtpPath, body, response);
             EnableWindow(g_regSubmitBtn, TRUE);
@@ -2005,13 +2231,14 @@ LRESULT CALLBACK OtpRegisterProc(HWND window, UINT message, WPARAM wParam, LPARA
 
                 g_activeUserPhone = mobile;
                 g_activeUserToken = token;
+                SaveUserSession(mobile, effectivePass, token);
                 if (g_userPhone)
                     SetWindowTextW(g_userPhone, mobile.c_str());
                 if (g_userPassword)
                     SetWindowTextW(g_userPassword, effectivePass.c_str());
                 if (g_userStatusLabel)
                 {
-                    const std::wstring status = L"\u0648\u0627\u0631\u062f \u0634\u062f\u0647: \\u200e" + mobile;
+                    const std::wstring status = L"وارد شده: \u200e" + mobile;
                     SetWindowTextW(g_userStatusLabel, status.c_str());
                     InvalidateRect(g_userStatusLabel, nullptr, TRUE);
                 }
@@ -2317,6 +2544,8 @@ void CreateControls(HWND window)
     g_mouseAtLastApply = ReadSystemMouseSettings();
     g_mousePreviewChanged = false;
     SetMouseControls(g_mouseAtLastApply);
+    RestoreUserSession(window);
+    SetTimer(window, 998, 90000, nullptr);
 }
 
 void CheckLauncherUpdates(HWND window)
@@ -2475,26 +2704,30 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
     case WM_COMMAND:
         if (HIWORD(wParam) == EN_CHANGE && reinterpret_cast<HWND>(lParam) == g_userPhone)
         {
-            wchar_t curPhone[64]{};
-            GetWindowTextW(g_userPhone, curPhone, static_cast<int>(std::size(curPhone)));
-            if (!g_activeUserToken.empty() && std::wstring(curPhone) != g_activeUserPhone)
+            if (!s_restoringSession)
             {
-                g_activeUserToken.clear();
-                g_activeUserPhone.clear();
-                if (g_userLoginBtn)
+                wchar_t curPhone[64]{};
+                GetWindowTextW(g_userPhone, curPhone, static_cast<int>(std::size(curPhone)));
+                if (!g_activeUserToken.empty() && std::wstring(curPhone) != g_activeUserPhone)
                 {
-                    SetWindowTextW(g_userLoginBtn, L"ورود");
-                    InvalidateRect(g_userLoginBtn, nullptr, TRUE);
-                }
-                if (g_userStatusLabel)
-                {
-                    SetWindowTextW(g_userStatusLabel, L"وارد نشده‌اید (مهمان: کانفیگ پیش‌فرض لود می‌شود)");
-                    InvalidateRect(g_userStatusLabel, nullptr, TRUE);
-                }
-                if (g_userRegisterBtn)
-                {
-                    SetWindowTextW(g_userRegisterBtn, L"ثبت‌نام / فراموشی رمز");
-                    InvalidateRect(g_userRegisterBtn, nullptr, TRUE);
+                    g_activeUserToken.clear();
+                    g_activeUserPhone.clear();
+                    ClearUserSession(false);
+                    if (g_userLoginBtn)
+                    {
+                        SetWindowTextW(g_userLoginBtn, L"ورود");
+                        InvalidateRect(g_userLoginBtn, nullptr, TRUE);
+                    }
+                    if (g_userStatusLabel)
+                    {
+                        SetWindowTextW(g_userStatusLabel, L"وارد نشده‌اید (مهمان: کانفیگ پیش‌فرض لود می‌شود)");
+                        InvalidateRect(g_userStatusLabel, nullptr, TRUE);
+                    }
+                    if (g_userRegisterBtn)
+                    {
+                        SetWindowTextW(g_userRegisterBtn, L"ثبت‌نام / فراموشی رمز");
+                        InvalidateRect(g_userRegisterBtn, nullptr, TRUE);
+                    }
                 }
             }
         }
@@ -2669,9 +2902,31 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
         return TRUE;
     }
 
+    case WM_TIMER:
+        if (wParam == 998)
+        {
+            SendUserHeartbeat();
+            return 0;
+        }
+        break;
+
     case WM_DESTROY:
+        KillTimer(window, 998);
         if (!g_launchRequested)
+        {
             RevertMousePreview();
+            if (!g_accessStatus.is_home_client && !g_activeUserToken.empty())
+            {
+                const std::string devHash = Compute24CharDeviceHash();
+                const std::string body = std::string("action=logout&token=") + UrlEncode(g_activeUserToken) +
+                                         "&device_hash=" + UrlEncode(devHash);
+                std::string response;
+                PostUrlEncoded(kAuthOtpPath, body, response);
+                g_activeUserToken.clear();
+                g_activeUserPhone.clear();
+                ResetGuestConfigToDefault();
+            }
+        }
         PostQuitMessage(0);
         return 0;
     default:
@@ -2683,7 +2938,24 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
 
 bool IsUserAuthenticated()
 {
-    return !g_activeUserToken.empty();
+    if (!g_activeUserToken.empty())
+        return true;
+
+    if (g_accessStatus.is_home_client)
+    {
+        RegistryKey regKey(HKEY_CURRENT_USER, kLauncherKey, KEY_QUERY_VALUE);
+        if (regKey.ReadDword(L"SavedUserLoggedIn", 0) == 1)
+        {
+            std::wstring savedToken = regKey.ReadString(L"SavedUserToken");
+            if (!savedToken.empty())
+            {
+                g_activeUserToken = NarrowUtf8(savedToken);
+                g_activeUserPhone = regKey.ReadString(L"SavedUserPhone");
+                return true;
+            }
+        }
+    }
+    return false;
 }
 
 void ResetGuestConfigToDefault()
@@ -2691,6 +2963,7 @@ void ResetGuestConfigToDefault()
     namespace fs = std::filesystem;
     const auto gameDir = ExecutableRoot() / L"cstrike";
     const auto gameCfg = gameDir / L"config.cfg";
+    const auto gameCfgBak = gameDir / L"config.cfg.bak";
     const auto userCfg = gameDir / L"userconfig.cfg";
     const auto defaultCfg = ExecutableRoot() / L"default" / L"config.cfg";
 
@@ -2718,17 +2991,25 @@ void ResetGuestConfigToDefault()
         }
     }
 
-    constexpr char kDefaultUserConfig[] = R"CFG(alias d "disconnect"
-alias q "quit"
-alias ret "retry"
+    // Clean up any old backup from previous logged-in user
+    if (fs::exists(gameCfgBak, ec))
+    {
+        fs::remove(gameCfgBak, ec);
+    }
 
-exec gameland_lan_host.cfg
-)CFG";
+    // Reset memory hash so next login or sync starts clean
+    g_lastLoadedConfigHash.clear();
+
+    std::string defaultUserConfig = "alias d \"disconnect\"\nalias q \"quit\"\nalias ret \"retry\"\n";
+    if (!g_accessStatus.is_home_client)
+    {
+        defaultUserConfig += "\nexec gameland_lan_host.cfg\n";
+    }
 
     std::ofstream userOut(userCfg, std::ios::binary | std::ios::trunc);
     if (userOut.is_open())
     {
-        userOut.write(kDefaultUserConfig, std::strlen(kDefaultUserConfig));
+        userOut.write(defaultUserConfig.data(), defaultUserConfig.size());
         userOut.close();
     }
 }
@@ -2736,7 +3017,7 @@ exec gameland_lan_host.cfg
 void SyncPlayerConfig()
 {
     std::string token = g_activeUserToken;
-    if (token.empty())
+    if (token.empty() && g_accessStatus.is_home_client)
     {
         RegistryKey regKey(HKEY_CURRENT_USER, kLauncherKey, KEY_QUERY_VALUE);
         token = NarrowUtf8(regKey.ReadString(L"SavedUserToken"));
@@ -2744,6 +3025,38 @@ void SyncPlayerConfig()
     if (!token.empty())
     {
         PushUserConfigToCloud(token);
+
+        // On gamenet, release session lock and reset local config for next customer!
+        if (!g_accessStatus.is_home_client)
+        {
+            const std::string devHash = Compute24CharDeviceHash();
+            const std::string body = std::string("action=logout&token=") + UrlEncode(token) +
+                                     "&device_hash=" + UrlEncode(devHash);
+            std::string response;
+            PostUrlEncoded(kAuthOtpPath, body, response);
+
+            g_activeUserToken.clear();
+            g_activeUserPhone.clear();
+            ResetGuestConfigToDefault();
+        }
+    }
+}
+
+void SendUserHeartbeat()
+{
+    std::string token = g_activeUserToken;
+    if (token.empty() && g_accessStatus.is_home_client)
+    {
+        RegistryKey regKey(HKEY_CURRENT_USER, kLauncherKey, KEY_QUERY_VALUE);
+        token = NarrowUtf8(regKey.ReadString(L"SavedUserToken"));
+    }
+    if (!token.empty())
+    {
+        const std::string devHash = Compute24CharDeviceHash();
+        const std::string hbBody = std::string("action=heartbeat&token=") + UrlEncode(token) +
+                                   "&device_hash=" + UrlEncode(devHash);
+        std::string hbResp;
+        PostUrlEncoded(kAuthOtpPath, hbBody, hbResp);
     }
 }
 

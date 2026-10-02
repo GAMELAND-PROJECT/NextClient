@@ -13,6 +13,7 @@ using HUD_RedrawNext = nitroapi::NextHandlerInterface<int, float, int>*;
 using HUD_Key_EventNext = nitroapi::NextHandlerInterface<int, int, int, const char*>*;
 using UserMsg_TextMsgNext = nitroapi::NextHandlerInterface<int, const char*, int, void*>*;
 using CL_CreateMoveNext = nitroapi::NextHandlerInterface<void, float, usercmd_s*, int>*;
+using CLDLL_InitializeNext = nitroapi::NextHandlerInterface<int, cl_enginefuncs_s*, int>*;
 using HUD_TempEntUpdateNext = nitroapi::NextHandlerInterface<void, double, double, double,
     TEMPENTITY**, TEMPENTITY**, int (*)(cl_entity_t*), void (*)(TEMPENTITY*, float)>*;
 

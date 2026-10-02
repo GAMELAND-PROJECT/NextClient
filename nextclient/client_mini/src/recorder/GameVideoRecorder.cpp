@@ -17,6 +17,104 @@
 #include <gl/GL.h>
 #include <mmdeviceapi.h>
 #include <audioclient.h>
+#include <audiopolicy.h>
+
+class ExternalAudioSilencer
+{
+public:
+    ExternalAudioSilencer() : m_pSessionManager(nullptr), m_myPid(0) {}
+
+    ~ExternalAudioSilencer()
+    {
+        RestoreExternalSessions();
+    }
+
+    void SilenceExternalSessions()
+    {
+        RestoreExternalSessions();
+        m_myPid = GetCurrentProcessId();
+
+        IMMDeviceEnumerator* pEnumerator = nullptr;
+        HRESULT hr = CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL,
+                                      __uuidof(IMMDeviceEnumerator), (void**)&pEnumerator);
+        if (FAILED(hr) || !pEnumerator) return;
+
+        IMMDevice* pDevice = nullptr;
+        hr = pEnumerator->GetDefaultAudioEndpoint(eRender, eConsole, &pDevice);
+        pEnumerator->Release();
+        if (FAILED(hr) || !pDevice) return;
+
+        hr = pDevice->Activate(__uuidof(IAudioSessionManager2), CLSCTX_ALL, nullptr, (void**)&m_pSessionManager);
+        pDevice->Release();
+        if (FAILED(hr) || !m_pSessionManager) return;
+
+        IAudioSessionEnumerator* pSessionEnum = nullptr;
+        hr = m_pSessionManager->GetSessionEnumerator(&pSessionEnum);
+        if (FAILED(hr) || !pSessionEnum) return;
+
+        int sessionCount = 0;
+        pSessionEnum->GetCount(&sessionCount);
+
+        for (int i = 0; i < sessionCount; ++i)
+        {
+            IAudioSessionControl* pControl = nullptr;
+            if (SUCCEEDED(pSessionEnum->GetSession(i, &pControl)) && pControl)
+            {
+                IAudioSessionControl2* pControl2 = nullptr;
+                if (SUCCEEDED(pControl->QueryInterface(__uuidof(IAudioSessionControl2), (void**)&pControl2)) && pControl2)
+                {
+                    DWORD pid = 0;
+                    pControl2->GetProcessId(&pid);
+                    pControl2->Release();
+
+                    // If this audio session does not belong to CS 1.6, mute it during clip recording
+                    if (pid != m_myPid)
+                    {
+                        ISimpleAudioVolume* pVolume = nullptr;
+                        if (SUCCEEDED(pControl->QueryInterface(__uuidof(ISimpleAudioVolume), (void**)&pVolume)) && pVolume)
+                        {
+                            BOOL bMuted = FALSE;
+                            pVolume->GetMute(&bMuted);
+                            if (!bMuted)
+                            {
+                                pVolume->SetMute(TRUE, nullptr);
+                                m_mutedVolumes.push_back(pVolume);
+                                pVolume = nullptr;
+                            }
+                            if (pVolume) pVolume->Release();
+                        }
+                    }
+                }
+                pControl->Release();
+            }
+        }
+        pSessionEnum->Release();
+    }
+
+    void RestoreExternalSessions()
+    {
+        for (auto* pVol : m_mutedVolumes)
+        {
+            if (pVol)
+            {
+                pVol->SetMute(FALSE, nullptr);
+                pVol->Release();
+            }
+        }
+        m_mutedVolumes.clear();
+
+        if (m_pSessionManager)
+        {
+            m_pSessionManager->Release();
+            m_pSessionManager = nullptr;
+        }
+    }
+
+private:
+    DWORD m_myPid{ 0 };
+    IAudioSessionManager2* m_pSessionManager{ nullptr };
+    std::vector<ISimpleAudioVolume*> m_mutedVolumes;
+};
 
 #define GL_PIXEL_PACK_BUFFER_ARB 0x88EB
 #define GL_STREAM_READ_ARB       0x88E1
@@ -505,7 +603,7 @@ namespace nextclient::client_mini
             << " -thread_queue_size 128 -f rawvideo -pix_fmt rgb24 -s " << width << "x" << height
             << " -r 100 -i \"" << videoPipeName << "\""
             << " -filter_threads 0 -vf " << videoFilter
-            << " -c:v libx264 -preset veryfast -tune fastdecode -crf 21 -profile:v high -pix_fmt yuv420p -threads 0 -slices 4"
+            << " -c:v libx264 -preset fast -crf 16 -profile:v high -pix_fmt yuv420p -threads 0"
             << " -movflags +faststart \"" << m_tempVideoPath << "\"";
 
         STARTUPINFOA si{};
@@ -778,6 +876,11 @@ namespace nextclient::client_mini
         WAVEFORMATEX* pwfx = nullptr;
         bool captureReady = false;
 
+        // Isolate game audio: Mute all external audio sessions (Discord, Spotify, browsers, system sounds)
+        // so that the loopback capture records pure, uncontaminated CS 1.6 game sound.
+        ExternalAudioSilencer audioSilencer;
+        audioSilencer.SilenceExternalSessions();
+
         hr = CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL,
                               __uuidof(IMMDeviceEnumerator), (void**)&pEnumerator);
         if (SUCCEEDED(hr) && pEnumerator != nullptr)
@@ -891,6 +994,9 @@ namespace nextclient::client_mini
 
         if (captureReady && pAudioClient != nullptr)
             pAudioClient->Stop();
+
+        // Restore all external audio sessions (unmute Discord, Spotify, etc.)
+        audioSilencer.RestoreExternalSessions();
 
         if (pwfx != nullptr) CoTaskMemFree(pwfx);
         if (pCaptureClient != nullptr) pCaptureClient->Release();
@@ -1023,34 +1129,28 @@ namespace nextclient::client_mini
 
     std::string GameVideoRecorder::BuildStudioVideoFilter() const
     {
-        float gameGamma = 2.5f;
-        float gameBrightness = 1.0f;
-#ifdef _WIN32
-        if (gEngfuncs.pfnGetCvarPointer != nullptr)
-        {
-            cvar_t* pG = gEngfuncs.pfnGetCvarPointer("gamma");
-            if (pG && pG->value > 0.05f)
-                gameGamma = pG->value;
-
-            cvar_t* pB = gEngfuncs.pfnGetCvarPointer("brightness");
-            if (pB)
-                gameBrightness = pB->value;
-        }
-#endif
-
-        // Balanced Dynamic Gamma Calibration:
-        // Lifts dark models out of shadow clamp without bleaching sunny walls or ceilings
-        float ffmpegGamma = 1.02f + (gameGamma - 1.5f) * 0.20f;
-        ffmpegGamma = std::clamp(ffmpegGamma, 1.15f, 1.35f);
-
-        // Zero additive brightness offset keeps black level true black and eliminates wash-out
-        float ffmpegBrightness = 0.0f;
-
         std::ostringstream ss;
-        ss << std::fixed << std::setprecision(2);
-        ss << "vflip,eq=gamma=" << ffmpegGamma
-           << ":contrast=1.08:brightness=" << ffmpegBrightness
-           << ":saturation=1.15,unsharp=3:3:0.6:3:3:0.3";
+        ss << "vflip";
+
+        const int srcW = (m_recordWidth > 0) ? m_recordWidth : 800;
+        const int srcH = (m_recordHeight > 0) ? m_recordHeight : 600;
+
+        // Upscale any low-res frame (800x600, 1024x768, 720p, etc.) to 1080p height
+        // using the high-precision Lanczos algorithm to prevent media player bilinear blur.
+        // Aspect ratio is strictly preserved without any stretch distortion.
+        if (srcH < 1080)
+        {
+            const int targetH = 1080;
+            int targetW = static_cast<int>(std::round(static_cast<double>(targetH) * srcW / srcH));
+            if (targetW % 2 != 0)
+                targetW++;
+
+            ss << ",scale=" << targetW << ":" << targetH << ":flags=lanczos";
+        }
+
+        // Hardware Desktop Gamma Ramp compensation (glReadPixels raw buffer is dark/flat)
+        ss << ",eq=gamma=1.18";
+
         return ss.str();
     }
 
@@ -1365,7 +1465,7 @@ namespace nextclient::client_mini
             << " -r " << fps << " -i \"" << videoPipeName << "\""
             << " -f s16le -ar " << audioRate << " -ac 2 -i \"" << audioPipeName << "\""
             << " -filter_threads 0 -vf " << videoFilter
-            << " -c:v libx264 -preset veryfast -tune fastdecode -crf 21 -profile:v high -pix_fmt yuv420p -threads 0 -slices 4"
+            << " -c:v libx264 -preset fast -crf 16 -profile:v high -pix_fmt yuv420p -threads 0"
             << " -af aresample=async=1000:min_hard_comp=0.100000:first_pts=0"
             << " -c:a aac -b:a 160k"
             << " -movflags +faststart+frag_keyframe+empty_moov"

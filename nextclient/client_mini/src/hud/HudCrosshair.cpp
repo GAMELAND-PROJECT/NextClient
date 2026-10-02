@@ -2,6 +2,7 @@
 #include "weapontype.h"
 #include "../shared_util.h"
 #include "../main.h"
+#include "../recorder/GameVideoRecorder.h"
 
 HudCrosshair::HudCrosshair(nitroapi::NitroApiInterface *nitro_api) :
     nitroapi::NitroApiHelper(nitro_api),
@@ -473,6 +474,12 @@ void HudCrosshair::CalculateCrosshairColor()
 
 void HudCrosshair::CalculateCrosshairDrawMode()
 {
+    if (nextclient::client_mini::GameVideoRecorder::Instance().IsHighlightRendering())
+    {
+        m_bAdditive = false;
+        return;
+    }
+
     float value = cl_crosshair_translucent_->value;
 
     if (value == 0)
