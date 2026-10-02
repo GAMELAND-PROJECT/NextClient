@@ -19,6 +19,10 @@ endif ()
 
 add_library(${PROJECT_NAME} SHARED
         src/api_impl/SteamAPI.cpp
+        src/api_impl/SteamUserProxy.cpp
+        src/api_impl/SteamUserProxy.h
+        src/voice/SpeexVoiceManager.cpp
+        src/voice/SpeexVoiceManager.h
         src/public/steam/isteamapps.h
         src/public/steam/isteambilling.h
         src/public/steam/isteamclient.h
@@ -52,6 +56,7 @@ target_include_directories(${PROJECT_NAME} PRIVATE
 target_link_libraries(${PROJECT_NAME} PRIVATE
         nitro_api::nitro_api
         NextClient::client_mini
+        speex::speex
 )
 
 if (UNIX)
