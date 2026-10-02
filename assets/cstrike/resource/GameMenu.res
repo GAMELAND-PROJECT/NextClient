@@ -20,22 +20,11 @@
 		"OnlyInGame" "1"
 		"notsingle" "1"
 	}
-	"8"
+	"10"
 	{
-		"label" ""
-		"command" ""
-		"OnlyInGame" "1"
+		"label" "Match Demo Studio (F4)"
+		"command" "OpenDemoStudio"
 	}
-    "9"
-    {
-        "label" "#GameUI_GameMenu_RandomServer"
-        "command" "ConnectToRandomServer"
-    }
-    "10"
-    {
-        "label" "Match Demo Studio (F4)"
-        "command" "OpenDemoStudio"
-    }
 	"11"
 	{
 		"label" "#GameUI_GameMenu_NewGame"
@@ -55,15 +44,5 @@
 	{
 		"label" "#GameUI_GameMenu_Quit"
 		"command" "Quit"
-	}
-    "15"
-	{
-		"label" ""
-		"command" ""
-	}
-    "16"
-	{
-		"label" "#GameUI_GameMenu_Help"
-		"command" "OpenHelpUrl"
 	}
 }

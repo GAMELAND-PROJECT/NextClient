@@ -284,6 +284,35 @@ Scheme
 				"name"		"Tahoma"
 				"tall"		"16"
 				"weight"	"1000"
+				"yres"		"480 600"
+			}
+			"2"
+			{
+				"name"		"Tahoma"
+				"tall"		"20"
+				"weight"	"1000"
+				"yres"		"601 768"
+			}
+			"3"
+			{
+				"name"		"Tahoma"
+				"tall"		"24"
+				"weight"	"1000"
+				"yres"		"769 900"
+			}
+			"4"
+			{
+				"name"		"Tahoma"
+				"tall"		"28"
+				"weight"	"1000"
+				"yres"		"901 1080"
+			}
+			"5"
+			{
+				"name"		"Tahoma"
+				"tall"		"34"
+				"weight"	"1000"
+				"yres"		"1081 6000"
 			}
 		}
 		"DefaultUnderline"
@@ -361,6 +390,39 @@ Scheme
 				"tall"		"16" 
 				"weight"	"600"
 				"antialias" "1"
+				"yres"		"480 600"
+			}
+			"2"
+			{
+				"name"		"Verdana" 
+				"tall"		"20" 
+				"weight"	"600"
+				"antialias" "1"
+				"yres"		"601 768"
+			}
+			"3"
+			{
+				"name"		"Verdana" 
+				"tall"		"24" 
+				"weight"	"600"
+				"antialias" "1"
+				"yres"		"769 900"
+			}
+			"4"
+			{
+				"name"		"Verdana" 
+				"tall"		"28" 
+				"weight"	"600"
+				"antialias" "1"
+				"yres"		"901 1080"
+			}
+			"5"
+			{
+				"name"		"Verdana" 
+				"tall"		"34" 
+				"weight"	"600"
+				"antialias" "1"
+				"yres"		"1081 6000"
 			}
 		}
 
