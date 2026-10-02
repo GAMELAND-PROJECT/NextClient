@@ -1597,6 +1597,9 @@ bool PushUserConfigToCloud(const std::string& token)
 
 void SaveUserSession(const std::wstring& phone, const std::wstring& password, const std::string& token)
 {
+    if (!g_accessStatus.is_home_client)
+        return; // Gamenet PCs are shared! Never save session to registry.
+
     RegistryKey regKey(HKEY_CURRENT_USER, kLauncherKey, KEY_SET_VALUE);
     regKey.WriteString(L"SavedUserPhone", phone);
     if (!password.empty())
@@ -1620,6 +1623,12 @@ void ClearUserSession(bool clearCredentials = false)
 
 void RestoreUserSession(HWND window)
 {
+    if (!g_accessStatus.is_home_client)
+    {
+        // Gamenet PCs are shared! Never auto-fill credentials or auto-login with previous customer's session.
+        return;
+    }
+
     s_restoringSession = true;
     RegistryKey regKey(HKEY_CURRENT_USER, kLauncherKey, KEY_QUERY_VALUE);
     const std::wstring phone = regKey.ReadString(L"SavedUserPhone");
@@ -2904,7 +2913,20 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
     case WM_DESTROY:
         KillTimer(window, 998);
         if (!g_launchRequested)
+        {
             RevertMousePreview();
+            if (!g_accessStatus.is_home_client && !g_activeUserToken.empty())
+            {
+                const std::string devHash = Compute24CharDeviceHash();
+                const std::string body = std::string("action=logout&token=") + UrlEncode(g_activeUserToken) +
+                                         "&device_hash=" + UrlEncode(devHash);
+                std::string response;
+                PostUrlEncoded(kAuthOtpPath, body, response);
+                g_activeUserToken.clear();
+                g_activeUserPhone.clear();
+                ResetGuestConfigToDefault();
+            }
+        }
         PostQuitMessage(0);
         return 0;
     default:
@@ -2919,15 +2941,18 @@ bool IsUserAuthenticated()
     if (!g_activeUserToken.empty())
         return true;
 
-    RegistryKey regKey(HKEY_CURRENT_USER, kLauncherKey, KEY_QUERY_VALUE);
-    if (regKey.ReadDword(L"SavedUserLoggedIn", 0) == 1)
+    if (g_accessStatus.is_home_client)
     {
-        std::wstring savedToken = regKey.ReadString(L"SavedUserToken");
-        if (!savedToken.empty())
+        RegistryKey regKey(HKEY_CURRENT_USER, kLauncherKey, KEY_QUERY_VALUE);
+        if (regKey.ReadDword(L"SavedUserLoggedIn", 0) == 1)
         {
-            g_activeUserToken = NarrowUtf8(savedToken);
-            g_activeUserPhone = regKey.ReadString(L"SavedUserPhone");
-            return true;
+            std::wstring savedToken = regKey.ReadString(L"SavedUserToken");
+            if (!savedToken.empty())
+            {
+                g_activeUserToken = NarrowUtf8(savedToken);
+                g_activeUserPhone = regKey.ReadString(L"SavedUserPhone");
+                return true;
+            }
         }
     }
     return false;
@@ -2992,7 +3017,7 @@ void ResetGuestConfigToDefault()
 void SyncPlayerConfig()
 {
     std::string token = g_activeUserToken;
-    if (token.empty())
+    if (token.empty() && g_accessStatus.is_home_client)
     {
         RegistryKey regKey(HKEY_CURRENT_USER, kLauncherKey, KEY_QUERY_VALUE);
         token = NarrowUtf8(regKey.ReadString(L"SavedUserToken"));
@@ -3000,13 +3025,27 @@ void SyncPlayerConfig()
     if (!token.empty())
     {
         PushUserConfigToCloud(token);
+
+        // On gamenet, release session lock and reset local config for next customer!
+        if (!g_accessStatus.is_home_client)
+        {
+            const std::string devHash = Compute24CharDeviceHash();
+            const std::string body = std::string("action=logout&token=") + UrlEncode(token) +
+                                     "&device_hash=" + UrlEncode(devHash);
+            std::string response;
+            PostUrlEncoded(kAuthOtpPath, body, response);
+
+            g_activeUserToken.clear();
+            g_activeUserPhone.clear();
+            ResetGuestConfigToDefault();
+        }
     }
 }
 
 void SendUserHeartbeat()
 {
     std::string token = g_activeUserToken;
-    if (token.empty())
+    if (token.empty() && g_accessStatus.is_home_client)
     {
         RegistryKey regKey(HKEY_CURRENT_USER, kLauncherKey, KEY_QUERY_VALUE);
         token = NarrowUtf8(regKey.ReadString(L"SavedUserToken"));

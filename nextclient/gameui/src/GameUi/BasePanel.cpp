@@ -61,63 +61,224 @@ vgui2::VPANEL GetGameUIBasePanel(void)
 CGameMenuItem::CGameMenuItem(vgui2::Menu *parent, const char *name) : BaseClass(parent, name, "GameMenuItem")
 {
     m_bRightAligned = false;
+    m_bIsDemoStudio = false;
+    m_bIsQuit = false;
+    m_bIsResume = false;
+    m_bIsDisconnect = false;
+    m_flScale = 1.0f;
+}
+
+void CGameMenuItem::UpdateScaleMetrics(float scale)
+{
+    m_flScale = scale;
+    int baseInset = (int)(24.0f * m_flScale + 0.5f);
+    SetTextInset(baseInset, 0);
 }
 
 void CGameMenuItem::ApplySchemeSettings(vgui2::IScheme *pScheme)
 {
     BaseClass::ApplySchemeSettings(pScheme);
 
-    auto bwFgColor = GetSchemeColor("InGameDesktop/MenuColor", pScheme);
-    auto bwFgDefaultColor = bwFgColor;
-    auto bwFgArmedColor = GetSchemeColor("InGameDesktop/ArmedMenuColor", pScheme);
-    auto bwDepressedColor = GetSchemeColor("InGameDesktop/DepressedMenuColor", pScheme);
+    int swide, stall;
+    vgui2::surface()->GetScreenSize(swide, stall);
+    float scale = (float)stall / 600.0f;
+    if (scale < 0.75f) scale = 0.75f;
+    m_flScale = scale;
 
-    SetFgColor(GetSchemeColor("MainMenu.TextColor", bwFgColor, pScheme));
-    SetBgColor(Color(0, 0, 0, 0));
-    SetDefaultColor(GetSchemeColor("MainMenu.TextColor", bwFgDefaultColor, pScheme), Color(255, 255, 255, 255));
-    SetArmedColor(GetSchemeColor("MainMenu.ArmedTextColor", bwFgArmedColor, pScheme), Color(200, 200, 200, 200));
-    SetDepressedColor(GetSchemeColor("MainMenu.DepressedTextColor", bwDepressedColor, pScheme), Color(75, 75, 75, 200));
-    SetContentAlignment(Label::a_west);
-
-    SetBorder(pScheme->GetBorder("BaseBorder"));
-    SetDefaultBorder(NULL);
-    SetDepressedBorder(NULL);
-    SetKeyFocusBorder(NULL);
-
-    vgui2::HFont hMainMenuFont = pScheme->GetFont("MainMenuFont", IsProportional());
-
-    if (hMainMenuFont)
-        SetFont(hMainMenuFont);
-    else
-        SetFont(pScheme->GetFont("MenuLarge", IsProportional()));
-
-    SetTextInset(0, 0);
-    SetArmedSound("UI/buttonrollover.wav");
-    SetDepressedSound("UI/buttonclick.wav");
-    SetReleasedSound("UI/buttonclickrelease.wav");
-    SetButtonActivationType(Button::ACTIVATE_ONPRESSED);
-    SetPaintBackgroundType(2);
-
-    if (m_bRightAligned)
-        SetContentAlignment(Label::a_east);
+    m_bIsDemoStudio = false;
+    m_bIsQuit = false;
+    m_bIsResume = false;
+    m_bIsDisconnect = false;
 
     if (GetCommand())
     {
         const char *cmd = GetCommand()->GetString("command", "");
         if (!Q_stricmp(cmd, "OpenDemoStudio") || !Q_stricmp(cmd, "OpenDemoUploader"))
-        {
-            Color demoColor = Color(75, 210, 255, 255);
-            Color demoArmed = Color(255, 255, 255, 255);
-            SetDefaultColor(demoColor, Color(0, 0, 0, 0));
-            SetArmedColor(demoArmed, Color(75, 210, 255, 50));
-            SetFgColor(demoColor);
-        }
+            m_bIsDemoStudio = true;
+        else if (!Q_stricmp(cmd, "Quit"))
+            m_bIsQuit = true;
+        else if (!Q_stricmp(cmd, "ResumeGame"))
+            m_bIsResume = true;
+        else if (!Q_stricmp(cmd, "Disconnect"))
+            m_bIsDisconnect = true;
     }
+
+    Color fgColor = Color(225, 230, 240, 240);
+    Color armedColor = Color(255, 255, 255, 255);
+    Color depressedColor = Color(200, 205, 215, 255);
+
+    if (m_bIsDemoStudio)
+    {
+        fgColor = Color(0, 230, 255, 255);       // Electric Cyan
+        armedColor = Color(255, 255, 255, 255);
+    }
+    else if (m_bIsQuit || m_bIsDisconnect)
+    {
+        fgColor = Color(225, 225, 230, 220);
+        armedColor = Color(255, 110, 110, 255);   // Warning Rose / Red
+    }
+
+    SetFgColor(fgColor);
+    SetBgColor(Color(0, 0, 0, 0));
+    SetDefaultColor(fgColor, Color(0, 0, 0, 0));
+    SetArmedColor(armedColor, Color(0, 0, 0, 0));
+    SetDepressedColor(depressedColor, Color(0, 0, 0, 0));
+    SetContentAlignment(Label::a_west);
+
+    SetBorder(NULL);
+    SetDefaultBorder(NULL);
+    SetDepressedBorder(NULL);
+    SetKeyFocusBorder(NULL);
+
+    vgui2::HFont hMenuFont = pScheme->GetFont("MenuLarge", IsProportional());
+    if (!hMenuFont)
+        hMenuFont = pScheme->GetFont("DefaultBold", IsProportional());
+    if (hMenuFont)
+        SetFont(hMenuFont);
+
+    int baseInset = (int)(24.0f * m_flScale + 0.5f);
+    SetTextInset(baseInset, 0);
+    SetArmedSound("UI/buttonrollover.wav");
+    SetDepressedSound("UI/buttonclick.wav");
+    SetReleasedSound("UI/buttonclickrelease.wav");
+    SetButtonActivationType(Button::ACTIVATE_ONPRESSED);
+    SetPaintBackgroundType(0);
+
+    if (m_bRightAligned)
+        SetContentAlignment(Label::a_east);
 }
 
 void CGameMenuItem::PaintBackground(void)
 {
-    BaseClass::PaintBackground();
+    int w, h;
+    GetSize(w, h);
+
+    bool isArmed = IsArmed();
+    bool isDepressed = IsDepressed();
+
+    // Subtle 1px vertical spacing between cards
+    int cardY0 = 1;
+    int cardY1 = h - 1;
+
+    int accentW = std::max(3, (int)(4.0f * m_flScale + 0.5f));
+    int innerGlowW = accentW + std::max(2, (int)(2.0f * m_flScale + 0.5f));
+    int dotSize = std::max(4, (int)(4.0f * m_flScale + 0.5f));
+    int dotLeft = (int)(11.0f * m_flScale + 0.5f);
+    int dotRight = dotLeft + dotSize;
+    int dotTop = h / 2 - dotSize / 2;
+    int dotBottom = dotTop + dotSize;
+
+    if (m_bIsDemoStudio)
+    {
+        // ─── Match Demo Studio (F4): Neon Cyan Cyber Card ───
+        if (isArmed)
+        {
+            // Dark cyan frosted glass background
+            vgui2::surface()->DrawSetColor(Color(12, 42, 64, 235));
+            vgui2::surface()->DrawFilledRect(0, cardY0, w, cardY1);
+
+            // Left luminous neon cyan accent bar
+            vgui2::surface()->DrawSetColor(Color(0, 245, 255, 255));
+            vgui2::surface()->DrawFilledRect(0, cardY0, accentW, cardY1);
+
+            // Inner cyan accent glow
+            vgui2::surface()->DrawSetColor(Color(0, 210, 255, 120));
+            vgui2::surface()->DrawFilledRect(accentW, cardY0, innerGlowW, cardY1);
+
+            // Glowing cyan card border
+            vgui2::surface()->DrawSetColor(Color(0, 245, 255, 140));
+            vgui2::surface()->DrawOutlinedRect(0, cardY0, w, cardY1);
+
+            // Bright indicator dot
+            vgui2::surface()->DrawSetColor(Color(0, 255, 255, 255));
+            vgui2::surface()->DrawFilledRect(dotLeft, dotTop, dotRight, dotBottom);
+        }
+        else
+        {
+            // Idle: refined translucent cyan pill
+            vgui2::surface()->DrawSetColor(Color(10, 26, 42, 165));
+            vgui2::surface()->DrawFilledRect(0, cardY0, w, cardY1);
+
+            // Cyan left accent edge
+            vgui2::surface()->DrawSetColor(Color(0, 210, 255, 180));
+            vgui2::surface()->DrawFilledRect(0, cardY0, std::max(2, accentW - 1), cardY1);
+
+            // Hairline border
+            vgui2::surface()->DrawSetColor(Color(0, 210, 255, 50));
+            vgui2::surface()->DrawOutlinedRect(0, cardY0, w, cardY1);
+
+            // Cyan indicator dot
+            vgui2::surface()->DrawSetColor(Color(0, 210, 255, 190));
+            vgui2::surface()->DrawFilledRect(dotLeft, dotTop, dotRight, dotBottom);
+        }
+    }
+    else if (m_bIsQuit || m_bIsDisconnect)
+    {
+        // ─── Quit / Disconnect: Sleek Crimson / Dark Slate Card ───
+        if (isArmed)
+        {
+            vgui2::surface()->DrawSetColor(Color(52, 18, 24, 230));
+            vgui2::surface()->DrawFilledRect(0, cardY0, w, cardY1);
+
+            vgui2::surface()->DrawSetColor(Color(255, 70, 70, 255));
+            vgui2::surface()->DrawFilledRect(0, cardY0, accentW, cardY1);
+
+            vgui2::surface()->DrawSetColor(Color(255, 75, 75, 110));
+            vgui2::surface()->DrawOutlinedRect(0, cardY0, w, cardY1);
+
+            vgui2::surface()->DrawSetColor(Color(255, 80, 80, 255));
+            vgui2::surface()->DrawFilledRect(dotLeft, dotTop, dotRight, dotBottom);
+        }
+        else
+        {
+            vgui2::surface()->DrawSetColor(Color(16, 20, 26, 125));
+            vgui2::surface()->DrawFilledRect(0, cardY0, w, cardY1);
+
+            vgui2::surface()->DrawSetColor(Color(255, 255, 255, 14));
+            vgui2::surface()->DrawOutlinedRect(0, cardY0, w, cardY1);
+
+            vgui2::surface()->DrawSetColor(Color(160, 165, 175, 130));
+            vgui2::surface()->DrawFilledRect(dotLeft, dotTop, dotRight, dotBottom);
+        }
+    }
+    else
+    {
+        // ─── Standard Menu Items: Modern Glass / Amber Card ───
+        if (isArmed)
+        {
+            vgui2::surface()->DrawSetColor(Color(34, 40, 52, 235));
+            vgui2::surface()->DrawFilledRect(0, cardY0, w, cardY1);
+
+            vgui2::surface()->DrawSetColor(Color(255, 185, 45, 255));
+            vgui2::surface()->DrawFilledRect(0, cardY0, accentW, cardY1);
+
+            vgui2::surface()->DrawSetColor(Color(255, 195, 60, 100));
+            vgui2::surface()->DrawFilledRect(accentW, cardY0, innerGlowW, cardY1);
+
+            vgui2::surface()->DrawSetColor(Color(255, 205, 80, 100));
+            vgui2::surface()->DrawOutlinedRect(0, cardY0, w, cardY1);
+
+            vgui2::surface()->DrawSetColor(Color(255, 200, 55, 255));
+            vgui2::surface()->DrawFilledRect(dotLeft, dotTop, dotRight, dotBottom);
+        }
+        else
+        {
+            vgui2::surface()->DrawSetColor(Color(18, 22, 30, 140));
+            vgui2::surface()->DrawFilledRect(0, cardY0, w, cardY1);
+
+            vgui2::surface()->DrawSetColor(Color(255, 255, 255, 16));
+            vgui2::surface()->DrawOutlinedRect(0, cardY0, w, cardY1);
+
+            vgui2::surface()->DrawSetColor(Color(150, 160, 175, 130));
+            vgui2::surface()->DrawFilledRect(dotLeft, dotTop, dotRight, dotBottom);
+        }
+    }
+
+    if (isDepressed)
+    {
+        vgui2::surface()->DrawSetColor(Color(255, 255, 255, 50));
+        vgui2::surface()->DrawFilledRect(0, cardY0, w, cardY1);
+    }
 }
 
 void CGameMenuItem::SetRightAlignedText(bool state)
@@ -138,13 +299,17 @@ Color CGameMenuItem::GetButtonFgColor()
 void CGameMenuItem::OnCursorEntered(void)
 {
     BaseClass::OnCursorEntered();
-    //vgui2::GetAnimationController()->RunAnimationCommand(this, "bgcolor", Color(150, 150, 150, 150), 0.0f, 0.5, vgui2::AnimationController::INTERPOLATOR_ACCEL);
+    int slideInset = (int)(30.0f * m_flScale + 0.5f);
+    SetTextInset(slideInset, 0); // Smooth responsive slide to right
+    Repaint();
 }
 
 void CGameMenuItem::OnCursorExited(void)
 {
     BaseClass::OnCursorExited();
-    //vgui2::GetAnimationController()->RunAnimationCommand(this, "bgcolor", Color(0, 0, 0, 0), 0.0f, 0.5, vgui2::AnimationController::INTERPOLATOR_DEACCEL);
+    int baseInset = (int)(24.0f * m_flScale + 0.5f);
+    SetTextInset(baseInset, 0); // Smooth slide back
+    Repaint();
 }
 
 class CGameMenu : public vgui2::Menu
@@ -161,12 +326,13 @@ public:
     {
         BaseClass::ApplySchemeSettings(pScheme);
 
-        auto strMenuItemHeight = pScheme->GetResourceString("MainMenu.MenuItemHeight");
-        if(!Q_strlen(strMenuItemHeight))
-            strMenuItemHeight = pScheme->GetResourceString("InGameDesktop/MenuItemHeight");
+        int swide, stall;
+        vgui2::surface()->GetScreenSize(swide, stall);
+        float scale = (float)stall / 600.0f;
+        if (scale < 0.75f) scale = 0.75f;
 
-        if(Q_strlen(strMenuItemHeight))
-            SetMenuItemHeight(atoi(strMenuItemHeight));
+        int itemH = (int)(34.0f * scale + 0.5f);
+        SetMenuItemHeight(itemH);
 
         SetBgColor(Color(0, 0, 0, 0));
         SetBorder(NULL);
@@ -230,13 +396,48 @@ public:
     {
         BaseClass::PerformLayout();
 
-        bool foundDemoStudio = false;
-        int extraGap = 18;
+        int swide = 0, stall = 0;
+        vgui2::surface()->GetScreenSize(swide, stall);
+        float scale = (stall > 0) ? ((float)stall / 600.0f) : 1.0f;
+        if (scale < 1.0f) scale = 1.0f;
+
+        int itemH = (int)(34.0f * scale + 0.5f);
+        SetMenuItemHeight(itemH);
+
+        // Uniform modern card width, scaled to 800x600 experience
+        int maxItemW = (int)(220.0f * scale + 0.5f);
+        for (int i = 0; i < GetChildCount(); i++)
+        {
+            Panel *child = GetChild(i);
+            CGameMenuItem *menuItem = dynamic_cast<CGameMenuItem *>(child);
+            if (menuItem && menuItem->IsVisible())
+            {
+                menuItem->UpdateScaleMetrics(scale);
+
+                int mw = 0, mh = 0;
+                menuItem->GetSize(mw, mh);
+                if (mw > maxItemW)
+                    maxItemW = mw;
+            }
+        }
 
         for (int i = 0; i < GetChildCount(); i++)
         {
             Panel *child = GetChild(i);
-            vgui2::MenuItem *menuItem = dynamic_cast<vgui2::MenuItem *>(child);
+            CGameMenuItem *menuItem = dynamic_cast<CGameMenuItem *>(child);
+            if (menuItem && menuItem->IsVisible())
+            {
+                menuItem->SetSize(maxItemW, itemH);
+            }
+        }
+
+        bool foundDemoStudio = false;
+        int extraGap = (int)(12.0f * scale + 0.5f);
+
+        for (int i = 0; i < GetChildCount(); i++)
+        {
+            Panel *child = GetChild(i);
+            CGameMenuItem *menuItem = dynamic_cast<CGameMenuItem *>(child);
             if (menuItem && menuItem->IsVisible())
             {
                 const char *cmd = menuItem->GetCommand() ? menuItem->GetCommand()->GetString("command", "") : "";
@@ -255,12 +456,9 @@ public:
             }
         }
 
-        if (foundDemoStudio)
-        {
-            int w, h;
-            GetSize(w, h);
-            SetSize(w, h + extraGap);
-        }
+        int w, h;
+        GetSize(w, h);
+        SetSize(std::max(w, maxItemW), foundDemoStudio ? (h + extraGap) : h);
     }
 
     virtual void OnKeyCodePressed(vgui2::KeyCode code)
@@ -469,6 +667,101 @@ void CBasePanel::PaintBackground(void)
         vgui2::surface()->DrawSetColor(0, 0, 0, m_flBackgroundFillAlpha);
         vgui2::surface()->DrawFilledRect(0, 0, swide, stall);
     }
+
+    DrawTopWelcomeBanner();
+}
+
+void CBasePanel::DrawTopWelcomeBanner(void)
+{
+    if (GameUI().IsInLevel() || g_hLoadingDialog.Get())
+        return;
+
+    int swide = 0, stall = 0;
+    vgui2::surface()->GetScreenSize(swide, stall);
+    if (swide <= 0 || stall <= 0)
+        return;
+
+    float scale = (float)stall / 600.0f;
+    if (scale < 1.0f) scale = 1.0f;
+
+    // Get current player name from engine
+    const char *pName = engine ? engine->pfnGetCvarString("name") : "Player";
+    if (!pName || !*pName)
+        pName = "Player";
+
+    wchar_t wName[64]{};
+    if (g_pVGuiLocalize)
+        g_pVGuiLocalize->ConvertANSIToUnicode(pName, wName, sizeof(wName));
+    else
+        mbstowcs(wName, pName, sizeof(wName) / sizeof(wchar_t) - 1);
+
+    wchar_t wPrefix[] = L"WELCOME : ";
+
+    vgui2::IScheme *pScheme = vgui2::scheme()->GetIScheme(vgui2::scheme()->GetDefaultScheme());
+    if (!pScheme)
+        return;
+
+    vgui2::HFont hFont = pScheme->GetFont("MenuLarge", IsProportional());
+    if (!hFont)
+        hFont = pScheme->GetFont("DefaultBold", IsProportional());
+    if (!hFont)
+        return;
+
+    int prefixW = 0, prefixH = 0;
+    vgui2::surface()->GetTextSize(hFont, wPrefix, prefixW, prefixH);
+
+    int nameW = 0, nameH = 0;
+    vgui2::surface()->GetTextSize(hFont, wName, nameW, nameH);
+
+    int textW = prefixW + nameW;
+    int textH = std::max(prefixH, nameH);
+
+    int paddingX = (int)(24.0f * scale + 0.5f);
+    int dotSize = std::max(6, (int)(6.0f * scale + 0.5f));
+    int dotGap = (int)(14.0f * scale + 0.5f);
+
+    int bannerH = std::max((int)(36.0f * scale + 0.5f), textH + (int)(14.0f * scale + 0.5f));
+    int bannerW = textW + paddingX * 2 + dotSize + dotGap;
+    int bannerX = (swide - bannerW) / 2;
+    int bannerY = (int)(20.0f * scale + 0.5f);
+
+    // 1. Frosted obsidian glass backdrop
+    vgui2::surface()->DrawSetColor(Color(14, 18, 26, 215));
+    vgui2::surface()->DrawFilledRect(bannerX, bannerY, bannerX + bannerW, bannerY + bannerH);
+
+    // 2. Subtle top accent line (Dual-tone cyan to gold)
+    int halfW = bannerW / 2;
+    int accentH = std::max(2, (int)(2.0f * scale + 0.5f));
+    vgui2::surface()->DrawSetColor(Color(0, 220, 255, 230)); // Cyan
+    vgui2::surface()->DrawFilledRect(bannerX, bannerY, bannerX + halfW, bannerY + accentH);
+    vgui2::surface()->DrawSetColor(Color(255, 185, 45, 230)); // Esports Gold
+    vgui2::surface()->DrawFilledRect(bannerX + halfW, bannerY, bannerX + bannerW, bannerY + accentH);
+
+    // 3. Hairline outline
+    vgui2::surface()->DrawSetColor(Color(255, 255, 255, 22));
+    vgui2::surface()->DrawOutlinedRect(bannerX, bannerY, bannerX + bannerW, bannerY + bannerH);
+
+    // 4. Live status green indicator dot
+    int dotX = bannerX + paddingX;
+    int dotY = bannerY + (bannerH - dotSize) / 2;
+    vgui2::surface()->DrawSetColor(Color(46, 213, 115, 255));
+    vgui2::surface()->DrawFilledRect(dotX, dotY, dotX + dotSize, dotY + dotSize);
+
+    // 5. Draw text
+    int textX = dotX + dotSize + dotGap;
+    int textY = bannerY + (bannerH - textH) / 2;
+
+    vgui2::surface()->DrawSetTextFont(hFont);
+
+    // Draw "WELCOME : " in metallic silver/slate
+    vgui2::surface()->DrawSetTextColor(Color(175, 185, 200, 255));
+    vgui2::surface()->DrawSetTextPos(textX, textY);
+    vgui2::surface()->DrawPrintText(wPrefix, wcslen(wPrefix));
+
+    // Draw Player Name in luminous esports gold
+    vgui2::surface()->DrawSetTextColor(Color(255, 215, 85, 255));
+    vgui2::surface()->DrawSetTextPos(textX + prefixW, textY);
+    vgui2::surface()->DrawPrintText(wName, wcslen(wName));
 }
 
 bool CBasePanel::IsMenuFading(void)
@@ -806,6 +1099,10 @@ CGameMenu *CBasePanel::RecursiveLoadGameMenu(vgui2::Panel *parent, KeyValues *da
         if (cmd && (!Q_stricmp(cmd, "ConnectToRandomServer") || !Q_stricmp(cmd, "OpenHelpUrl")))
             continue;
 
+        // Never load blank separators or ghost buttons with empty label or command
+        if (!cmd || !*cmd || !label || !*label)
+            continue;
+
         menu->AddMenuItem(name, label, cmd, this, dat);
     }
 
@@ -831,6 +1128,12 @@ void CBasePanel::PerformLayout(void)
     int wide, tall;
     vgui2::surface()->GetScreenSize(wide, tall);
 
+    float scale = (float)tall / 600.0f;
+    if (scale < 0.75f) scale = 0.75f;
+
+    m_iGameMenuPos.x = (int)(20.0f * scale + 0.5f);
+    m_iGameMenuInset = (int)(32.0f * scale + 0.5f);
+
     int menuWide, menuTall;
     m_pGameMenu->GetSize(menuWide, menuTall);
 
@@ -841,7 +1144,8 @@ void CBasePanel::PerformLayout(void)
     for (int i = 0; i < m_pGameMenuButtons.Count(); ++i)
     {
         m_pGameMenuButtons[i]->SizeToContents();
-        m_pGameMenuButtons[i]->SetPos(m_iGameTitlePos[i].x, m_iGameTitlePos[i].y + yDiff);
+        if (i < m_iGameTitlePos.Count())
+            m_pGameMenuButtons[i]->SetPos(m_iGameTitlePos[i].x, m_iGameTitlePos[i].y + yDiff);
     }
 
     if (m_pGameLogo)

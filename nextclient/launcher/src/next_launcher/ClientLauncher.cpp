@@ -954,7 +954,12 @@ void ClientLauncher::RestoreGameConfigOnFreshLaunch()
     constexpr char kDefaultConfig[] = "default/config.cfg";
     EnsureDefaultGameConfig(kDefaultConfig);
 
-    // On fresh launch, if no user is authenticated (guest mode), cleanly reset to default!
+    // If home client, NEVER wipe user's local config! Home users have their own PC.
+    const GameNetAccessStatus online_access = QueryGameNetOnlineAccess();
+    if (online_access.is_home_client)
+        return;
+
+    // On fresh launch, if no user is authenticated (guest mode in LAN game center), cleanly reset to default!
     if (!IsUserAuthenticated())
     {
         ResetGuestConfigToDefault();

@@ -114,9 +114,15 @@ public:
 
 public:
     void SetRightAlignedText(bool state);
+    void UpdateScaleMetrics(float scale);
 
 private:
     bool m_bRightAligned;
+    bool m_bIsDemoStudio;
+    bool m_bIsQuit;
+    bool m_bIsResume;
+    bool m_bIsDisconnect;
+    float m_flScale;
 };
 
 class CBasePanel : public vgui2::Panel
@@ -158,6 +164,7 @@ public:
 protected:
     virtual void PaintBackground(void);
     virtual void ApplySchemeSettings(vgui2::IScheme *pScheme);
+    void DrawTopWelcomeBanner(void);
 
 private:
     enum EBackgroundState

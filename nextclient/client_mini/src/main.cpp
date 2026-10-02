@@ -23,6 +23,7 @@
 #include "inspect.h"
 #include "invert_mouse.h"
 #include "recorder/GameVideoRecorder.h"
+#include "hud/ModernChat.h"
 
 using nextclient::client_mini::GameVideoRecorder;
 
@@ -926,31 +927,41 @@ static std::string GetActiveDemoOrMapName()
 
     static int HUD_Key_EventHandler(int down, int keynum, const char* pszCurrentBinding, HUD_Key_EventNext next)
     {
+        if (ModernChat::Instance().IsOpen())
+        {
+            return ModernChat::Instance().HandleKey(down, keynum, pszCurrentBinding);
+        }
+
         if (!down)
             return next->Invoke(down, keynum, pszCurrentBinding);
 
-        // Anti-AutoBhop / Synthetic Space spam rate-limiter (Layer 2)
-        // Detects rapid spacebar repetition faster than humanly possible (< 35ms / > 30 taps per sec)
-        if (keynum == 32)
+        if (down)
         {
-            static uint64_t s_lastSpaceDownTick = 0;
-            static int s_rapidSpaceCount = 0;
-            uint64_t now = GetTickCount64();
-            uint64_t delta = now - s_lastSpaceDownTick;
-            s_lastSpaceDownTick = now;
-
-            if (delta < 35)
+            if (pszCurrentBinding != nullptr)
             {
-                s_rapidSpaceCount++;
-                if (s_rapidSpaceCount >= 2)
+                if (BindingEquals(pszCurrentBinding, "messagemode2"))
                 {
-                    // Synthetic space spam detected -> drop keydown event!
+                    ModernChat::Instance().Open(ModernChatMode::SayTeam);
+                    return 0;
+                }
+                if (BindingEquals(pszCurrentBinding, "messagemode"))
+                {
+                    ModernChat::Instance().Open(ModernChatMode::SayAll);
                     return 0;
                 }
             }
             else
             {
-                s_rapidSpaceCount = 0;
+                if (keynum == 'u' || keynum == 'U')
+                {
+                    ModernChat::Instance().Open(ModernChatMode::SayTeam);
+                    return 0;
+                }
+                if (keynum == 'y' || keynum == 'Y')
+                {
+                    ModernChat::Instance().Open(ModernChatMode::SayAll);
+                    return 0;
+                }
             }
         }
 
@@ -1422,6 +1433,9 @@ static int HUD_RedrawHandler(float flTime, int iIntermission, HUD_RedrawNext nex
     if (hud_draw_value != 0.0f && !overlay_visible && g_DemoMenuVisible)
         DrawDemoMenu();
 
+    if (hud_draw_value != 0.0f && !overlay_visible)
+        ModernChat::Instance().Draw(scrW, scrH);
+
     // Render top-right Windows capture style timer widget if match demo is recording
     if (GameVideoRecorder::Instance().IsMatchDemoRecording() && !g_DemoMenuVisible)
     {
@@ -1478,6 +1492,7 @@ static int HUD_RedrawHandler(float flTime, int iIntermission, HUD_RedrawNext nex
 
 static void HUD_ResetHandler(HUD_ResetNext next)
 {
+    ModernChat::Instance().Reset();
     ClearHudTxt();
 
     next->Invoke();
@@ -1505,6 +1520,7 @@ static void HUD_ResetHandler(HUD_ResetNext next)
 
 static int HUD_VidInitHandler(HUD_VidInitNext next)
 {
+    ModernChat::Instance().VidInit();
     ClearHudTxt();
 
     next->Invoke();
@@ -1574,6 +1590,7 @@ static void UserMsg_InitHUDPost(const char* name, int size, void* data, int resu
 static pfnEngSrc_pfnHookUserMsg_t g_OriginalHookUserMsg = nullptr;
 static pfnUserMsgHook g_Original_MsgFunc_ShowMenu = nullptr;
 static pfnUserMsgHook g_Original_MsgFunc_VGUIMenu = nullptr;
+static pfnUserMsgHook g_Original_MsgFunc_SayText = nullptr;
 
 static int Hooked_MsgFunc_ShowMenu(const char* pszName, int iSize, void* pbuf)
 {
@@ -1650,6 +1667,81 @@ static int Hooked_MsgFunc_VGUIMenu(const char* pszName, int iSize, void* pbuf)
     return 0;
 }
 
+static int Hooked_MsgFunc_SayText(const char* pszName, int iSize, void* pbuf)
+{
+    if (pbuf != nullptr && iSize > 1)
+    {
+        BEGIN_READ(pbuf, iSize);
+        int clientIndex = READ_BYTE();
+
+        std::vector<std::string> strings;
+        for (int i = 0; i < 4; ++i)
+        {
+            const char* s = READ_STRING();
+            if (s != nullptr && *s != '\0')
+            {
+                strings.emplace_back(s);
+            }
+        }
+
+        if (!strings.empty())
+        {
+            ModernChat::Instance().OnSayTextPacket(clientIndex, strings);
+        }
+    }
+
+    // In CS 1.6, SayText is exclusively player chat.
+    // Unconditionally suppress legacy SayText so player chat NEVER prints to the old yellow HUD!
+    return 1;
+}
+
+static pfnUserMsgHook g_Original_MsgFunc_TextMsg = nullptr;
+
+static int Hooked_MsgFunc_TextMsg(const char* pszName, int iSize, void* pbuf)
+{
+    if (pbuf != nullptr && iSize > 0)
+    {
+        BEGIN_READ(pbuf, iSize);
+        int destType = READ_BYTE();
+
+        if (destType == 3) // HUD_PRINTTALK (In-game Chat, All Chat, Team Chat, Server broadcasts, / commands)
+        {
+            std::vector<std::string> strings;
+            for (int i = 0; i < 5; ++i)
+            {
+                const char* s = READ_STRING();
+                if (s != nullptr && *s != '\0')
+                {
+                    strings.emplace_back(s);
+                }
+            }
+
+            if (!strings.empty())
+            {
+                ModernChat::Instance().OnTextMsgPacket(strings);
+            }
+            // Unconditionally suppress HUD_PRINTTALK from legacy HUD!
+            return 1;
+        }
+        else if (destType == 2) // HUD_PRINTCONSOLE
+        {
+            std::string msg = READ_STRING();
+            if (msg == "#Game_unknown_command")
+            {
+                std::string cmd = READ_STRING();
+                if (cmd.starts_with("client_chat_"))
+                    return 1;
+            }
+        }
+    }
+
+    // destType == 4 (HUD_PRINTCENTER) and other non-chat messages pass to original client handler
+    if (g_Original_MsgFunc_TextMsg != nullptr)
+        return g_Original_MsgFunc_TextMsg(pszName, iSize, pbuf);
+
+    return 0;
+}
+
 static int HookUserMsgInterceptor(const char* pszMsgName, pfnUserMsgHook pfn)
 {
     if (pszMsgName != nullptr)
@@ -1666,6 +1758,20 @@ static int HookUserMsgInterceptor(const char* pszMsgName, pfnUserMsgHook pfn)
             g_Original_MsgFunc_VGUIMenu = pfn;
             if (g_OriginalHookUserMsg != nullptr)
                 return g_OriginalHookUserMsg(pszMsgName, Hooked_MsgFunc_VGUIMenu);
+            return 1;
+        }
+        else if (std::strcmp(pszMsgName, "SayText") == 0)
+        {
+            g_Original_MsgFunc_SayText = pfn;
+            if (g_OriginalHookUserMsg != nullptr)
+                return g_OriginalHookUserMsg(pszMsgName, Hooked_MsgFunc_SayText);
+            return 1;
+        }
+        else if (std::strcmp(pszMsgName, "TextMsg") == 0)
+        {
+            g_Original_MsgFunc_TextMsg = pfn;
+            if (g_OriginalHookUserMsg != nullptr)
+                return g_OriginalHookUserMsg(pszMsgName, Hooked_MsgFunc_TextMsg);
             return 1;
         }
     }
@@ -1694,22 +1800,50 @@ static int UserMsg_TextMsgHandler(const char* name, int size, void* data, UserMs
         "client_chat_close\n",
     };
 
-    BEGIN_READ(data, size);
-
-    const int destType = READ_BYTE();
-    if (destType == 2)
+    if (data != nullptr && size > 0)
     {
-        std::string message = READ_STRING();
-        if (message == "#Game_unknown_command")
+        const unsigned char* bytes = static_cast<const unsigned char*>(data);
+        const int destType = bytes[0];
+
+        if (destType == 2) // HUD_PRINTCONSOLE
         {
-            std::string command = READ_STRING();
-            if (std::ranges::contains(hiddenServerCmds, command))
+            BEGIN_READ(data, size);
+            READ_BYTE(); // destType
+            std::string message = READ_STRING();
+            if (message == "#Game_unknown_command")
             {
-                return 1;
+                std::string command = READ_STRING();
+                if (std::ranges::contains(hiddenServerCmds, command))
+                {
+                    return 1;
+                }
             }
+        }
+        else if (destType == 3) // HUD_PRINTTALK (In-game Chat & Server announcements)
+        {
+            BEGIN_READ(data, size);
+            READ_BYTE(); // destType
+            std::vector<std::string> strings;
+            for (int i = 0; i < 5; ++i)
+            {
+                const char* s = READ_STRING();
+                if (s != nullptr && *s != '\0')
+                {
+                    strings.emplace_back(s);
+                }
+            }
+
+            if (!strings.empty())
+            {
+                ModernChat::Instance().OnTextMsgPacket(strings);
+            }
+            // Unconditionally suppress HUD_PRINTTALK from legacy HUD!
+            return 1;
         }
     }
 
+    // Pass any unhandled TextMsg messages (e.g. HUD_PRINTCENTER big titles)
+    // directly to the original client handler so they display on screen as normal!
     return next->Invoke(name, size, data);
 }
 
@@ -1736,6 +1870,12 @@ static void CL_CreateMoveHandler(float frametime, usercmd_t* cmd, int active, CL
     next->Invoke(frametime, cmd, active);
 
     CL_CreateMove_InvertMousePost(frametime, cmd, active);
+
+    if (ModernChat::Instance().IsOpen() && cmd != nullptr)
+    {
+        // Keep running and walking momentum fluid; only prevent weapon firing on mouse click
+        cmd->buttons &= ~(IN_ATTACK | IN_ATTACK2);
+    }
 }
 
 static void HUD_ProcessPlayerStateHandler(entity_state_s* dst, const entity_state_s* src, HUD_ProcessPlayerStateNext next)
@@ -1833,6 +1973,14 @@ public:
         g_Unsub.emplace_back(client_data->UserMsg_InitHUD += UserMsg_InitHUDPost);
         g_Unsub.emplace_back(client_data->UserMsg_TextMsg |= UserMsg_TextMsgHandler);
         g_Unsub.emplace_back(client_data->CL_CreateMove |= CL_CreateMoveHandler);
+
+        ModernChat::Instance().Init(nitro_api);
+        g_Unsub.emplace_back(eng()->Con_MessageMode_f |= [](const auto& /*next*/) {
+            ModernChat::Instance().Open(ModernChatMode::SayAll);
+        });
+        g_Unsub.emplace_back(eng()->Con_MessageMode2_f |= [](const auto& /*next*/) {
+            ModernChat::Instance().Open(ModernChatMode::SayTeam);
+        });
 
         // A capture transition is also an input-state boundary. Clearing once
         // here prevents held buttons and pre-capture mouse motion leaking into

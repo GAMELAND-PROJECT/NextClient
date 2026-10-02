@@ -75,6 +75,8 @@ add_library(${PROJECT_NAME} SHARED
         src/hud/HudAmmo.cpp
         src/recorder/GameVideoRecorder.h
         src/recorder/GameVideoRecorder.cpp
+        src/hud/ModernChat.h
+        src/hud/ModernChat.cpp
 )
 
 target_include_directories(${PROJECT_NAME} PRIVATE
