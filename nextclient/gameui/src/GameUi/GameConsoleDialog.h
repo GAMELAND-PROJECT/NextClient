@@ -74,9 +74,10 @@ public:
     // clears the console
     void Clear();
 
-    // Shows the small, static LAN-host command card without enabling engine logs.
+    // Shows the interactive LAN-host match manager panel without enabling engine spam.
     void ShowLanHostGuide(bool show);
     void UpdateLanHostStatus(bool isListenHost);
+    void PrintHostStatusCard(const char* title, const char* mode, bool ff, int freezetime, float roundtime, int startmoney);
 
     void Hide();
     void DumpConsoleTextToFile();
@@ -109,7 +110,8 @@ private:
 
 private:
     CNoKeyboardInputRichText *m_pHistory;
-    vgui2::Panel *m_pLanHostGuide;
+    class CLanHostMenuPanel *m_pLanHostMenu;
+    vgui2::Button *m_pTabToggle;
     TabCatchingTextEntry *m_pEntry;
     vgui2::Button *m_pSubmit;
     vgui2::Menu *m_pCompletionList;

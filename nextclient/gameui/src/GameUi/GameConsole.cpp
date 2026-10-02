@@ -70,6 +70,8 @@ void CGameConsole::Initialize()
     m_bInitialized = true;
 
     engine->pfnAddCommand("condump", CGameConsole::OnCmdCondump);
+    engine->pfnAddCommand("hostmenu", CGameConsole::OnCmdHostMenu);
+    engine->pfnAddCommand("host", CGameConsole::OnCmdHostMenu);
 
     // This provides a 1 frame delay to display the text after the temporary buffer from the engine
     TaskCoro::RunInMainThread([this]
@@ -237,3 +239,13 @@ void CGameConsole::OnCmdCondump()
 
     g_GameConsole.m_pConsole->DumpConsoleTextToFile();
 }
+
+void CGameConsole::OnCmdHostMenu()
+{
+    GameConsole().Activate();
+    if (GameConsole().m_pConsole)
+    {
+        GameConsole().m_pConsole->ShowLanHostGuide(true);
+    }
+}
+

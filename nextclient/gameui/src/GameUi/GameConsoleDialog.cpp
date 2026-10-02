@@ -29,40 +29,7 @@
 #include "LoadingDialog.h"
 #include <Windows.h>
 #undef PostMessage
-#include "LanHostGuideBitmap.h"
-
-class CLanHostGuidePanel : public vgui2::Panel
-{
-public:
-    CLanHostGuidePanel(vgui2::Panel* parent) : Panel(parent, "LanHostGuide")
-    {
-        SetMouseInputEnabled(false);
-        SetKeyBoardInputEnabled(false);
-        SetPaintBackgroundEnabled(false);
-    }
-    ~CLanHostGuidePanel() override
-    {
-        if (texture_) vgui2::surface()->DeleteTextureByID(texture_);
-    }
-    void Paint() override
-    {
-        const int width = GetWide(), height = GetTall();
-        if (!texture_ || width != width_ || height != height_)
-        {
-            const auto rgba = RenderLanHostGuide(width, height);
-            if (rgba.empty()) return;
-            if (!texture_) texture_ = vgui2::surface()->CreateNewTextureID(true);
-            vgui2::surface()->DrawSetTextureRGBA(texture_, rgba.data(), width, height, 0, true);
-            width_ = width;
-            height_ = height;
-        }
-        vgui2::surface()->DrawSetColor(255, 255, 255, 255);
-        vgui2::surface()->DrawSetTexture(texture_);
-        vgui2::surface()->DrawTexturedRect(0, 0, width, height);
-    }
-private:
-    int texture_ = 0, width_ = 0, height_ = 0;
-};
+#include "LanHostMenuPanel.h"
 
 // memdbgon must be the last include file in a .cpp file!!!
 #include <tier0/memdbgon.h>
@@ -263,8 +230,12 @@ CGameConsoleDialog::CGameConsoleDialog() : BaseClass(NULL, "GameConsole", false)
     m_bIsListenHost = false;
 
     m_pHistory = new CNoKeyboardInputRichText(this, "ConsoleHistory", m_pEntry);
-    m_pLanHostGuide = new CLanHostGuidePanel(this);
-    m_pLanHostGuide->SetVisible(false);
+    m_pLanHostMenu = new CLanHostMenuPanel(this, this);
+    m_pLanHostMenu->SetVisible(false);
+
+    m_pTabToggle = new vgui2::Button(this, "TabToggle", "کنترل پنل هاست");
+    m_pTabToggle->SetCommand("ToggleHostTab");
+    m_pTabToggle->SetVisible(false);
 
     // Keep console history active and lightweight in LAN (4096 chars buffer eliminates lag)
     m_pHistory->SetVisible(true);
@@ -300,29 +271,39 @@ void CGameConsoleDialog::Activate()
 void CGameConsoleDialog::Clear()
 {
     m_pHistory->SetText("");
-    if (!m_bLanHostGuideVisible)
+    if (!m_bLanHostGuideVisible && m_pLanHostMenu)
     {
-        m_pLanHostGuide->SetVisible(false);
+        m_pLanHostMenu->SetVisible(false);
     }
 }
 
 void CGameConsoleDialog::UpdateLanHostStatus(bool isListenHost)
 {
     m_bIsListenHost = isListenHost;
+    if (m_pTabToggle)
+        m_pTabToggle->SetVisible(isListenHost);
+
     ShowLanHostGuide(isListenHost);
 }
 
 void CGameConsoleDialog::ShowLanHostGuide(bool show)
 {
     m_bLanHostGuideVisible = show;
-    m_pLanHostGuide->SetVisible(show);
+    if (m_pLanHostMenu)
+        m_pLanHostMenu->SetVisible(show);
+
     m_pHistory->SetVisible(!show);
     m_pHistory->SetVerticalScrollbar(!show);
 
+    if (m_pTabToggle)
+    {
+        m_pTabToggle->SetText(show ? "مشاهده لاگ‌های کنسول" : "کنترل پنل هاست");
+    }
+
     if (show)
     {
-        SetMinimumSize(620, 440);
-        SetSize(std::max(GetWide(), 620), std::max(GetTall(), 440));
+        SetMinimumSize(660, 480);
+        SetSize(std::max(GetWide(), 660), std::max(GetTall(), 480));
     }
     else
     {
@@ -331,6 +312,48 @@ void CGameConsoleDialog::ShowLanHostGuide(bool show)
     }
 
     InvalidateLayout();
+}
+
+void CGameConsoleDialog::PrintHostStatusCard(const char* title, const char* mode, bool ff, int freezetime, float roundtime, int startmoney)
+{
+    Color cCyan(80, 220, 245, 255);
+    Color cGold(245, 201, 112, 255);
+    Color cGreen(80, 240, 140, 255);
+    Color cRed(255, 90, 90, 255);
+    Color cWhite(230, 235, 240, 255);
+    Color cGray(140, 160, 180, 255);
+
+    ColorPrint(cCyan, "\n===================================================================\n");
+    ColorPrint(cGold, "  [GAMELAND HOST MANAGER] ");
+    ColorPrint(cWhite, title ? title : "تنظیمات جدید هاست اعمال شد");
+    ColorPrint(cCyan, "\n-------------------------------------------------------------------\n");
+
+    ColorPrint(cGray, "  * حالت بازی (Mode)          : ");
+    ColorPrint(cGold, mode ? mode : "Custom");
+    ColorPrint(cWhite, "\n");
+
+    ColorPrint(cGray, "  * تیر به خودی (Friendly Fire): ");
+    if (ff)
+        ColorPrint(cGreen, "[ فعال / ON ] (mp_friendlyfire 1)\n");
+    else
+        ColorPrint(cRed, "[ غیرفعال / OFF ] (mp_friendlyfire 0)\n");
+
+    ColorPrint(cGray, "  * وقت اولیه (Freeze Time)   : ");
+    char ftBuf[64];
+    snprintf(ftBuf, sizeof(ftBuf), "[ %d ثانیه ] (mp_freezetime %d)\n", freezetime, freezetime);
+    ColorPrint(cWhite, ftBuf);
+
+    ColorPrint(cGray, "  * زمان هر راند (Round Time) : ");
+    char rtBuf[64];
+    snprintf(rtBuf, sizeof(rtBuf), "[ %.2f دقیقه ] (mp_roundtime %.2f)\n", roundtime, roundtime);
+    ColorPrint(cWhite, rtBuf);
+
+    ColorPrint(cGray, "  * سرمایه اولیه (Start Money): ");
+    char smBuf[64];
+    snprintf(smBuf, sizeof(smBuf), "[ $%d ] (mp_startmoney %d)\n", startmoney, startmoney);
+    ColorPrint(cGreen, smBuf);
+
+    ColorPrint(cCyan, "===================================================================\n\n");
 }
 
 //-----------------------------------------------------------------------------
@@ -776,6 +799,12 @@ void CGameConsoleDialog::OnTextChanged(Panel *panel)
 //-----------------------------------------------------------------------------
 void CGameConsoleDialog::OnCommand(const char *command)
 {
+    if (!stricmp(command, "ToggleHostTab"))
+    {
+        ShowLanHostGuide(!m_bLanHostGuideVisible);
+        return;
+    }
+
     if (!stricmp(command, "Submit"))
     {
         // submit the entry as a console commmand
@@ -791,7 +820,8 @@ void CGameConsoleDialog::OnCommand(const char *command)
             trimLen--;
         }
 
-        if (m_bIsListenHost && (!stricmp(pTrim, "help") || !stricmp(pTrim, "guide") || !stricmp(pTrim, "commands")))
+        if (m_bIsListenHost && (!stricmp(pTrim, "help") || !stricmp(pTrim, "guide") || !stricmp(pTrim, "commands") ||
+            !stricmp(pTrim, "host") || !stricmp(pTrim, "hostmenu") || !stricmp(pTrim, "mixmenu")))
         {
             ShowLanHostGuide(true);
             m_pEntry->SetText("");
@@ -948,14 +978,25 @@ void CGameConsoleDialog::PerformLayout()
 
     m_pHistory->SetPos(inset, inset + topHeight);
     m_pHistory->SetSize(wide - (inset * 2), tall - (entryInset * 2 + inset * 2 + topHeight + entryHeight));
-    m_pLanHostGuide->SetBounds(inset, inset + topHeight, wide - inset * 2,
-        tall - (entryInset * 2 + inset * 2 + topHeight + entryHeight));
+    if (m_pLanHostMenu)
+    {
+        m_pLanHostMenu->SetBounds(inset, inset + topHeight, wide - inset * 2,
+            tall - (entryInset * 2 + inset * 2 + topHeight + entryHeight));
+    }
 
     m_pEntry->SetPos(inset, tall - (entryInset * 2 + entryHeight));
     m_pEntry->SetSize(wide - (inset * 3 + submitWide), entryHeight);
 
     m_pSubmit->SetPos(wide - (inset + submitWide), tall - (entryInset * 2 + entryHeight));
     m_pSubmit->SetSize(submitWide, entryHeight);
+
+    if (m_pTabToggle)
+    {
+        const int tabW = 150;
+        m_pTabToggle->SetBounds(wide - tabW - 40, 4, tabW, 20);
+        m_pTabToggle->SetVisible(m_bIsListenHost);
+        m_pTabToggle->SetText(m_bLanHostGuideVisible ? "مشاهده لاگ‌های کنسول" : "کنترل پنل هاست");
+    }
 
     UpdateCompletionListPosition();
 }
