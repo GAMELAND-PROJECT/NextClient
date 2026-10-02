@@ -1296,19 +1296,36 @@ static void FixDemoScoreboardTeams()
             continue;
 
         extra_player_info_t& extra = extraInfo[i];
-        if (extra.teamname[0] == '\0' || (std::strcmp(extra.teamname, "TERRORIST") != 0 && std::strcmp(extra.teamname, "CT") != 0))
-        {
-            if (info.model != nullptr && info.model[0] != '\0')
-            {
-                std::string model = info.model;
-                for (char& c : model) c = static_cast<char>(tolower(c));
 
+        std::string model = (info.model != nullptr) ? info.model : "";
+        for (char& c : model) c = static_cast<char>(tolower(c));
+
+        // 1. If player is marked as spectator by engine, model or previous teaminfo, keep as spectator
+        if (info.spectator != 0 ||
+            model.find("spectator") != std::string::npos ||
+            model.find("spec") != std::string::npos ||
+            extra.teamnumber == 3 ||
+            std::strcmp(extra.teamname, "SPECTATOR") == 0)
+        {
+            extra.teamnumber = 3; // TEAM_SPECTATOR
+            extra.team_id = 3;
+            strcpy_s(extra.teamname, sizeof(extra.teamname), "SPECTATOR");
+            extra.dead = true;
+            continue;
+        }
+
+        // 2. Only infer Terrorist / CT if team is unassigned or empty
+        if (extra.teamname[0] == '\0' || extra.teamnumber == 0)
+        {
+            if (!model.empty())
+            {
                 if (model.find("terror") != std::string::npos ||
                     model.find("leet") != std::string::npos ||
                     model.find("arctic") != std::string::npos ||
                     model.find("guerilla") != std::string::npos)
                 {
                     extra.teamnumber = 1; // TEAM_TERRORIST
+                    extra.team_id = 1;
                     strcpy_s(extra.teamname, sizeof(extra.teamname), "TERRORIST");
                 }
                 else if (model.find("urban") != std::string::npos ||
@@ -1318,6 +1335,7 @@ static void FixDemoScoreboardTeams()
                          model.find("vip") != std::string::npos)
                 {
                     extra.teamnumber = 2; // TEAM_CT
+                    extra.team_id = 2;
                     strcpy_s(extra.teamname, sizeof(extra.teamname), "CT");
                 }
             }
@@ -1412,9 +1430,21 @@ static int HUD_RedrawHandler(float flTime, int iIntermission, HUD_RedrawNext nex
 
     // Render Demo Highlight HUD elements during demo playback
     const bool isViewingDemo = (gEngfuncs.pDemoAPI && gEngfuncs.pDemoAPI->IsPlayingback());
+    static bool s_wasViewingDemo = false;
     if (isViewingDemo)
     {
+        if (!s_wasViewingDemo)
+        {
+            s_wasViewingDemo = true;
+            // Clear any active menu/dialog leftover from game when starting demo playback
+            gEngfuncs.pfnClientCmd("cancelselect\n");
+            gEngfuncs.pfnClientCmd("slot10\n");
+        }
         FixDemoScoreboardTeams();
+    }
+    else
+    {
+        s_wasViewingDemo = false;
     }
     if (isViewingDemo && !overlay_visible)
     {
@@ -1539,6 +1569,121 @@ static void UserMsg_InitHUDPost(const char* name, int size, void* data, int resu
 {
     g_GameHud->InitHUDData();
     ResetInvertMouse();
+}
+
+static pfnEngSrc_pfnHookUserMsg_t g_OriginalHookUserMsg = nullptr;
+static pfnUserMsgHook g_Original_MsgFunc_ShowMenu = nullptr;
+static pfnUserMsgHook g_Original_MsgFunc_VGUIMenu = nullptr;
+
+static int Hooked_MsgFunc_ShowMenu(const char* pszName, int iSize, void* pbuf)
+{
+    const bool isDemo = (gEngfuncs.pDemoAPI && gEngfuncs.pDemoAPI->IsPlayingback());
+    const bool isRendering = GameVideoRecorder::Instance().IsHighlightRendering() ||
+                             GameVideoRecorder::Instance().IsHighlightSeeking() ||
+                             GameVideoRecorder::Instance().IsHighlightMarking();
+
+    if (isDemo || isRendering)
+    {
+        BEGIN_READ(pbuf, iSize);
+        short validSlots = READ_SHORT();
+        int displayTime = READ_CHAR();
+        int needMore = READ_BYTE();
+        const char* menuString = READ_STRING();
+
+        if (menuString != nullptr)
+        {
+            std::string menuStr = menuString;
+            for (char& c : menuStr) c = static_cast<char>(tolower(c));
+
+            if (menuStr.find("team") != std::string::npos ||
+                menuStr.find("terror") != std::string::npos ||
+                menuStr.find("counter") != std::string::npos ||
+                menuStr.find("police") != std::string::npos ||
+                menuStr.find("select") != std::string::npos ||
+                menuStr.find("choose") != std::string::npos ||
+                menuStr.find("چوز") != std::string::npos ||
+                menuStr.find("ترور") != std::string::npos ||
+                menuStr.find("پلیس") != std::string::npos ||
+                menuStr.find("#team_select") != std::string::npos ||
+                menuStr.find("#terrorist_select") != std::string::npos ||
+                menuStr.find("#ct_select") != std::string::npos)
+            {
+                // Suppress team/class selection menu during demo playback and video render
+                return 0;
+            }
+        }
+
+        // During demo playback, suppress any interactive slot menu leftover from server
+        if (validSlots != 0)
+        {
+            return 0;
+        }
+    }
+
+    if (g_Original_MsgFunc_ShowMenu != nullptr)
+        return g_Original_MsgFunc_ShowMenu(pszName, iSize, pbuf);
+
+    return 0;
+}
+
+static int Hooked_MsgFunc_VGUIMenu(const char* pszName, int iSize, void* pbuf)
+{
+    const bool isDemo = (gEngfuncs.pDemoAPI && gEngfuncs.pDemoAPI->IsPlayingback());
+    const bool isRendering = GameVideoRecorder::Instance().IsHighlightRendering() ||
+                             GameVideoRecorder::Instance().IsHighlightSeeking() ||
+                             GameVideoRecorder::Instance().IsHighlightMarking();
+
+    if (isDemo || isRendering)
+    {
+        BEGIN_READ(pbuf, iSize);
+        int menuId = READ_BYTE();
+        // VGUI Menu 2 = Team Select Menu, 1 = MOTD, 26 = VIP Menu
+        if (menuId == 2 || menuId == 1 || menuId == 26)
+        {
+            return 0;
+        }
+    }
+
+    if (g_Original_MsgFunc_VGUIMenu != nullptr)
+        return g_Original_MsgFunc_VGUIMenu(pszName, iSize, pbuf);
+
+    return 0;
+}
+
+static int HookUserMsgInterceptor(const char* pszMsgName, pfnUserMsgHook pfn)
+{
+    if (pszMsgName != nullptr)
+    {
+        if (std::strcmp(pszMsgName, "ShowMenu") == 0)
+        {
+            g_Original_MsgFunc_ShowMenu = pfn;
+            if (g_OriginalHookUserMsg != nullptr)
+                return g_OriginalHookUserMsg(pszMsgName, Hooked_MsgFunc_ShowMenu);
+            return 1;
+        }
+        else if (std::strcmp(pszMsgName, "VGUIMenu") == 0)
+        {
+            g_Original_MsgFunc_VGUIMenu = pfn;
+            if (g_OriginalHookUserMsg != nullptr)
+                return g_OriginalHookUserMsg(pszMsgName, Hooked_MsgFunc_VGUIMenu);
+            return 1;
+        }
+    }
+
+    if (g_OriginalHookUserMsg != nullptr)
+        return g_OriginalHookUserMsg(pszMsgName, pfn);
+
+    return 0;
+}
+
+static int Hook_CLDLL_Initialize(cl_enginefuncs_s* pEnginefuncs, int iVersion, CLDLL_InitializeNext next)
+{
+    if (pEnginefuncs != nullptr)
+    {
+        g_OriginalHookUserMsg = pEnginefuncs->pfnHookUserMsg;
+        pEnginefuncs->pfnHookUserMsg = HookUserMsgInterceptor;
+    }
+    return next->Invoke(pEnginefuncs, iVersion);
 }
 
 static int UserMsg_TextMsgHandler(const char* name, int size, void* data, UserMsg_TextMsgNext next)
@@ -1670,6 +1815,7 @@ public:
         g_MouseCaptured = false;
 
         nitroapi::ClientData* client_data = nitro_api->GetClientData();
+        g_Unsub.emplace_back(client_data->CLDLL_Initialize |= Hook_CLDLL_Initialize);
         g_Unsub.emplace_back(client_data->HUD_VidInit |= HUD_VidInitHandler);
         g_Unsub.emplace_back(client_data->HUD_Reset |= HUD_ResetHandler);
         g_Unsub.emplace_back(client_data->HUD_Init += HUD_InitPost);

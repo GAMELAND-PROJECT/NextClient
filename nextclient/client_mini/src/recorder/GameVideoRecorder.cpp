@@ -17,6 +17,104 @@
 #include <gl/GL.h>
 #include <mmdeviceapi.h>
 #include <audioclient.h>
+#include <audiopolicy.h>
+
+class ExternalAudioSilencer
+{
+public:
+    ExternalAudioSilencer() : m_pSessionManager(nullptr), m_myPid(0) {}
+
+    ~ExternalAudioSilencer()
+    {
+        RestoreExternalSessions();
+    }
+
+    void SilenceExternalSessions()
+    {
+        RestoreExternalSessions();
+        m_myPid = GetCurrentProcessId();
+
+        IMMDeviceEnumerator* pEnumerator = nullptr;
+        HRESULT hr = CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL,
+                                      __uuidof(IMMDeviceEnumerator), (void**)&pEnumerator);
+        if (FAILED(hr) || !pEnumerator) return;
+
+        IMMDevice* pDevice = nullptr;
+        hr = pEnumerator->GetDefaultAudioEndpoint(eRender, eConsole, &pDevice);
+        pEnumerator->Release();
+        if (FAILED(hr) || !pDevice) return;
+
+        hr = pDevice->Activate(__uuidof(IAudioSessionManager2), CLSCTX_ALL, nullptr, (void**)&m_pSessionManager);
+        pDevice->Release();
+        if (FAILED(hr) || !m_pSessionManager) return;
+
+        IAudioSessionEnumerator* pSessionEnum = nullptr;
+        hr = m_pSessionManager->GetSessionEnumerator(&pSessionEnum);
+        if (FAILED(hr) || !pSessionEnum) return;
+
+        int sessionCount = 0;
+        pSessionEnum->GetCount(&sessionCount);
+
+        for (int i = 0; i < sessionCount; ++i)
+        {
+            IAudioSessionControl* pControl = nullptr;
+            if (SUCCEEDED(pSessionEnum->GetSession(i, &pControl)) && pControl)
+            {
+                IAudioSessionControl2* pControl2 = nullptr;
+                if (SUCCEEDED(pControl->QueryInterface(__uuidof(IAudioSessionControl2), (void**)&pControl2)) && pControl2)
+                {
+                    DWORD pid = 0;
+                    pControl2->GetProcessId(&pid);
+                    pControl2->Release();
+
+                    // If this audio session does not belong to CS 1.6, mute it during clip recording
+                    if (pid != m_myPid)
+                    {
+                        ISimpleAudioVolume* pVolume = nullptr;
+                        if (SUCCEEDED(pControl->QueryInterface(__uuidof(ISimpleAudioVolume), (void**)&pVolume)) && pVolume)
+                        {
+                            BOOL bMuted = FALSE;
+                            pVolume->GetMute(&bMuted);
+                            if (!bMuted)
+                            {
+                                pVolume->SetMute(TRUE, nullptr);
+                                m_mutedVolumes.push_back(pVolume);
+                                pVolume = nullptr;
+                            }
+                            if (pVolume) pVolume->Release();
+                        }
+                    }
+                }
+                pControl->Release();
+            }
+        }
+        pSessionEnum->Release();
+    }
+
+    void RestoreExternalSessions()
+    {
+        for (auto* pVol : m_mutedVolumes)
+        {
+            if (pVol)
+            {
+                pVol->SetMute(FALSE, nullptr);
+                pVol->Release();
+            }
+        }
+        m_mutedVolumes.clear();
+
+        if (m_pSessionManager)
+        {
+            m_pSessionManager->Release();
+            m_pSessionManager = nullptr;
+        }
+    }
+
+private:
+    DWORD m_myPid{ 0 };
+    IAudioSessionManager2* m_pSessionManager{ nullptr };
+    std::vector<ISimpleAudioVolume*> m_mutedVolumes;
+};
 
 #define GL_PIXEL_PACK_BUFFER_ARB 0x88EB
 #define GL_STREAM_READ_ARB       0x88E1
@@ -778,6 +876,11 @@ namespace nextclient::client_mini
         WAVEFORMATEX* pwfx = nullptr;
         bool captureReady = false;
 
+        // Isolate game audio: Mute all external audio sessions (Discord, Spotify, browsers, system sounds)
+        // so that the loopback capture records pure, uncontaminated CS 1.6 game sound.
+        ExternalAudioSilencer audioSilencer;
+        audioSilencer.SilenceExternalSessions();
+
         hr = CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL,
                               __uuidof(IMMDeviceEnumerator), (void**)&pEnumerator);
         if (SUCCEEDED(hr) && pEnumerator != nullptr)
@@ -891,6 +994,9 @@ namespace nextclient::client_mini
 
         if (captureReady && pAudioClient != nullptr)
             pAudioClient->Stop();
+
+        // Restore all external audio sessions (unmute Discord, Spotify, etc.)
+        audioSilencer.RestoreExternalSessions();
 
         if (pwfx != nullptr) CoTaskMemFree(pwfx);
         if (pCaptureClient != nullptr) pCaptureClient->Release();
