@@ -120,27 +120,32 @@ void CLanHostMenuPanel::BuildHitboxes(int width, int height)
 {
     m_hitboxes.clear();
 
-    // 1. Header Button: Switch to Console View
-    RECT rcConsoleTab{ width - 215, 8, width - 12, 34 };
+    // 1. Header Button: Switch to Console View (clean English)
+    RECT rcConsoleTab{ width - 150, 8, width - 12, 34 };
     m_hitboxes.push_back({
         BTN_TAB_CONSOLE,
         rcConsoleTab,
         "",
-        L"کنسول متنی (Console Logs)",
-        L"مشاهده لاگ‌ها و دستورات",
+        L"Console View",
+        L"Switch to logs",
         false,
         false,
         RGB(104, 216, 193)
     });
 
-    // 2. Section: Game Modes (5 buttons in a single clean row)
+    // 2. Section: Game Modes + Dedicated Separated Restart Button
     const int modesTop = 64;
     const int modesBottom = 126;
     const int leftPad = 12;
     const int rightPad = 12;
     const int availableW = width - leftPad - rightPad;
     const int gap = 8;
-    const int btnW = (availableW - (gap * 4)) / 5;
+
+    // Restart button separated on the right:
+    const int restartW = 140;
+    const int modesAreaW = availableW - restartW - 14;
+    const int numModes = 3;
+    const int modeBtnW = (modesAreaW - (gap * (numModes - 1))) / numModes;
 
     struct ModeDef {
         ButtonId id;
@@ -151,17 +156,15 @@ void CLanHostMenuPanel::BuildHitboxes(int width, int height)
     };
 
     static const ModeDef modes[] = {
-        { BTN_MODE_WARMUP,  "warm", L"WARMUP",     L"تمرینی و وارم‌آپ", RGB(245, 185, 60) },
-        { BTN_MODE_MATCH,   "mix",  L"MATCH 5v5",  L"مسابقه رسمی",     RGB(60, 200, 245) },
-        { BTN_MODE_1V1,     "1v1",  L"1v1 DUEL",   L"دوئل تک‌به‌تک",    RGB(185, 110, 255) },
-        { BTN_MODE_LIVE,    "LIVE", L"LIVE MATCH", L"شروع زنده بازی",   RGB(255, 75, 75) },
-        { BTN_MODE_RESTART, "r",    L"RESTART",    L"ری‌استارت راند",   RGB(80, 230, 140) }
+        { BTN_MODE_WARMUP,  "warm", L"WARMUP",    L"تمرینی و وارم‌آپ", RGB(245, 185, 60) },
+        { BTN_MODE_MATCH,   "mix",  L"MATCH 5v5", L"مسابقه رسمی ۵ به ۵", RGB(60, 200, 245) },
+        { BTN_MODE_1V1,     "1v1",  L"1v1 DUEL",  L"دوئل و ایم مپ",    RGB(190, 110, 255) }
     };
 
     int curX = leftPad;
-    for (int i = 0; i < 5; ++i)
+    for (int i = 0; i < numModes; ++i)
     {
-        RECT rcBtn{ curX, modesTop, curX + btnW, modesBottom };
+        RECT rcBtn{ curX, modesTop, curX + modeBtnW, modesBottom };
         bool isActive = (m_currentMode == modes[i].modeKey);
         m_hitboxes.push_back({
             modes[i].id,
@@ -173,8 +176,21 @@ void CLanHostMenuPanel::BuildHitboxes(int width, int height)
             isActive,
             modes[i].accent
         });
-        curX += btnW + gap;
+        curX += modeBtnW + gap;
     }
+
+    // Dedicated Separated Restart Button (r / sv_restart 1)
+    RECT rcRestart{ leftPad + modesAreaW + 14, modesTop, leftPad + availableW, modesBottom };
+    m_hitboxes.push_back({
+        BTN_RESTART,
+        rcRestart,
+        "r",
+        L"🔄 RESTART",
+        L"ری‌استارت راند (r)",
+        false,
+        false,
+        RGB(50, 220, 130)
+    });
 
     // 3. Section: Friendly Fire & Round Time (Row A)
     const int rowATop = 158;
@@ -226,7 +242,7 @@ void CLanHostMenuPanel::BuildHitboxes(int width, int height)
         });
     }
 
-    // 4. Section: Freeze Time Steppers & Chips (Row B)
+    // 4. Section: Freeze Time Steppers & Chips (Row B: 0, 5, 8, 12)
     const int rowBTop = 248;
     const int rowBBottom = 328;
 
@@ -255,27 +271,25 @@ void CLanHostMenuPanel::BuildHitboxes(int width, int height)
         RGB(245, 185, 60)
     });
 
-    // Preset Chips: 0s, 3s, 5s, 10s, 12s, 15s
+    // Preset Chips: 0s, 5s, 8s, 12s
     const int ftChipsStartX = leftPad + 104;
     const int ftChipsAvailableW = width - rightPad - ftChipsStartX - 12;
-    const int ftChipW = (ftChipsAvailableW - (5 * 6)) / 6;
+    const int ftChipW = (ftChipsAvailableW - (3 * 8)) / 4;
 
-    struct FreezeDef { ButtonId id; int sec; const wchar_t* label; };
+    struct FreezeDef { ButtonId id; int sec; const wchar_t* label; const wchar_t* sub; };
     static const FreezeDef freezeDefs[] = {
-        { BTN_FREEZE_0,   0, L"0s" },
-        { BTN_FREEZE_3,   3, L"3s" },
-        { BTN_FREEZE_5,   5, L"5s" },
-        { BTN_FREEZE_10, 10, L"10s" },
-        { BTN_FREEZE_12, 12, L"12s" },
-        { BTN_FREEZE_15, 15, L"15s" }
+        { BTN_FREEZE_0,   0, L"0s",  L"بدون فریز" },
+        { BTN_FREEZE_5,   5, L"5s",  L"کوتاه" },
+        { BTN_FREEZE_8,   8, L"8s",  L"استاندارد" },
+        { BTN_FREEZE_12, 12, L"12s", L"مسابقه رسمی" }
     };
 
-    for (int i = 0; i < 6; ++i)
+    for (int i = 0; i < 4; ++i)
     {
         RECT rcFtChip{
-            ftChipsStartX + i * (ftChipW + 6),
+            ftChipsStartX + i * (ftChipW + 8),
             rowBTop + 30,
-            ftChipsStartX + i * (ftChipW + 6) + ftChipW,
+            ftChipsStartX + i * (ftChipW + 8) + ftChipW,
             rowBTop + 66
         };
         bool isActive = (m_iFreezeTime == freezeDefs[i].sec);
@@ -284,14 +298,14 @@ void CLanHostMenuPanel::BuildHitboxes(int width, int height)
             rcFtChip,
             "",
             freezeDefs[i].label,
-            freezeDefs[i].sec == 12 ? L"مسابقه" : (freezeDefs[i].sec == 0 ? L"سریع" : L"ثانیه"),
+            freezeDefs[i].sub,
             false,
             isActive,
             RGB(80, 230, 140)
         });
     }
 
-    // 5. Section: Start Money (Row C)
+    // 5. Section: Start Money (Row C: $800, $5,000, $16,000)
     const int rowCTop = 338;
     const int rowCBottom = 402;
     const int smChipsStartX = leftPad + 12;
@@ -300,9 +314,9 @@ void CLanHostMenuPanel::BuildHitboxes(int width, int height)
 
     struct MoneyDef { ButtonId id; int money; const wchar_t* title; const wchar_t* sub; };
     static const MoneyDef moneyDefs[] = {
-        { BTN_MONEY_800, 800, L"$800", L"پیستول / مسابقه رسمی" },
-        { BTN_MONEY_16K, 16000, L"$16,000", L"حداکثر سقف مسابقه" },
-        { BTN_MONEY_MAX, 999999, L"نامحدود ($999,999)", L"خرید آزاد تمرینی" }
+        { BTN_MONEY_800,  800,   L"$800",    L"پیستول راند (Pistol)" },
+        { BTN_MONEY_5000, 5000,  L"$5,000",  L"نیمه‌بای / تمرینی (Half)" },
+        { BTN_MONEY_16K,  16000, L"$16,000", L"فول‌بای رسمی (Full Buy)" }
     };
 
     for (int i = 0; i < 3; ++i)
@@ -313,7 +327,7 @@ void CLanHostMenuPanel::BuildHitboxes(int width, int height)
             smChipsStartX + i * (smChipW + 12) + smChipW,
             rowCTop + 56
         };
-        bool isActive = (m_iStartMoney == moneyDefs[i].money) || (moneyDefs[i].money > 16000 && m_iStartMoney > 16000);
+        bool isActive = (m_iStartMoney == moneyDefs[i].money);
         m_hitboxes.push_back({
             moneyDefs[i].id,
             rcSmChip,
@@ -351,28 +365,10 @@ void CLanHostMenuPanel::ExecuteAction(ButtonId id)
         SetMode("1v1");
         break;
 
-    case BTN_MODE_LIVE:
+    case BTN_RESTART:
         if (engine)
         {
-            engine->pfnClientCmd("LIVE\n");
-            if (m_pConsoleDialog)
-            {
-                m_pConsoleDialog->PrintHostStatusCard(
-                    "شمارش معکوس و آغاز زنده مسابقه (LIVE 3s)",
-                    m_currentMode.c_str(),
-                    m_bFriendlyFire,
-                    m_iFreezeTime,
-                    m_fRoundTime,
-                    m_iStartMoney
-                );
-            }
-        }
-        break;
-
-    case BTN_MODE_RESTART:
-        if (engine)
-        {
-            engine->pfnClientCmd("sv_restartround 1\n");
+            engine->pfnClientCmd("r\nsv_restartround 1\n");
             if (m_pConsoleDialog)
             {
                 m_pConsoleDialog->PrintHostStatusCard(
@@ -400,11 +396,9 @@ void CLanHostMenuPanel::ExecuteAction(ButtonId id)
         break;
 
     case BTN_FREEZE_0:   SetFreezeTime(0); break;
-    case BTN_FREEZE_3:   SetFreezeTime(3); break;
     case BTN_FREEZE_5:   SetFreezeTime(5); break;
-    case BTN_FREEZE_10:  SetFreezeTime(10); break;
+    case BTN_FREEZE_8:   SetFreezeTime(8); break;
     case BTN_FREEZE_12:  SetFreezeTime(12); break;
-    case BTN_FREEZE_15:  SetFreezeTime(15); break;
 
     case BTN_ROUND_100: SetRoundTime(1.00f); break;
     case BTN_ROUND_145: SetRoundTime(1.45f); break;
@@ -412,9 +406,9 @@ void CLanHostMenuPanel::ExecuteAction(ButtonId id)
     case BTN_ROUND_200: SetRoundTime(2.00f); break;
     case BTN_ROUND_300: SetRoundTime(3.00f); break;
 
-    case BTN_MONEY_800: SetStartMoney(800); break;
-    case BTN_MONEY_16K: SetStartMoney(16000); break;
-    case BTN_MONEY_MAX: SetStartMoney(999999); break;
+    case BTN_MONEY_800:  SetStartMoney(800); break;
+    case BTN_MONEY_5000: SetStartMoney(5000); break;
+    case BTN_MONEY_16K:  SetStartMoney(16000); break;
 
     default:
         break;
@@ -588,21 +582,21 @@ std::vector<unsigned char> CLanHostMenuPanel::RenderHostMenuBitmap(int width, in
     void* pixels = nullptr;
     HBITMAP bitmap = CreateDIBSection(dc, &info, DIB_RGB_COLORS, &pixels, nullptr, 0);
 
-    HFONT fontTitle = CreateFontW(-15, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
+    HFONT fontTitle = CreateFontW(-16, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
         DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-        ANTIALIASED_QUALITY, DEFAULT_PITCH, L"Tahoma");
+        CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI");
 
     HFONT fontBold = CreateFontW(-13, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
         DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-        ANTIALIASED_QUALITY, DEFAULT_PITCH, L"Tahoma");
+        CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI");
 
     HFONT fontNormal = CreateFontW(-12, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
         DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-        ANTIALIASED_QUALITY, DEFAULT_PITCH, L"Tahoma");
+        CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI");
 
     HFONT fontSmall = CreateFontW(-10, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
         DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-        ANTIALIASED_QUALITY, DEFAULT_PITCH, L"Tahoma");
+        CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI");
 
     if (!bitmap || !fontTitle || !fontBold || !fontNormal || !fontSmall)
     {
@@ -633,24 +627,32 @@ std::vector<unsigned char> CLanHostMenuPanel::RenderHostMenuBitmap(int width, in
     // Header Title
     SetTextColor(dc, RGB(245, 201, 112));
     SelectObject(dc, fontTitle);
-    RECT rcTitleText{ 16, 4, width - 230, 24 };
+    RECT rcTitleText{ 16, 4, width - 170, 24 };
     DrawTextW(dc, L"🎮  GAMELAND MATCH & HOST MANAGER", -1, &rcTitleText, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
 
     // Header Subtitle (Persian RTL)
     SetTextColor(dc, RGB(104, 216, 193));
     SelectObject(dc, fontNormal);
-    RECT rcSubText{ 16, 23, width - 230, 41 };
+    RECT rcSubText{ 16, 23, width - 170, 41 };
     DrawTextW(dc, L"کنترل‌پنل مدیریت مسابقه و هاست لن | اجرای سریع حالت‌ها و قوانین", -1, &rcSubText,
         DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_RIGHT | DT_RTLREADING);
 
-    // 3. Section 1 Label
+    // 3. Section 1 Labels (Modes on left, Separated Quick Action on right)
     SelectObject(dc, fontBold);
     SetTextColor(dc, RGB(230, 235, 240));
-    RECT rcSec1{ 16, 47, width - 16, 62 };
-    DrawTextW(dc, L"حالت‌های اصلی بازی و مسابقه (Select Match Mode):", -1, &rcSec1,
+    RECT rcSec1{ 16, 47, width - 175, 62 };
+    DrawTextW(dc, L"حالت‌های بازی (Select Match Mode):", -1, &rcSec1,
+        DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_RIGHT | DT_RTLREADING);
+
+    SelectObject(dc, fontSmall);
+    SetTextColor(dc, RGB(80, 230, 140));
+    RECT rcSec1R{ width - 165, 47, width - 16, 62 };
+    DrawTextW(dc, L"عملیات ویژه (Quick Action):", -1, &rcSec1R,
         DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_RIGHT | DT_RTLREADING);
 
     // Section 2 Labels
+    SelectObject(dc, fontBold);
+    SetTextColor(dc, RGB(230, 235, 240));
     RECT rcSec2{ 16, 137, width - 16, 154 };
     DrawTextW(dc, L"قوانین و تنظیمات لحظه‌ای سرور (Live Match Settings):", -1, &rcSec2,
         DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_RIGHT | DT_RTLREADING);
@@ -758,7 +760,23 @@ std::vector<unsigned char> CLanHostMenuPanel::RenderHostMenuBitmap(int width, in
             RECT rcText = btn.rect;
             DrawTextW(dc, btn.title.c_str(), -1, &rcText, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
         }
-        else if (btn.id >= BTN_MODE_WARMUP && btn.id <= BTN_MODE_RESTART)
+        else if (btn.id == BTN_RESTART)
+        {
+            SelectObject(dc, fontBold);
+            SetTextColor(dc, isHovered ? RGB(255, 255, 255) : RGB(80, 240, 140));
+            RECT rcT = btn.rect;
+            rcT.top += 7;
+            rcT.bottom = rcT.top + 18;
+            DrawTextW(dc, btn.title.c_str(), -1, &rcT, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+
+            SelectObject(dc, fontSmall);
+            SetTextColor(dc, isHovered ? RGB(220, 255, 230) : RGB(140, 220, 170));
+            RECT rcS = btn.rect;
+            rcS.top = rcT.bottom + 2;
+            rcS.bottom -= 4;
+            DrawTextW(dc, btn.subtitle.c_str(), -1, &rcS, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX | DT_RTLREADING);
+        }
+        else if (btn.id >= BTN_MODE_WARMUP && btn.id <= BTN_MODE_1V1)
         {
             // Mode button with Title + Subtitle
             SelectObject(dc, fontBold);

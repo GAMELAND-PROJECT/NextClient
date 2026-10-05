@@ -233,7 +233,7 @@ CGameConsoleDialog::CGameConsoleDialog() : BaseClass(NULL, "GameConsole", false)
     m_pLanHostMenu = new CLanHostMenuPanel(this, this);
     m_pLanHostMenu->SetVisible(false);
 
-    m_pTabToggle = new vgui2::Button(this, "TabToggle", "کنترل پنل هاست");
+    m_pTabToggle = new vgui2::Button(this, "TabToggle", "Host Manager");
     m_pTabToggle->SetCommand("ToggleHostTab");
     m_pTabToggle->SetVisible(false);
 
@@ -297,7 +297,7 @@ void CGameConsoleDialog::ShowLanHostGuide(bool show)
 
     if (m_pTabToggle)
     {
-        m_pTabToggle->SetText(show ? "مشاهده لاگ‌های کنسول" : "کنترل پنل هاست");
+        m_pTabToggle->SetText(show ? "Console View" : "Host Manager");
     }
 
     if (show)
@@ -992,10 +992,10 @@ void CGameConsoleDialog::PerformLayout()
 
     if (m_pTabToggle)
     {
-        const int tabW = 150;
+        const int tabW = 120;
         m_pTabToggle->SetBounds(wide - tabW - 40, 4, tabW, 20);
         m_pTabToggle->SetVisible(m_bIsListenHost);
-        m_pTabToggle->SetText(m_bLanHostGuideVisible ? "مشاهده لاگ‌های کنسول" : "کنترل پنل هاست");
+        m_pTabToggle->SetText(m_bLanHostGuideVisible ? "Console View" : "Host Manager");
     }
 
     UpdateCompletionListPosition();
