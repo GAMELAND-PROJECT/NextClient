@@ -134,16 +134,16 @@ void CLanHostMenuPanel::BuildHitboxes(int width, int height)
     });
 
     // 2. Section: Game Modes + Dedicated Separated Restart Button
-    const int modesTop = 64;
-    const int modesBottom = 126;
+    const int modesTop = 58;
+    const int modesBottom = 114;
     const int leftPad = 12;
     const int rightPad = 12;
     const int availableW = width - leftPad - rightPad;
     const int gap = 8;
 
     // Restart button separated on the right:
-    const int restartW = 140;
-    const int modesAreaW = availableW - restartW - 14;
+    const int restartW = 145;
+    const int modesAreaW = availableW - restartW - 12;
     const int numModes = 3;
     const int modeBtnW = (modesAreaW - (gap * (numModes - 1))) / numModes;
 
@@ -180,7 +180,7 @@ void CLanHostMenuPanel::BuildHitboxes(int width, int height)
     }
 
     // Dedicated Separated Restart Button (r / sv_restart 1)
-    RECT rcRestart{ leftPad + modesAreaW + 14, modesTop, leftPad + availableW, modesBottom };
+    RECT rcRestart{ leftPad + modesAreaW + 12, modesTop, width - rightPad, modesBottom };
     m_hitboxes.push_back({
         BTN_RESTART,
         rcRestart,
@@ -192,13 +192,28 @@ void CLanHostMenuPanel::BuildHitboxes(int width, int height)
         RGB(50, 220, 130)
     });
 
-    // 3. Section: Friendly Fire & Round Time (Row A)
-    const int rowATop = 158;
-    const int rowABottom = 236;
-    const int halfW = (availableW - gap) / 2;
+    // 3. Section 2: Adaptive Settings Cards (Friendly Fire, Round Time, Freeze Time, Start Money)
+    const int cardsTop = 138;
+    const int footerH = 26;
+    const int cardsBottom = height - footerH - 6;
+    const int totalCardsH = std::max(cardsBottom - cardsTop, 190);
+    const int cardGap = 7;
+    const int cardH = std::clamp((totalCardsH - (2 * cardGap)) / 3, 58, 86);
 
-    // Friendly Fire Toggle
-    RECT rcFF{ leftPad + 8, rowATop + 28, leftPad + halfW - 8, rowABottom - 10 };
+    const int rowATop = cardsTop;
+    const int rowABottom = rowATop + cardH;
+
+    const int rowBTop = rowABottom + cardGap;
+    const int rowBBottom = rowBTop + cardH;
+
+    const int rowCTop = rowBBottom + cardGap;
+    const int rowCBottom = rowCTop + cardH;
+
+    const int btnH = std::clamp(cardH - 26, 28, 38);
+
+    // Row A - Friendly Fire (Left half)
+    const int halfW = (availableW - cardGap) / 2;
+    RECT rcFF{ leftPad + 8, rowATop + 22, leftPad + halfW - 8, rowATop + 22 + btnH };
     m_hitboxes.push_back({
         BTN_TOGGLE_FF,
         rcFF,
@@ -210,44 +225,44 @@ void CLanHostMenuPanel::BuildHitboxes(int width, int height)
         m_bFriendlyFire ? RGB(60, 220, 120) : RGB(240, 70, 70)
     });
 
-    // Round Time Chips
-    const int rtAreaX = leftPad + halfW + gap + 8;
+    // Row A - Round Time (Right half: 4 chips -> 1:00, 1:45 [1.75], 2:00, 5:00)
+    const int rtAreaX = leftPad + halfW + cardGap + 8;
     const int rtAreaW = halfW - 16;
-    const int rtChipW = (rtAreaW - 16) / 5;
-    const int rtChipY = rowATop + 28;
-    const int rtChipH = 34;
+    const int rtChipW = (rtAreaW - (3 * 6)) / 4;
+    const int rtChipY = rowATop + 22;
 
-    struct RoundDef { ButtonId id; float val; const wchar_t* label; };
+    struct RoundDef { ButtonId id; float val; const wchar_t* label; const wchar_t* sub; };
     static const RoundDef roundDefs[] = {
-        { BTN_ROUND_100, 1.00f, L"1:00" },
-        { BTN_ROUND_145, 1.45f, L"1:45" },
-        { BTN_ROUND_175, 1.75f, L"1:75" },
-        { BTN_ROUND_200, 2.00f, L"2:00" },
-        { BTN_ROUND_300, 3.00f, L"3:00" }
+        { BTN_ROUND_100, 1.00f, L"1:00", L"1 دقیقه" },
+        { BTN_ROUND_145, 1.75f, L"1:45", L"1.45 (رسمی)" },
+        { BTN_ROUND_200, 2.00f, L"2:00", L"2 دقیقه" },
+        { BTN_ROUND_500, 5.00f, L"5:00", L"5 دقیقه" }
     };
 
-    for (int i = 0; i < 5; ++i)
+    for (int i = 0; i < 4; ++i)
     {
-        RECT rcChip{ rtAreaX + i * (rtChipW + 4), rtChipY, rtAreaX + i * (rtChipW + 4) + rtChipW, rtChipY + rtChipH };
+        RECT rcChip{
+            rtAreaX + i * (rtChipW + 6),
+            rtChipY,
+            rtAreaX + i * (rtChipW + 6) + rtChipW,
+            rtChipY + btnH
+        };
         bool isActive = std::abs(m_fRoundTime - roundDefs[i].val) < 0.05f;
         m_hitboxes.push_back({
             roundDefs[i].id,
             rcChip,
             "",
             roundDefs[i].label,
-            L"دقیقه",
+            roundDefs[i].sub,
             false,
             isActive,
             RGB(60, 200, 245)
         });
     }
 
-    // 4. Section: Freeze Time Steppers & Chips (Row B: 0, 5, 8, 12)
-    const int rowBTop = 248;
-    const int rowBBottom = 328;
-
-    // Steppers [-] and [+]
-    RECT rcMinus{ leftPad + 12, rowBTop + 30, leftPad + 48, rowBTop + 66 };
+    // Row B - Freeze Time (Steppers [-] [+] and 4 Preset Chips: 0s, 5s, 8s, 12s)
+    const int ftBtnY = rowBTop + 22;
+    RECT rcMinus{ leftPad + 8, ftBtnY, leftPad + 46, ftBtnY + btnH };
     m_hitboxes.push_back({
         BTN_FREEZE_MINUS,
         rcMinus,
@@ -259,7 +274,7 @@ void CLanHostMenuPanel::BuildHitboxes(int width, int height)
         RGB(245, 185, 60)
     });
 
-    RECT rcPlus{ leftPad + 54, rowBTop + 30, leftPad + 90, rowBTop + 66 };
+    RECT rcPlus{ leftPad + 52, ftBtnY, leftPad + 90, ftBtnY + btnH };
     m_hitboxes.push_back({
         BTN_FREEZE_PLUS,
         rcPlus,
@@ -271,9 +286,8 @@ void CLanHostMenuPanel::BuildHitboxes(int width, int height)
         RGB(245, 185, 60)
     });
 
-    // Preset Chips: 0s, 5s, 8s, 12s
-    const int ftChipsStartX = leftPad + 104;
-    const int ftChipsAvailableW = width - rightPad - ftChipsStartX - 12;
+    const int ftChipsStartX = leftPad + 98;
+    const int ftChipsAvailableW = width - rightPad - ftChipsStartX - 8;
     const int ftChipW = (ftChipsAvailableW - (3 * 8)) / 4;
 
     struct FreezeDef { ButtonId id; int sec; const wchar_t* label; const wchar_t* sub; };
@@ -288,9 +302,9 @@ void CLanHostMenuPanel::BuildHitboxes(int width, int height)
     {
         RECT rcFtChip{
             ftChipsStartX + i * (ftChipW + 8),
-            rowBTop + 30,
+            ftBtnY,
             ftChipsStartX + i * (ftChipW + 8) + ftChipW,
-            rowBTop + 66
+            ftBtnY + btnH
         };
         bool isActive = (m_iFreezeTime == freezeDefs[i].sec);
         m_hitboxes.push_back({
@@ -305,11 +319,10 @@ void CLanHostMenuPanel::BuildHitboxes(int width, int height)
         });
     }
 
-    // 5. Section: Start Money (Row C: $800, $5,000, $16,000)
-    const int rowCTop = 338;
-    const int rowCBottom = 402;
-    const int smChipsStartX = leftPad + 12;
-    const int smChipsAvailableW = width - rightPad - smChipsStartX - 12;
+    // Row C - Start Money (3 Chips: $800, $5,000, $16,000)
+    const int smBtnY = rowCTop + 22;
+    const int smChipsStartX = leftPad + 8;
+    const int smChipsAvailableW = width - rightPad - smChipsStartX - 8;
     const int smChipW = (smChipsAvailableW - (2 * 12)) / 3;
 
     struct MoneyDef { ButtonId id; int money; const wchar_t* title; const wchar_t* sub; };
@@ -323,9 +336,9 @@ void CLanHostMenuPanel::BuildHitboxes(int width, int height)
     {
         RECT rcSmChip{
             smChipsStartX + i * (smChipW + 12),
-            rowCTop + 24,
+            smBtnY,
             smChipsStartX + i * (smChipW + 12) + smChipW,
-            rowCTop + 56
+            smBtnY + btnH
         };
         bool isActive = (m_iStartMoney == moneyDefs[i].money);
         m_hitboxes.push_back({
@@ -401,10 +414,9 @@ void CLanHostMenuPanel::ExecuteAction(ButtonId id)
     case BTN_FREEZE_12:  SetFreezeTime(12); break;
 
     case BTN_ROUND_100: SetRoundTime(1.00f); break;
-    case BTN_ROUND_145: SetRoundTime(1.45f); break;
-    case BTN_ROUND_175: SetRoundTime(1.75f); break;
+    case BTN_ROUND_145: SetRoundTime(1.75f); break;
     case BTN_ROUND_200: SetRoundTime(2.00f); break;
-    case BTN_ROUND_300: SetRoundTime(3.00f); break;
+    case BTN_ROUND_500: SetRoundTime(5.00f); break;
 
     case BTN_MONEY_800:  SetStartMoney(800); break;
     case BTN_MONEY_5000: SetStartMoney(5000); break;
@@ -429,9 +441,9 @@ void CLanHostMenuPanel::SetMode(const char* modeName)
         m_bFriendlyFire = false;
         m_iFreezeTime = 0;
         m_fRoundTime = 5.0f;
-        m_iStartMoney = 999999;
+        m_iStartMoney = 16000;
         if (m_pConsoleDialog)
-            m_pConsoleDialog->PrintHostStatusCard("حالت تمرینی و گرم‌کردن فعال شد (WARMUP)", "تمرینی (WARMUP)", false, 0, 5.0f, 999999);
+            m_pConsoleDialog->PrintHostStatusCard("حالت تمرینی و گرم‌کردن فعال شد (WARMUP)", "تمرینی (WARMUP)", false, 0, 5.0f, 16000);
     }
     else if (m_currentMode == "mix")
     {
@@ -446,10 +458,10 @@ void CLanHostMenuPanel::SetMode(const char* modeName)
     {
         m_bFriendlyFire = false;
         m_iFreezeTime = 0;
-        m_fRoundTime = 0.5f;
+        m_fRoundTime = 1.0f;
         m_iStartMoney = 16000;
         if (m_pConsoleDialog)
-            m_pConsoleDialog->PrintHostStatusCard("دوئل ۱ به ۱ فعال شد (1v1 DUEL)", "دوئل تک‌به‌تک (1v1 DUEL)", false, 0, 0.5f, 16000);
+            m_pConsoleDialog->PrintHostStatusCard("دوئل ۱ به ۱ فعال شد (1v1 DUEL)", "دوئل تک‌به‌تک (1v1 DUEL)", false, 0, 1.0f, 16000);
     }
 
     m_needsRedraw = true;
@@ -519,7 +531,8 @@ void CLanHostMenuPanel::SetRoundTime(float minutes)
         return;
 
     m_fRoundTime = minutes;
-    std::string cmd = std::format("mp_roundtime {:.2f}; wait; say === ROUND TIME {:.2f} MIN ===\n", minutes, minutes);
+    const char* displayStr = (std::abs(minutes - 1.75f) < 0.05f) ? "1:45" : (minutes >= 4.9f ? "5:00" : (minutes >= 1.9f ? "2:00" : "1:00"));
+    std::string cmd = std::format("mp_roundtime {:.2f}; wait; say === ROUND TIME {} MIN ===\n", minutes, displayStr);
     engine->pfnClientCmd(cmd.c_str());
 
     if (m_pConsoleDialog)
@@ -640,68 +653,104 @@ std::vector<unsigned char> CLanHostMenuPanel::RenderHostMenuBitmap(int width, in
     // 3. Section 1 Labels (Modes on left, Separated Quick Action on right)
     SelectObject(dc, fontBold);
     SetTextColor(dc, RGB(230, 235, 240));
-    RECT rcSec1{ 16, 47, width - 175, 62 };
+    RECT rcSec1{ 16, 43, width - 175, 58 };
     DrawTextW(dc, L"حالت‌های بازی (Select Match Mode):", -1, &rcSec1,
         DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_RIGHT | DT_RTLREADING);
 
     SelectObject(dc, fontSmall);
     SetTextColor(dc, RGB(80, 230, 140));
-    RECT rcSec1R{ width - 165, 47, width - 16, 62 };
+    RECT rcSec1R{ width - 165, 43, width - 16, 58 };
     DrawTextW(dc, L"عملیات ویژه (Quick Action):", -1, &rcSec1R,
         DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_RIGHT | DT_RTLREADING);
 
     // Section 2 Labels
     SelectObject(dc, fontBold);
     SetTextColor(dc, RGB(230, 235, 240));
-    RECT rcSec2{ 16, 137, width - 16, 154 };
+    RECT rcSec2{ 16, 120, width - 16, 136 };
     DrawTextW(dc, L"قوانین و تنظیمات لحظه‌ای سرور (Live Match Settings):", -1, &rcSec2,
         DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_RIGHT | DT_RTLREADING);
 
-    // Draw Card Backgrounds for Sections
-    const int availableW = width - 24;
+    // Draw Card Backgrounds for Sections (matches BuildHitboxes adaptive layout)
+    const int leftPad = 12;
+    const int rightPad = 12;
+    const int availableW = width - leftPad - rightPad;
     const int gap = 8;
-    const int halfW = (availableW - gap) / 2;
+
+    const int cardsTop = 138;
+    const int footerH = 26;
+    const int cardsBottom = height - footerH - 6;
+    const int totalCardsH = std::max(cardsBottom - cardsTop, 190);
+    const int cardGap = 7;
+    const int cardH = std::clamp((totalCardsH - (2 * cardGap)) / 3, 58, 86);
+
+    const int rowATop = cardsTop;
+    const int rowABottom = rowATop + cardH;
+
+    const int rowBTop = rowABottom + cardGap;
+    const int rowBBottom = rowBTop + cardH;
+
+    const int rowCTop = rowBBottom + cardGap;
+    const int rowCBottom = rowCTop + cardH;
+
+    const int halfW = (availableW - cardGap) / 2;
 
     // Card Friendly Fire
-    RECT rcCardFF{ 12, 156, 12 + halfW, 238 };
+    RECT rcCardFF{ leftPad, rowATop, leftPad + halfW, rowABottom };
     SetDCBrushColor(dc, RGB(22, 28, 36));
     FillRect(dc, &rcCardFF, static_cast<HBRUSH>(GetStockObject(DC_BRUSH)));
 
     SelectObject(dc, fontSmall);
     SetTextColor(dc, RGB(160, 175, 190));
-    RECT rcLblFF{ 20, 160, 12 + halfW - 8, 176 };
+    RECT rcLblFF{ leftPad + 8, rowATop + 3, leftPad + halfW - 8, rowATop + 20 };
     DrawTextW(dc, L"وضعیت آسیب به هم‌تیمی‌ها (Friendly Fire):", -1, &rcLblFF,
         DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_RIGHT | DT_RTLREADING);
 
     // Card Round Time
-    RECT rcCardRT{ 12 + halfW + gap, 156, width - 12, 238 };
+    RECT rcCardRT{ leftPad + halfW + cardGap, rowATop, width - rightPad, rowABottom };
     FillRect(dc, &rcCardRT, static_cast<HBRUSH>(GetStockObject(DC_BRUSH)));
 
-    RECT rcLblRT{ 12 + halfW + gap + 8, 160, width - 20, 176 };
+    RECT rcLblRT{ leftPad + halfW + cardGap + 8, rowATop + 3, width - rightPad - 8, rowATop + 20 };
     wchar_t rtBuf[64];
-    swprintf_s(rtBuf, L"زمان هر راند: [%.2f دقیقه] (Round Time)", m_fRoundTime);
+    if (std::abs(m_fRoundTime - 1.75f) < 0.05f)
+        swprintf_s(rtBuf, L"زمان هر راند: [1:45 دقیقه] (Round Time)");
+    else
+        swprintf_s(rtBuf, L"زمان هر راند: [%.0f:00 دقیقه] (Round Time)", m_fRoundTime);
     DrawTextW(dc, rtBuf, -1, &rcLblRT,
         DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_RIGHT | DT_RTLREADING);
 
     // Card Freeze Time
-    RECT rcCardFT{ 12, 246, width - 12, 330 };
+    RECT rcCardFT{ leftPad, rowBTop, width - rightPad, rowBBottom };
     FillRect(dc, &rcCardFT, static_cast<HBRUSH>(GetStockObject(DC_BRUSH)));
 
-    RECT rcLblFT{ 20, 250, width - 20, 268 };
+    RECT rcLblFT{ leftPad + 8, rowBTop + 3, width - rightPad - 8, rowBTop + 20 };
     wchar_t ftBuf[64];
     swprintf_s(ftBuf, L"وقت اولیه ابتدای راند: [%d ثانیه] (Freeze Time)", m_iFreezeTime);
     DrawTextW(dc, ftBuf, -1, &rcLblFT,
         DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_RIGHT | DT_RTLREADING);
 
     // Card Start Money
-    RECT rcCardSM{ 12, 338, width - 12, 404 };
+    RECT rcCardSM{ leftPad, rowCTop, width - rightPad, rowCBottom };
     FillRect(dc, &rcCardSM, static_cast<HBRUSH>(GetStockObject(DC_BRUSH)));
 
-    RECT rcLblSM{ 20, 342, width - 20, 358 };
+    RECT rcLblSM{ leftPad + 8, rowCTop + 3, width - rightPad - 8, rowCTop + 20 };
     wchar_t smBuf[64];
     swprintf_s(smBuf, L"سرمایه اولیه بازیکنان: [$%d] (Start Money)", m_iStartMoney);
     DrawTextW(dc, smBuf, -1, &rcLblSM,
         DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_RIGHT | DT_RTLREADING);
+
+    // Draw Subtle Outlines for All Cards
+    HPEN cardPen = CreatePen(PS_SOLID, 1, RGB(36, 48, 64));
+    HGDIOBJ prevCardPen = SelectObject(dc, cardPen);
+    HGDIOBJ prevBrush = SelectObject(dc, GetStockObject(NULL_BRUSH));
+
+    Rectangle(dc, rcCardFF.left, rcCardFF.top, rcCardFF.right, rcCardFF.bottom);
+    Rectangle(dc, rcCardRT.left, rcCardRT.top, rcCardRT.right, rcCardRT.bottom);
+    Rectangle(dc, rcCardFT.left, rcCardFT.top, rcCardFT.right, rcCardFT.bottom);
+    Rectangle(dc, rcCardSM.left, rcCardSM.top, rcCardSM.right, rcCardSM.bottom);
+
+    SelectObject(dc, prevBrush);
+    SelectObject(dc, prevCardPen);
+    DeleteObject(cardPen);
 
     // Rebuild hitboxes to current dimensions
     BuildHitboxes(width, height);
@@ -843,18 +892,25 @@ std::vector<unsigned char> CLanHostMenuPanel::RenderHostMenuBitmap(int width, in
     }
 
     // 5. Footer Status Bar
-    RECT rcFooter{ 0, height - 26, width, height };
+    RECT rcFooter{ 0, height - footerH, width, height };
     SetDCBrushColor(dc, RGB(12, 16, 22));
     FillRect(dc, &rcFooter, static_cast<HBRUSH>(GetStockObject(DC_BRUSH)));
 
     SelectObject(dc, fontSmall);
     SetTextColor(dc, RGB(130, 150, 170));
-    RECT rcStatusText{ 16, height - 24, width - 16, height - 2 };
+    RECT rcStatusText{ 16, height - footerH + 2, width - 16, height - 2 };
+
+    wchar_t rtDisplay[32];
+    if (std::abs(m_fRoundTime - 1.75f) < 0.05f)
+        wcscpy_s(rtDisplay, L"1:45");
+    else
+        swprintf_s(rtDisplay, L"%.0f:00", m_fRoundTime);
 
     wchar_t statusBuf[256];
     swprintf_s(statusBuf,
-        L"وضعیت هاست: حالت [%hs] | فریزتایم: %d ثانیه | تیر به خودی: [%s] | سرمایه: $%d | تغییرات آنی اعمال می‌شوند",
+        L"وضعیت هاست: حالت [%hs] | زمان راند: %s | فریزتایم: %d ثانیه | تیر به خودی: [%s] | سرمایه: $%d | اعمال خودکار",
         m_currentMode.c_str(),
+        rtDisplay,
         m_iFreezeTime,
         m_bFriendlyFire ? L"روشن" : L"خاموش",
         m_iStartMoney

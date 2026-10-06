@@ -302,8 +302,12 @@ void CGameConsoleDialog::ShowLanHostGuide(bool show)
 
     if (show)
     {
-        SetMinimumSize(660, 480);
-        SetSize(std::max(GetWide(), 660), std::max(GetTall(), 480));
+        int swide = 800, stall = 600;
+        vgui2::surface()->GetScreenSize(swide, stall);
+        int targetW = std::clamp(std::max(GetWide(), 740), 660, swide - 30);
+        int targetH = std::clamp(std::max(GetTall(), 540), 480, stall - 30);
+        SetMinimumSize(std::min(660, swide - 30), std::min(480, stall - 30));
+        SetSize(targetW, targetH);
     }
     else
     {
@@ -345,7 +349,10 @@ void CGameConsoleDialog::PrintHostStatusCard(const char* title, const char* mode
 
     ColorPrint(cGray, "  * زمان هر راند (Round Time) : ");
     char rtBuf[64];
-    snprintf(rtBuf, sizeof(rtBuf), "[ %.2f دقیقه ] (mp_roundtime %.2f)\n", roundtime, roundtime);
+    if (std::abs(roundtime - 1.75f) < 0.05f)
+        snprintf(rtBuf, sizeof(rtBuf), "[ 1:45 دقیقه ] (mp_roundtime 1.75)\n");
+    else
+        snprintf(rtBuf, sizeof(rtBuf), "[ %.0f:00 دقیقه ] (mp_roundtime %.2f)\n", roundtime, roundtime);
     ColorPrint(cWhite, rtBuf);
 
     ColorPrint(cGray, "  * سرمایه اولیه (Start Money): ");
