@@ -647,6 +647,12 @@ static void OnGameInitializing(void* mainwindow, HDC* pmaindc, HGLRC* pbaseRC, c
     g_Unsubs.emplace_back(eng()->CL_StartResourceDownloading |= [](const char* msg, int custom, const auto& next)                      { CL_StartResourceDownloading(msg, custom); });
     g_Unsubs.emplace_back(eng()->CL_ReadPackets              |= [](const auto& next)                                                   { CL_ReadPackets(); });
     g_Unsubs.emplace_back(eng()->CL_RequestMissingResources  |= [](const auto& next)                                                   { return CL_RequestMissingResources(); });
+    g_Unsubs.emplace_back(eng()->CL_SendConnectPacket        |= [](const auto& next)
+    {
+        if (cls)
+            cls->authprotocol = 3;
+        next->Invoke();
+    });
     g_Unsubs.emplace_back(eng()->ClientDLL_Init += []() {
         Cbuf_InsertText("bind F4 allclient_demo_menu\nbind F5 snapshot\n");
 

@@ -153,9 +153,9 @@ namespace SteamEmu
         memset(t, 0, sizeof(*t));
 
         // Header
-        t->magic = 0x554D4548;           // "HEMU"
+        t->magic = 0x554D4548;           // "HEMU" (hCupa SteamEmu identifier)
         t->version = 0x0000013B;         // Version 315
-        t->server_ip = HostToNet32(unIPServer);
+        t->server_ip = unIPServer;       // Already in network byte order from netadr_t
         t->client_ip = 0;
         t->steam_id_low = g_AccountID;
         t->steam_id_high = 0x01100001;    // UniversePublic | Individual | Instance1
@@ -165,13 +165,25 @@ namespace SteamEmu
         t->steam_id_high2 = 0x01100001;
         t->inner_size = 0x20;            // 32 bytes
 
-        // Inner Block at 0x3C (recognized by SmartSteamEmu and Reunion)
+        // Inner Block at 0x3C (recognized by SmartSteamEmu and Reunion SSE3)
         t->inner_magic1 = 0;
         t->inner_magic2 = 0x20455353;    // "SSE "
         t->inner_sid_low = g_AccountID;
         t->inner_sid_high = 0x01100001;
-        t->inner_srv_ip = HostToNet32(unIPServer);
-        t->inner_srv_port = HostToNet16(usPortServer);
+        t->inner_srv_ip = unIPServer;    // Already in network byte order
+        t->inner_srv_port = usPortServer; // Already in network byte order
+
+        // Compute CRC32 checksum of inner block (0x3C to 0x67)
+        uint32_t crc = 0xFFFFFFFF;
+        const uint8_t* pBlock = reinterpret_cast<const uint8_t*>(&t->inner_magic1);
+        size_t blockLen = (uintptr_t)&t->inner_checksum - (uintptr_t)&t->inner_magic1;
+        for (size_t i = 0; i < blockLen; ++i)
+        {
+            crc ^= pBlock[i];
+            for (int k = 0; k < 8; ++k)
+                crc = (crc >> 1) ^ (0xEDB88320 & (-(int32_t)(crc & 1)));
+        }
+        t->inner_checksum = ~crc;
 
         return sizeof(SteamEmuAuthTicket);
     }

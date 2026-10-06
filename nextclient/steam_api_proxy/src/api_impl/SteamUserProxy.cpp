@@ -2,6 +2,7 @@
 #include "SteamEmu.h"
 #include "../voice/SpeexVoiceManager.h"
 #include <cstring>
+#include <cstdio>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -75,7 +76,20 @@ int SteamUserVoiceProxy::InitiateGameConnection(
     if (!pAuthBlob || cbMaxAuthBlob < (int)sizeof(SteamEmuAuthTicket))
         return 0;
 
-    return (int)SteamEmu::GenerateAuthTicket(pAuthBlob, (size_t)cbMaxAuthBlob, unIPServer, usPortServer);
+    int res = (int)SteamEmu::GenerateAuthTicket(pAuthBlob, (size_t)cbMaxAuthBlob, unIPServer, usPortServer);
+
+    FILE* f = fopen("platform\\steam\\steam_auth.log", "a");
+    if (!f)
+        f = fopen("steam_auth.log", "a");
+    if (f)
+    {
+        uint32_t acc = SteamEmu::GetAccountID();
+        fprintf(f, "[SteamEmu] InitiateGameConnection: unIPServer=0x%08X usPortServer=%u TicketLen=%d SteamID=STEAM_0:%u:%u\n",
+            unIPServer, usPortServer, res, acc & 1, acc / 2);
+        fclose(f);
+    }
+
+    return res;
 }
 
 bool SteamUserVoiceProxy::GetUserDataFolder(char *pchBuffer, int cubBuffer)
