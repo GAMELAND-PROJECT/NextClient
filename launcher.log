@@ -1,0 +1,17 @@
+2026-10-06 06:23:12,208 [INFO] -----------------------------------------------
+2026-10-06 06:23:12,209 [INFO] Start "cstrike.exe"
+2026-10-06 06:23:12,209 [INFO] Version: 0.0.1
+2026-10-06 06:23:12,210 [INFO] Provisioned embedded default config to default/config.cfg
+2026-10-06 06:23:12,210 [WARNING] Default config not found: platform/defaults\user_game_config.ini
+2026-10-06 06:23:12,211 [WARNING] Default config not found: platform/defaults\MasterServer.vdf
+2026-10-06 06:23:12,211 [WARNING] Default config not found: platform/defaults\backend.json
+2026-10-06 06:23:13,125 [INFO] Fresh launch: guest mode config reset to default.
+2026-10-06 06:23:13,125 [INFO] Branch: msvsru
+2026-10-06 06:27:15,916 [INFO] -----------------------------------------------
+2026-10-06 06:27:15,916 [INFO] Start "cstrike.exe"
+2026-10-06 06:27:15,916 [INFO] Version: 0.0.1
+2026-10-06 06:27:15,916 [WARNING] Default config not found: platform/defaults\user_game_config.ini
+2026-10-06 06:27:15,916 [WARNING] Default config not found: platform/defaults\MasterServer.vdf
+2026-10-06 06:27:15,916 [WARNING] Default config not found: platform/defaults\backend.json
+2026-10-06 06:27:16,770 [INFO] Fresh launch: guest mode config reset to default.
+2026-10-06 06:27:16,770 [INFO] Branch: msvsru

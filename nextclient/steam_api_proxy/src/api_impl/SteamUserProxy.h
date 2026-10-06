@@ -1,115 +1,56 @@
 #pragma once
 
 #include <steam/isteamuser.h>
+#include "SteamEmu.h"
 
 class SteamUserVoiceProxy : public ISteamUser
 {
 public:
-    SteamUserVoiceProxy();
+    SteamUserVoiceProxy() = default;
     ~SteamUserVoiceProxy() = default;
 
-    void SetOriginal(ISteamUser* orig) { m_pOrig = orig; }
-    ISteamUser* GetOriginal() const { return m_pOrig; }
-
     // ISteamUser interface implementation
-    HSteamUser GetHSteamUser() override { return m_pOrig ? m_pOrig->GetHSteamUser() : 0; }
-    bool BLoggedOn() override { return m_pOrig ? m_pOrig->BLoggedOn() : false; }
-    CSteamID GetSteamID() override { return m_pOrig ? m_pOrig->GetSteamID() : CSteamID(); }
+    HSteamUser GetHSteamUser() override { return 1; }
+    bool BLoggedOn() override { return true; }
+    CSteamID GetSteamID() override { return SteamEmu::GetSteamID(); }
     
-    int InitiateGameConnection(void *pAuthBlob, int cbMaxAuthBlob, CSteamID steamIDGameServer, uint32 unIPServer, uint16 usPortServer, bool bSecure) override
-    {
-        return m_pOrig ? m_pOrig->InitiateGameConnection(pAuthBlob, cbMaxAuthBlob, steamIDGameServer, unIPServer, usPortServer, bSecure) : 0;
-    }
+    int InitiateGameConnection(void *pAuthBlob, int cbMaxAuthBlob, CSteamID steamIDGameServer, uint32 unIPServer, uint16 usPortServer, bool bSecure) override;
+    void TerminateGameConnection(uint32 unIPServer, uint16 usPortServer) override { (void)unIPServer; (void)usPortServer; }
+    void TrackAppUsageEvent(CGameID gameID, int eAppUsageEvent, const char *pchExtraInfo = "") override { (void)gameID; (void)eAppUsageEvent; (void)pchExtraInfo; }
+    bool GetUserDataFolder(char *pchBuffer, int cubBuffer) override;
 
-    void TerminateGameConnection(uint32 unIPServer, uint16 usPortServer) override
-    {
-        if (m_pOrig) m_pOrig->TerminateGameConnection(unIPServer, usPortServer);
-    }
-
-    void TrackAppUsageEvent(CGameID gameID, int eAppUsageEvent, const char *pchExtraInfo = "") override
-    {
-        if (m_pOrig) m_pOrig->TrackAppUsageEvent(gameID, eAppUsageEvent, pchExtraInfo);
-    }
-
-    bool GetUserDataFolder(char *pchBuffer, int cubBuffer) override
-    {
-        return m_pOrig ? m_pOrig->GetUserDataFolder(pchBuffer, cubBuffer) : false;
-    }
-
-    void StartVoiceRecording() override
-    {
-        if (m_pOrig) m_pOrig->StartVoiceRecording();
-    }
-
-    void StopVoiceRecording() override
-    {
-        if (m_pOrig) m_pOrig->StopVoiceRecording();
-    }
-
+    void StartVoiceRecording() override {}
+    void StopVoiceRecording() override {}
     EVoiceResult GetAvailableVoice(uint32 *pcbCompressed, uint32 *pcbUncompressed, uint32 nUncompressedVoiceDesiredSampleRate) override
     {
-        return m_pOrig ? m_pOrig->GetAvailableVoice(pcbCompressed, pcbUncompressed, nUncompressedVoiceDesiredSampleRate) : k_EVoiceResultNotInitialized;
+        (void)nUncompressedVoiceDesiredSampleRate;
+        if (pcbCompressed) *pcbCompressed = 0;
+        if (pcbUncompressed) *pcbUncompressed = 0;
+        return k_EVoiceResultNotInitialized;
     }
-
     EVoiceResult GetVoice(bool bWantCompressed, void *pDestBuffer, uint32 cbDestBufferSize, uint32 *nBytesWritten, bool bWantUncompressed, void *pUncompressedDestBuffer, uint32 cbUncompressedDestBufferSize, uint32 *nUncompressBytesWritten, uint32 nUncompressedVoiceDesiredSampleRate) override
     {
-        return m_pOrig ? m_pOrig->GetVoice(bWantCompressed, pDestBuffer, cbDestBufferSize, nBytesWritten, bWantUncompressed, pUncompressedDestBuffer, cbUncompressedDestBufferSize, nUncompressBytesWritten, nUncompressedVoiceDesiredSampleRate) : k_EVoiceResultNotInitialized;
+        (void)bWantCompressed; (void)pDestBuffer; (void)cbDestBufferSize;
+        (void)bWantUncompressed; (void)pUncompressedDestBuffer; (void)cbUncompressedDestBufferSize;
+        (void)nUncompressedVoiceDesiredSampleRate;
+        if (nBytesWritten) *nBytesWritten = 0;
+        if (nUncompressBytesWritten) *nUncompressBytesWritten = 0;
+        return k_EVoiceResultNotInitialized;
     }
 
     EVoiceResult DecompressVoice(const void *pCompressed, uint32 cbCompressed, void *pDestBuffer, uint32 cbDestBufferSize, uint32 *nBytesWritten, uint32 nDesiredSampleRate) override;
 
-    uint32 GetVoiceOptimalSampleRate() override
-    {
-        return m_pOrig ? m_pOrig->GetVoiceOptimalSampleRate() : 11025;
-    }
+    uint32 GetVoiceOptimalSampleRate() override { return 12000; }
 
-    HAuthTicket GetAuthSessionTicket(void *pTicket, int cbMaxTicket, uint32 *pcbTicket) override
-    {
-        return m_pOrig ? m_pOrig->GetAuthSessionTicket(pTicket, cbMaxTicket, pcbTicket) : k_HAuthTicketInvalid;
-    }
-
-    EBeginAuthSessionResult BeginAuthSession(const void *pAuthTicket, int cbAuthTicket, CSteamID steamID) override
-    {
-        return m_pOrig ? m_pOrig->BeginAuthSession(pAuthTicket, cbAuthTicket, steamID) : k_EBeginAuthSessionResultInvalidTicket;
-    }
-
-    void EndAuthSession(CSteamID steamID) override
-    {
-        if (m_pOrig) m_pOrig->EndAuthSession(steamID);
-    }
-
-    void CancelAuthTicket(HAuthTicket hAuthTicket) override
-    {
-        if (m_pOrig) m_pOrig->CancelAuthTicket(hAuthTicket);
-    }
-
-    EUserHasLicenseForAppResult UserHasLicenseForApp(CSteamID steamID, AppId_t appID) override
-    {
-        return m_pOrig ? m_pOrig->UserHasLicenseForApp(steamID, appID) : k_EUserHasLicenseResultDoesNotHaveLicense;
-    }
-
-    bool BIsBehindNAT() override
-    {
-        return m_pOrig ? m_pOrig->BIsBehindNAT() : false;
-    }
-
-    void AdvertiseGame(CSteamID steamIDGameServer, uint32 unIPServer, uint16 usPortServer) override
-    {
-        if (m_pOrig) m_pOrig->AdvertiseGame(steamIDGameServer, unIPServer, usPortServer);
-    }
-
-    SteamAPICall_t RequestEncryptedAppTicket(void *pDataToInclude, int cbDataToInclude) override
-    {
-        return m_pOrig ? m_pOrig->RequestEncryptedAppTicket(pDataToInclude, cbDataToInclude) : k_uAPICallInvalid;
-    }
-
-    bool GetEncryptedAppTicket(void *pTicket, int cbMaxTicket, uint32 *pcbTicket) override
-    {
-        return m_pOrig ? m_pOrig->GetEncryptedAppTicket(pTicket, cbMaxTicket, pcbTicket) : false;
-    }
-
-private:
-    ISteamUser* m_pOrig{nullptr};
+    HAuthTicket GetAuthSessionTicket(void *pTicket, int cbMaxTicket, uint32 *pcbTicket) override;
+    EBeginAuthSessionResult BeginAuthSession(const void *pAuthTicket, int cbAuthTicket, CSteamID steamID) override { (void)pAuthTicket; (void)cbAuthTicket; (void)steamID; return k_EBeginAuthSessionResultOK; }
+    void EndAuthSession(CSteamID steamID) override { (void)steamID; }
+    void CancelAuthTicket(HAuthTicket hAuthTicket) override { (void)hAuthTicket; }
+    EUserHasLicenseForAppResult UserHasLicenseForApp(CSteamID steamID, AppId_t appID) override { (void)steamID; (void)appID; return k_EUserHasLicenseResultHasLicense; }
+    bool BIsBehindNAT() override { return false; }
+    void AdvertiseGame(CSteamID steamIDGameServer, uint32 unIPServer, uint16 usPortServer) override { (void)steamIDGameServer; (void)unIPServer; (void)usPortServer; }
+    SteamAPICall_t RequestEncryptedAppTicket(void *pDataToInclude, int cbDataToInclude) override { (void)pDataToInclude; (void)cbDataToInclude; return k_uAPICallInvalid; }
+    bool GetEncryptedAppTicket(void *pTicket, int cbMaxTicket, uint32 *pcbTicket) override { (void)pTicket; (void)cbMaxTicket; (void)pcbTicket; return false; }
 };
 
 extern SteamUserVoiceProxy g_SteamUserVoiceProxy;
