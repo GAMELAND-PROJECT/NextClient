@@ -27,6 +27,8 @@ add_library(${PROJECT_NAME} SHARED
         src/api_impl/SteamUserProxy.h
         src/voice/SpeexVoiceManager.cpp
         src/voice/SpeexVoiceManager.h
+        src/voice/VoiceRecorder.cpp
+        src/voice/VoiceRecorder.h
         src/public/steam/isteamapps.h
         src/public/steam/isteambilling.h
         src/public/steam/isteamclient.h
@@ -66,6 +68,7 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
         opus
         silk
         $<$<PLATFORM_ID:Windows>:ws2_32>
+        $<$<PLATFORM_ID:Windows>:winmm>
 )
 
 if (UNIX)

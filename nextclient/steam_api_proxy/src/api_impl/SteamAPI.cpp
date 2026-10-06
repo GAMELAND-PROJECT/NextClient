@@ -4,6 +4,7 @@
 #include "SteamUserProxy.h"
 #include "SteamEmu.h"
 #include "SteamStubs.h"
+#include "../voice/VoiceRecorder.h"
 
 #ifdef _WINDOWS
 #include <Windows.h>
@@ -92,6 +93,7 @@ void Initialize()
 
 void UnInitialize()
 {
+    VoiceRecorder::GetInstance().Shutdown();
     g_bInitialized = false;
     g_ExceptionCallback = nullptr;
 }

@@ -19,24 +19,10 @@ public:
     void TrackAppUsageEvent(CGameID gameID, int eAppUsageEvent, const char *pchExtraInfo = "") override { (void)gameID; (void)eAppUsageEvent; (void)pchExtraInfo; }
     bool GetUserDataFolder(char *pchBuffer, int cubBuffer) override;
 
-    void StartVoiceRecording() override {}
-    void StopVoiceRecording() override {}
-    EVoiceResult GetAvailableVoice(uint32 *pcbCompressed, uint32 *pcbUncompressed, uint32 nUncompressedVoiceDesiredSampleRate) override
-    {
-        (void)nUncompressedVoiceDesiredSampleRate;
-        if (pcbCompressed) *pcbCompressed = 0;
-        if (pcbUncompressed) *pcbUncompressed = 0;
-        return k_EVoiceResultNotInitialized;
-    }
-    EVoiceResult GetVoice(bool bWantCompressed, void *pDestBuffer, uint32 cbDestBufferSize, uint32 *nBytesWritten, bool bWantUncompressed, void *pUncompressedDestBuffer, uint32 cbUncompressedDestBufferSize, uint32 *nUncompressBytesWritten, uint32 nUncompressedVoiceDesiredSampleRate) override
-    {
-        (void)bWantCompressed; (void)pDestBuffer; (void)cbDestBufferSize;
-        (void)bWantUncompressed; (void)pUncompressedDestBuffer; (void)cbUncompressedDestBufferSize;
-        (void)nUncompressedVoiceDesiredSampleRate;
-        if (nBytesWritten) *nBytesWritten = 0;
-        if (nUncompressBytesWritten) *nUncompressBytesWritten = 0;
-        return k_EVoiceResultNotInitialized;
-    }
+    void StartVoiceRecording() override;
+    void StopVoiceRecording() override;
+    EVoiceResult GetAvailableVoice(uint32 *pcbCompressed, uint32 *pcbUncompressed, uint32 nUncompressedVoiceDesiredSampleRate) override;
+    EVoiceResult GetVoice(bool bWantCompressed, void *pDestBuffer, uint32 cbDestBufferSize, uint32 *nBytesWritten, bool bWantUncompressed, void *pUncompressedDestBuffer, uint32 cbUncompressedDestBufferSize, uint32 *nUncompressBytesWritten, uint32 nUncompressedVoiceDesiredSampleRate) override;
 
     EVoiceResult DecompressVoice(const void *pCompressed, uint32 cbCompressed, void *pDestBuffer, uint32 cbDestBufferSize, uint32 *nBytesWritten, uint32 nDesiredSampleRate) override;
 

@@ -1,6 +1,7 @@
 #include "SteamUserProxy.h"
 #include "SteamEmu.h"
 #include "../voice/SpeexVoiceManager.h"
+#include "../voice/VoiceRecorder.h"
 #include <cstring>
 #include <cstdio>
 
@@ -119,6 +120,54 @@ HAuthTicket SteamUserVoiceProxy::GetAuthSessionTicket(void *pTicket, int cbMaxTi
         *pcbTicket = (uint32)sz;
 
     return 1;
+}
+
+void SteamUserVoiceProxy::StartVoiceRecording()
+{
+    VoiceRecorder::GetInstance().StartRecording();
+}
+
+void SteamUserVoiceProxy::StopVoiceRecording()
+{
+    VoiceRecorder::GetInstance().StopRecording();
+}
+
+EVoiceResult SteamUserVoiceProxy::GetAvailableVoice(
+    uint32 *pcbCompressed,
+    uint32 *pcbUncompressed,
+    uint32 nUncompressedVoiceDesiredSampleRate
+)
+{
+    return VoiceRecorder::GetInstance().GetAvailableVoice(
+        pcbCompressed,
+        pcbUncompressed,
+        nUncompressedVoiceDesiredSampleRate
+    );
+}
+
+EVoiceResult SteamUserVoiceProxy::GetVoice(
+    bool bWantCompressed,
+    void *pDestBuffer,
+    uint32 cbDestBufferSize,
+    uint32 *nBytesWritten,
+    bool bWantUncompressed,
+    void *pUncompressedDestBuffer,
+    uint32 cbUncompressedDestBufferSize,
+    uint32 *nUncompressBytesWritten,
+    uint32 nUncompressedVoiceDesiredSampleRate
+)
+{
+    return VoiceRecorder::GetInstance().GetVoice(
+        bWantCompressed,
+        pDestBuffer,
+        cbDestBufferSize,
+        nBytesWritten,
+        bWantUncompressed,
+        pUncompressedDestBuffer,
+        cbUncompressedDestBufferSize,
+        nUncompressBytesWritten,
+        nUncompressedVoiceDesiredSampleRate
+    );
 }
 
 EVoiceResult SteamUserVoiceProxy::DecompressVoice(
