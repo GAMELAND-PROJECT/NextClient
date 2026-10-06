@@ -307,15 +307,21 @@ void ModernChat::VidInit()
 {
     if (IsOpen())
         Cancel();
+    m_messages.clear();
+    m_lastLocalSentText.clear();
+    m_lastLocalSentTime = 0.0;
+    m_scrollOffset = 0;
 }
 
 void ModernChat::Reset()
 {
     if (IsOpen())
         Cancel();
-    m_messages.clear();
+    // Do NOT wipe m_messages on round reset! In CS 1.6, Reset is called on every round restart.
+    // Keeping m_messages preserves the last 20 messages across rounds so the player can scroll and read history.
     m_lastLocalSentText.clear();
     m_lastLocalSentTime = 0.0;
+    m_scrollOffset = 0;
 }
 
 void ModernChat::Open(ModernChatMode mode)
@@ -328,6 +334,7 @@ void ModernChat::Open(ModernChatMode mode)
 
     m_mode = mode;
     m_buffer.clear();
+    m_scrollOffset = 0;
     m_openTime = (gEngfuncs.GetClientTime ? gEngfuncs.GetClientTime() : 0.0);
 
     // NOTE: Mouse look/turning remains 100% ACTIVE!
@@ -341,6 +348,7 @@ void ModernChat::Close()
 
     m_mode = ModernChatMode::Closed;
     m_buffer.clear();
+    m_scrollOffset = 0;
 }
 
 void ModernChat::Send()
@@ -403,6 +411,21 @@ void ModernChat::ToggleMode()
         m_mode = ModernChatMode::SayTeam;
     else if (m_mode == ModernChatMode::SayTeam)
         m_mode = ModernChatMode::SayAll;
+}
+
+int ModernChat::GetMaxVisibleMessages() const
+{
+    int refY = (m_barY > 100) ? m_barY : 500;
+    return std::clamp((refY - 70) / 21, 5, 10);
+}
+
+void ModernChat::ScrollHistory(int delta)
+{
+    const int totalMessages = static_cast<int>(m_messages.size());
+    const int maxVisible = GetMaxVisibleMessages();
+    const int maxScroll = std::max(0, totalMessages - maxVisible);
+
+    m_scrollOffset = std::clamp(m_scrollOffset + delta, 0, maxScroll);
 }
 
 void ModernChat::AddChatMessage(int clientIndex, const std::string& prefix, const std::string& sender, const std::string& text, float r, float g, float b, bool isTeam, bool isServer, bool isCommand)
@@ -492,7 +515,7 @@ void ModernChat::AddChatMessage(int clientIndex, const std::string& prefix, cons
     msg.timestamp = curTime;
 
     m_messages.push_back(std::move(msg));
-    while (m_messages.size() > 16)
+    while (m_messages.size() > 20)
     {
         m_messages.pop_front();
     }
@@ -1451,9 +1474,32 @@ int ModernChat::HandleKey(int down, int keynum, const char* /*pszCurrentBinding*
     if (down == 0)
         return 0; // Ingest key releases while chat is open
 
-    // 1. Mouse Controls (Send with Left-Click, Cancel with Right-Click)
-    constexpr int kMouse1 = 241;
-    constexpr int kMouse2 = 242;
+    // 1. Mouse Controls (Send with Left-Click, Cancel with Right-Click, Mouse Wheel History Scroll)
+    constexpr int kMWheelDown = 239;
+    constexpr int kMWheelUp   = 240;
+    constexpr int kMouse1     = 241;
+    constexpr int kMouse2     = 242;
+    constexpr int kMouse3     = 243;
+    constexpr int kPageUp     = 150;
+    constexpr int kPageDown   = 149;
+
+    if (keynum == kMWheelUp || keynum == kPageUp) // Scroll UP into previous history
+    {
+        ScrollHistory(+1);
+        return 0;
+    }
+
+    if (keynum == kMWheelDown || keynum == kPageDown) // Scroll DOWN towards latest
+    {
+        ScrollHistory(-1);
+        return 0;
+    }
+
+    if (keynum == kMouse3) // Middle Click -> Snap back to latest
+    {
+        m_scrollOffset = 0;
+        return 0;
+    }
 
     if (keynum == kMouse1) // Left Click -> Instant Send message!
     {
@@ -1467,19 +1513,19 @@ int ModernChat::HandleKey(int down, int keynum, const char* /*pszCurrentBinding*
         return 0;
     }
 
-    if (keynum >= 243 && keynum <= 245)
+    if (keynum >= 244 && keynum <= 255)
     {
         return 0;
     }
 
     // 2. Keyboard Navigation
-    if (keynum == 13 || keynum == 250) // Enter or NumPad Enter
+    if (keynum == 13 || keynum == 169 || keynum == 250) // Enter or NumPad Enter (K_ENTER 13, K_KP_ENTER 169)
     {
         Send();
         return 0;
     }
 
-    if (keynum == 27) // Escape
+    if (keynum == 27) // Escape (K_ESCAPE 27)
     {
         Cancel();
         return 0;
@@ -1581,7 +1627,7 @@ void ModernChat::Draw(int scrW, int scrH)
     const double curTime = (gEngfuncs.GetClientTime ? gEngfuncs.GetClientTime() : 0.0);
 
     // Compact, sleek input bar dimensions
-    m_barW = std::min(scrW - 32, static_cast<int>(390.0f * (scale > 1.3f ? 1.15f : 1.0f)));
+    m_barW = std::min(scrW - 32, static_cast<int>(430.0f * (scale > 1.3f ? 1.25f : 1.0f)));
     m_barH = 25;
     m_barX = 16;
 
@@ -1602,214 +1648,223 @@ void ModernChat::Draw(int scrW, int scrH)
     // طبقه پایین: پیام‌های سرور و دستورات با استایل سولار برنز و جت بلک
     // طبقه بالا: پیام‌های تیمی و همگانی بازیکنان با کادرهای شفاف و باریک
     // =========================================================================
-    int currentMsgBottomY = IsOpen() ? (m_barY - 5) : (scrH - 62);
     constexpr double kMessageLifetime = 8.0;
 
-    // -------------------------------------------------------------------------
-    // Tier 1: LOWER TIER - SERVER MESSAGES & COMMANDS (پایین‌تر از تکست‌های تیمی و آل)
-    // -------------------------------------------------------------------------
-    int drawnServerCount = 0;
-    for (int i = static_cast<int>(m_messages.size()) - 1; i >= 0 && drawnServerCount < 4; --i)
-    {
-        const auto& m = m_messages[i];
-        if (!m.isServer && !m.isCommand)
-            continue;
-
-        double age = curTime - m.timestamp;
-        int alpha = 240;
-        if (!IsOpen())
+    auto GetCleanBody = [](const std::string& sender, const std::string& text, std::string& tempOut) -> const char* {
+        const char* pDrawMsg = text.c_str();
+        if (!sender.empty() && StartsWithCI(text, sender))
         {
+            size_t idx = sender.length();
+            while (idx < text.length() && (text[idx] == ' ' || text[idx] == '\t'))
+                idx++;
+            if (idx < text.length() && text[idx] == ':')
+            {
+                idx++;
+                while (idx < text.length() && (text[idx] == ' ' || text[idx] == '\t'))
+                    idx++;
+                tempOut = text.substr(idx);
+                pDrawMsg = tempOut.c_str();
+            }
+        }
+        if (pDrawMsg[0] == ':')
+        {
+            size_t idx = 1;
+            while (pDrawMsg[idx] == ' ' || pDrawMsg[idx] == '\t')
+                idx++;
+            tempOut = pDrawMsg + idx;
+            pDrawMsg = tempOut.c_str();
+        }
+        return pDrawMsg;
+    };
+
+    if (!IsOpen())
+    {
+        // -------------------------------------------------------------------------
+        // GAMEPLAY HUD (When chat is CLOSED): Dynamic Two-Tier Fading Feed
+        // -------------------------------------------------------------------------
+        int currentMsgBottomY = scrH - 62;
+
+        // Tier 1: Lower Tier - Server Messages & Commands (up to 4)
+        int drawnServerCount = 0;
+        for (int i = static_cast<int>(m_messages.size()) - 1; i >= 0 && drawnServerCount < 4; --i)
+        {
+            const auto& m = m_messages[i];
+            if (!m.isServer && !m.isCommand)
+                continue;
+
+            double age = curTime - m.timestamp;
             if (age > kMessageLifetime)
                 continue;
+
+            int alpha = 240;
             if (age > 6.0)
                 alpha = static_cast<int>(240.0f * (1.0f - static_cast<float>(age - 6.0) / 2.0f));
-        }
-        if (alpha <= 6)
-            continue;
+            if (alpha <= 6)
+                continue;
 
-        float enterT = std::min(1.0f, static_cast<float>(age / 0.16f));
-        float slideEase = 1.0f - std::pow(1.0f - enterT, 3.0f);
-        int slideOffsetX = static_cast<int>((1.0f - slideEase) * -24.0f);
+            float enterT = std::min(1.0f, static_cast<float>(age / 0.16f));
+            float slideEase = 1.0f - std::pow(1.0f - enterT, 3.0f);
+            int slideOffsetX = static_cast<int>((1.0f - slideEase) * -24.0f);
 
-        int lineH = 19;
-        currentMsgBottomY -= (lineH + 2);
+            int lineH = 19;
+            currentMsgBottomY -= (lineH + 2);
 
-        int prefixW = 0, senderW = 0, textW = 0, dummyH = 0;
-        if (!m.prefix.empty()) GetTextSize(m.prefix.c_str(), prefixW, dummyH);
-        if (!m.sender.empty()) GetTextSize(m.sender.c_str(), senderW, dummyH);
-        GetTextSize(m.text.c_str(), textW, dummyH);
+            int prefixW = 0, senderW = 0, textW = 0, dummyH = 0;
+            if (!m.prefix.empty()) GetTextSize(m.prefix.c_str(), prefixW, dummyH);
+            if (!m.sender.empty()) GetTextSize(m.sender.c_str(), senderW, dummyH);
+            GetTextSize(m.text.c_str(), textW, dummyH);
 
-        int totalContentW = (m.prefix.empty() ? 0 : (prefixW + 10)) +
-                            (m.sender.empty() ? 0 : (senderW + 12)) +
-                            textW + 18;
-        int cardW = std::min(scrW - 32, std::max(110, totalContentW));
-        int cardX = m_barX + slideOffsetX;
+            int totalContentW = (m.prefix.empty() ? 0 : (prefixW + 10)) +
+                                (m.sender.empty() ? 0 : (senderW + 12)) +
+                                textW + 18;
+            int cardW = std::min(scrW - 32, std::max(110, totalContentW));
+            int cardX = m_barX + slideOffsetX;
 
-        // 1. Soft Ambient Drop-Shadow (compact)
-        DrawBox(cardX - 1, currentMsgBottomY - 1, cardW + 2, lineH + 2, 0, 0, 0, (alpha * 120) / 255);
+            DrawBox(cardX - 1, currentMsgBottomY - 1, cardW + 2, lineH + 2, 0, 0, 0, (alpha * 120) / 255);
 
-        if (m.isServer)
-        {
-            // Solar Bronze Glass (Clean, semi-transparent, non-intrusive)
-            DrawBox(cardX, currentMsgBottomY, cardW, lineH, 22, 15, 8, (alpha * 175) / 255);
-            DrawBox(cardX, currentMsgBottomY, cardW, 1, 255, 175, 35, (alpha * 190) / 255);
-            DrawBox(cardX, currentMsgBottomY + lineH - 1, cardW, 1, 65, 42, 16, (alpha * 130) / 255);
-            DrawBox(cardX + cardW - 1, currentMsgBottomY, 1, lineH, 75, 50, 20, (alpha * 100) / 255);
-            DrawBox(cardX, currentMsgBottomY, 2, lineH, 255, 185, 45, alpha);
-
-            if (!IsOpen())
+            if (m.isServer)
             {
+                DrawBox(cardX, currentMsgBottomY, cardW, lineH, 22, 15, 8, (alpha * 175) / 255);
+                DrawBox(cardX, currentMsgBottomY, cardW, 1, 255, 175, 35, (alpha * 190) / 255);
+                DrawBox(cardX, currentMsgBottomY + lineH - 1, cardW, 1, 65, 42, 16, (alpha * 130) / 255);
+                DrawBox(cardX + cardW - 1, currentMsgBottomY, 1, lineH, 75, 50, 20, (alpha * 100) / 255);
+                DrawBox(cardX, currentMsgBottomY, 2, lineH, 255, 185, 45, alpha);
+
                 float remaining = std::clamp(1.0f - static_cast<float>(age / kMessageLifetime), 0.0f, 1.0f);
                 int progW = static_cast<int>((cardW - 4) * remaining);
                 if (progW > 0)
                 {
                     DrawBox(cardX + 2, currentMsgBottomY + lineH - 1, progW, 1, 255, 195, 60, (alpha * 170) / 255);
                 }
+
+                int posX = cardX + 7;
+                int textY = currentMsgBottomY + (lineH - 13) / 2;
+
+                if (!m.prefix.empty())
+                {
+                    int badgePad = 3;
+                    int badgeW = prefixW + (badgePad * 2);
+                    int badgeH = lineH - 4;
+                    int badgeY = currentMsgBottomY + 2;
+
+                    DrawBox(posX, badgeY, badgeW, badgeH, 65, 38, 8, (alpha * 200) / 255);
+                    DrawBox(posX, badgeY, badgeW, 1, 255, 175, 35, (alpha * 220) / 255);
+                    DrawTextWithShadow(posX + badgePad, textY, m.prefix.c_str(), 1.0f, 0.84f, 0.35f);
+                    posX += badgeW + 6;
+                }
+
+                if (!m.sender.empty())
+                {
+                    DrawTextWithShadow(posX, textY, m.sender.c_str(), 1.0f, 0.88f, 0.65f);
+                    posX += senderW + 1;
+                    DrawTextWithShadow(posX, textY, ":", 0.90f, 0.75f, 0.40f);
+                    posX += 6;
+                }
+
+                DrawTextWithShadow(posX, textY, m.text.c_str(), 1.0f, 0.98f, 0.94f);
             }
-
-            int posX = cardX + 7;
-            int textY = currentMsgBottomY + (lineH - 13) / 2;
-
-            if (!m.prefix.empty())
+            else
             {
-                int badgePad = 3;
-                int badgeW = prefixW + (badgePad * 2);
-                int badgeH = lineH - 4;
-                int badgeY = currentMsgBottomY + 2;
+                DrawBox(cardX, currentMsgBottomY, cardW, lineH, 6, 6, 9, (alpha * 175) / 255);
+                DrawBox(cardX, currentMsgBottomY, cardW, 1, 75, 80, 90, (alpha * 140) / 255);
+                DrawBox(cardX, currentMsgBottomY + lineH - 1, cardW, 1, 30, 32, 38, (alpha * 130) / 255);
+                DrawBox(cardX, currentMsgBottomY, 2, lineH, 130, 135, 145, alpha);
 
-                DrawBox(posX, badgeY, badgeW, badgeH, 65, 38, 8, (alpha * 200) / 255);
-                DrawBox(posX, badgeY, badgeW, 1, 255, 175, 35, (alpha * 220) / 255);
-
-                DrawTextWithShadow(posX + badgePad, textY, m.prefix.c_str(), 1.0f, 0.84f, 0.35f);
-                posX += badgeW + 6;
-            }
-
-            if (!m.sender.empty())
-            {
-                DrawTextWithShadow(posX, textY, m.sender.c_str(), 1.0f, 0.88f, 0.65f);
-                posX += senderW + 1;
-                DrawTextWithShadow(posX, textY, ":", 0.90f, 0.75f, 0.40f);
-                posX += 6;
-            }
-
-            DrawTextWithShadow(posX, textY, m.text.c_str(), 1.0f, 0.98f, 0.94f);
-        }
-        else // Command messages
-        {
-            // Stealth Jet Glass
-            DrawBox(cardX, currentMsgBottomY, cardW, lineH, 6, 6, 9, (alpha * 175) / 255);
-            DrawBox(cardX, currentMsgBottomY, cardW, 1, 75, 80, 90, (alpha * 140) / 255);
-            DrawBox(cardX, currentMsgBottomY + lineH - 1, cardW, 1, 30, 32, 38, (alpha * 130) / 255);
-            DrawBox(cardX, currentMsgBottomY, 2, lineH, 130, 135, 145, alpha);
-
-            if (!IsOpen())
-            {
                 float remaining = std::clamp(1.0f - static_cast<float>(age / kMessageLifetime), 0.0f, 1.0f);
                 int progW = static_cast<int>((cardW - 4) * remaining);
                 if (progW > 0)
                 {
                     DrawBox(cardX + 2, currentMsgBottomY + lineH - 1, progW, 1, 95, 100, 110, (alpha * 160) / 255);
                 }
+
+                int posX = cardX + 7;
+                int textY = currentMsgBottomY + (lineH - 13) / 2;
+
+                if (!m.prefix.empty())
+                {
+                    int badgePad = 3;
+                    int badgeW = prefixW + (badgePad * 2);
+                    int badgeH = lineH - 4;
+                    int badgeY = currentMsgBottomY + 2;
+
+                    DrawBox(posX, badgeY, badgeW, badgeH, 20, 20, 26, (alpha * 200) / 255);
+                    DrawBox(posX, badgeY, badgeW, 1, 70, 75, 85, (alpha * 220) / 255);
+                    DrawTextWithShadow(posX + badgePad, textY, m.prefix.c_str(), 0.85f, 0.88f, 0.92f);
+                    posX += badgeW + 6;
+                }
+
+                if (!m.sender.empty())
+                {
+                    DrawTextWithShadow(posX, textY, m.sender.c_str(), 0.85f, 0.88f, 0.92f);
+                    posX += senderW + 1;
+                    DrawTextWithShadow(posX, textY, ":", 0.70f, 0.73f, 0.78f);
+                    posX += 6;
+                }
+
+                DrawTextWithShadow(posX, textY, m.text.c_str(), 0.98f, 0.98f, 1.0f);
             }
 
-            int posX = cardX + 7;
-            int textY = currentMsgBottomY + (lineH - 13) / 2;
-
-            if (!m.prefix.empty())
-            {
-                int badgePad = 3;
-                int badgeW = prefixW + (badgePad * 2);
-                int badgeH = lineH - 4;
-                int badgeY = currentMsgBottomY + 2;
-
-                DrawBox(posX, badgeY, badgeW, badgeH, 20, 20, 26, (alpha * 200) / 255);
-                DrawBox(posX, badgeY, badgeW, 1, 70, 75, 85, (alpha * 220) / 255);
-
-                DrawTextWithShadow(posX + badgePad, textY, m.prefix.c_str(), 0.85f, 0.88f, 0.92f);
-                posX += badgeW + 6;
-            }
-
-            if (!m.sender.empty())
-            {
-                DrawTextWithShadow(posX, textY, m.sender.c_str(), 0.85f, 0.88f, 0.92f);
-                posX += senderW + 1;
-                DrawTextWithShadow(posX, textY, ":", 0.70f, 0.73f, 0.78f);
-                posX += 6;
-            }
-
-            DrawTextWithShadow(posX, textY, m.text.c_str(), 0.98f, 0.98f, 1.0f);
+            drawnServerCount++;
         }
 
-        drawnServerCount++;
-    }
-
-    if (drawnServerCount > 0)
-    {
-        currentMsgBottomY -= 3;
-    }
-
-    // -------------------------------------------------------------------------
-    // Tier 2: UPPER TIER - PLAYER CHAT MESSAGES (چت‌های تیمی و همگانی بازیکنان)
-    // -------------------------------------------------------------------------
-    int drawnPlayerCount = 0;
-    for (int i = static_cast<int>(m_messages.size()) - 1; i >= 0 && drawnPlayerCount < 5; --i)
-    {
-        const auto& m = m_messages[i];
-        if (m.isServer || m.isCommand)
-            continue;
-
-        double age = curTime - m.timestamp;
-        int alpha = 240;
-        if (!IsOpen())
+        if (drawnServerCount > 0)
         {
+            currentMsgBottomY -= 3;
+        }
+
+        // Tier 2: Upper Tier - Player Chat Messages (up to 5)
+        int drawnPlayerCount = 0;
+        for (int i = static_cast<int>(m_messages.size()) - 1; i >= 0 && drawnPlayerCount < 5; --i)
+        {
+            const auto& m = m_messages[i];
+            if (m.isServer || m.isCommand)
+                continue;
+
+            double age = curTime - m.timestamp;
             if (age > kMessageLifetime)
                 continue;
+
+            int alpha = 240;
             if (age > 6.0)
                 alpha = static_cast<int>(240.0f * (1.0f - static_cast<float>(age - 6.0) / 2.0f));
-        }
-        if (alpha <= 6)
-            continue;
+            if (alpha <= 6)
+                continue;
 
-        float enterT = std::min(1.0f, static_cast<float>(age / 0.16f));
-        float slideEase = 1.0f - std::pow(1.0f - enterT, 3.0f);
-        int slideOffsetX = static_cast<int>((1.0f - slideEase) * -24.0f);
+            float enterT = std::min(1.0f, static_cast<float>(age / 0.16f));
+            float slideEase = 1.0f - std::pow(1.0f - enterT, 3.0f);
+            int slideOffsetX = static_cast<int>((1.0f - slideEase) * -24.0f);
 
-        int lineH = 19;
-        currentMsgBottomY -= (lineH + 2);
+            int lineH = 19;
+            currentMsgBottomY -= (lineH + 2);
 
-        int prefixW = 0, senderW = 0, textW = 0, dummyH = 0;
-        if (!m.prefix.empty()) GetTextSize(m.prefix.c_str(), prefixW, dummyH);
-        if (!m.sender.empty()) GetTextSize(m.sender.c_str(), senderW, dummyH);
-        GetTextSize(m.text.c_str(), textW, dummyH);
+            int prefixW = 0, senderW = 0, textW = 0, dummyH = 0;
+            if (!m.prefix.empty()) GetTextSize(m.prefix.c_str(), prefixW, dummyH);
+            if (!m.sender.empty()) GetTextSize(m.sender.c_str(), senderW, dummyH);
+            GetTextSize(m.text.c_str(), textW, dummyH);
 
-        int totalContentW = (m.prefix.empty() ? 0 : (prefixW + 10)) +
-                            (m.sender.empty() ? 0 : (senderW + 12)) +
-                            textW + 18;
-        int cardW = std::min(scrW - 32, std::max(110, totalContentW));
-        int cardX = m_barX + slideOffsetX;
+            int totalContentW = (m.prefix.empty() ? 0 : (prefixW + 10)) +
+                                (m.sender.empty() ? 0 : (senderW + 12)) +
+                                textW + 18;
+            int cardW = std::min(scrW - 32, std::max(110, totalContentW));
+            int cardX = m_barX + slideOffsetX;
 
-        // 1. Soft Drop-Shadow
-        DrawBox(cardX - 1, currentMsgBottomY - 1, cardW + 2, lineH + 2, 0, 0, 0, (alpha * 110) / 255);
+            DrawBox(cardX - 1, currentMsgBottomY - 1, cardW + 2, lineH + 2, 0, 0, 0, (alpha * 110) / 255);
 
-        if (m.isTeam)
-        {
-            // Emerald Glass Body
-            DrawBox(cardX, currentMsgBottomY, cardW, lineH, 8, 22, 14, (alpha * 175) / 255);
-            DrawBox(cardX, currentMsgBottomY, cardW, 1, 46, 213, 115, (alpha * 190) / 255);
-            DrawBox(cardX, currentMsgBottomY + lineH - 1, cardW, 1, 46, 213, 115, (alpha * 90) / 255);
-            DrawBox(cardX, currentMsgBottomY, 2, lineH, 46, 213, 115, alpha);
-        }
-        else
-        {
-            // Frosted Obsidian Glass Body
-            DrawBox(cardX, currentMsgBottomY, cardW, lineH, 10, 14, 22, (alpha * 170) / 255);
-            DrawBox(cardX, currentMsgBottomY, cardW, 1, 255, 255, 255, (alpha * 30) / 255);
-            DrawBox(cardX, currentMsgBottomY, 2, lineH,
-                    static_cast<int>(m.r * 255), static_cast<int>(m.g * 255), static_cast<int>(m.b * 255), alpha);
-        }
+            if (m.isTeam)
+            {
+                DrawBox(cardX, currentMsgBottomY, cardW, lineH, 8, 22, 14, (alpha * 175) / 255);
+                DrawBox(cardX, currentMsgBottomY, cardW, 1, 46, 213, 115, (alpha * 190) / 255);
+                DrawBox(cardX, currentMsgBottomY + lineH - 1, cardW, 1, 46, 213, 115, (alpha * 90) / 255);
+                DrawBox(cardX, currentMsgBottomY, 2, lineH, 46, 213, 115, alpha);
+            }
+            else
+            {
+                DrawBox(cardX, currentMsgBottomY, cardW, lineH, 10, 14, 22, (alpha * 170) / 255);
+                DrawBox(cardX, currentMsgBottomY, cardW, 1, 255, 255, 255, (alpha * 30) / 255);
+                DrawBox(cardX, currentMsgBottomY, 2, lineH,
+                        static_cast<int>(m.r * 255), static_cast<int>(m.g * 255), static_cast<int>(m.b * 255), alpha);
+            }
 
-        if (!IsOpen())
-        {
             float remaining = std::clamp(1.0f - static_cast<float>(age / kMessageLifetime), 0.0f, 1.0f);
             int progW = static_cast<int>((cardW - 4) * remaining);
             if (progW > 0)
@@ -1820,77 +1875,275 @@ void ModernChat::Draw(int scrW, int scrH)
                 DrawBox(cardX + 2, currentMsgBottomY + lineH - 1, progW, 1,
                         laserR, laserG, laserB, (alpha * 160) / 255);
             }
-        }
 
-        int posX = cardX + 7;
-        int textY = currentMsgBottomY + (lineH - 13) / 2;
+            int posX = cardX + 7;
+            int textY = currentMsgBottomY + (lineH - 13) / 2;
 
-        if (!m.prefix.empty())
-        {
-            int badgePad = 3;
-            int badgeW = prefixW + (badgePad * 2);
-            int badgeH = lineH - 4;
-            int badgeY = currentMsgBottomY + 2;
-
-            int bgR = m.isTeam ? 18 : static_cast<int>(m.r * 60);
-            int bgG = m.isTeam ? 75 : static_cast<int>(m.g * 60);
-            int bgB = m.isTeam ? 38 : static_cast<int>(m.b * 60);
-
-            int borderR = m.isTeam ? 46 : static_cast<int>(m.r * 255);
-            int borderG = m.isTeam ? 213 : static_cast<int>(m.g * 255);
-            int borderB = m.isTeam ? 115 : static_cast<int>(m.b * 255);
-
-            DrawBox(posX, badgeY, badgeW, badgeH, bgR, bgG, bgB, (alpha * 180) / 255);
-            DrawBox(posX, badgeY, badgeW, 1, borderR, borderG, borderB, (alpha * 200) / 255);
-
-            float prefixR = m.isTeam ? 0.40f : 0.90f;
-            float prefixG = m.isTeam ? 1.0f : 0.95f;
-            float prefixB = m.isTeam ? 0.60f : 1.0f;
-            DrawTextWithShadow(posX + badgePad, textY, m.prefix.c_str(), prefixR, prefixG, prefixB);
-            posX += badgeW + 6;
-        }
-
-        if (!m.sender.empty())
-        {
-            float senderR = m.isTeam ? 0.35f : m.r;
-            float senderG = m.isTeam ? 1.0f : m.g;
-            float senderB = m.isTeam ? 0.55f : m.b;
-            DrawTextWithShadow(posX, textY, m.sender.c_str(), senderR, senderG, senderB);
-            posX += senderW + 1;
-            DrawTextWithShadow(posX, textY, ":", 0.85f, 0.88f, 0.92f);
-            posX += 6;
-        }
-
-        const char* pDrawMsg = m.text.c_str();
-        std::string safeRenderText;
-        if (!m.sender.empty())
-        {
-            if (StartsWithCI(m.text, m.sender))
+            if (!m.prefix.empty())
             {
-                size_t idx = m.sender.length();
-                while (idx < m.text.length() && (m.text[idx] == ' ' || m.text[idx] == '\t'))
-                    idx++;
-                if (idx < m.text.length() && m.text[idx] == ':')
+                int badgePad = 3;
+                int badgeW = prefixW + (badgePad * 2);
+                int badgeH = lineH - 4;
+                int badgeY = currentMsgBottomY + 2;
+
+                int bgR = m.isTeam ? 18 : static_cast<int>(m.r * 60);
+                int bgG = m.isTeam ? 75 : static_cast<int>(m.g * 60);
+                int bgB = m.isTeam ? 38 : static_cast<int>(m.b * 60);
+
+                int borderR = m.isTeam ? 46 : static_cast<int>(m.r * 255);
+                int borderG = m.isTeam ? 213 : static_cast<int>(m.g * 255);
+                int borderB = m.isTeam ? 115 : static_cast<int>(m.b * 255);
+
+                DrawBox(posX, badgeY, badgeW, badgeH, bgR, bgG, bgB, (alpha * 180) / 255);
+                DrawBox(posX, badgeY, badgeW, 1, borderR, borderG, borderB, (alpha * 200) / 255);
+
+                float prefixR = m.isTeam ? 0.40f : 0.90f;
+                float prefixG = m.isTeam ? 1.0f : 0.95f;
+                float prefixB = m.isTeam ? 0.60f : 1.0f;
+                DrawTextWithShadow(posX + badgePad, textY, m.prefix.c_str(), prefixR, prefixG, prefixB);
+                posX += badgeW + 6;
+            }
+
+            if (!m.sender.empty())
+            {
+                float senderR = m.isTeam ? 0.35f : m.r;
+                float senderG = m.isTeam ? 1.0f : m.g;
+                float senderB = m.isTeam ? 0.55f : m.b;
+                DrawTextWithShadow(posX, textY, m.sender.c_str(), senderR, senderG, senderB);
+                posX += senderW + 1;
+                DrawTextWithShadow(posX, textY, ":", 0.85f, 0.88f, 0.92f);
+                posX += 6;
+            }
+
+            std::string tempOut;
+            const char* pDrawMsg = GetCleanBody(m.sender, m.text, tempOut);
+            DrawTextWithShadow(posX, textY, pDrawMsg, 0.96f, 0.97f, 1.0f);
+            drawnPlayerCount++;
+        }
+    }
+    else
+    {
+        // =====================================================================
+        // UNIFIED CHRONOLOGICAL SCROLLABLE FEED (When chat is OPEN via Y or U)
+        // Up to 20 messages in full history, scrollable with Mouse Wheel!
+        // =====================================================================
+        const int totalMessages = static_cast<int>(m_messages.size());
+        const int maxVisible = GetMaxVisibleMessages();
+        const int maxScroll = std::max(0, totalMessages - maxVisible);
+        m_scrollOffset = std::clamp(m_scrollOffset, 0, maxScroll);
+
+        if (totalMessages > 0)
+        {
+            int endIndex = (totalMessages - 1) - m_scrollOffset;
+            int startIndex = std::max(0, endIndex - maxVisible + 1);
+
+            int currentMsgBottomY = m_barY - 5;
+            int topMostMsgY = currentMsgBottomY;
+
+            for (int i = endIndex; i >= startIndex; --i)
+            {
+                const auto& m = m_messages[i];
+                const int lineH = 19;
+                currentMsgBottomY -= (lineH + 2);
+                topMostMsgY = currentMsgBottomY;
+
+                int prefixW = 0, senderW = 0, textW = 0, dummyH = 0;
+                if (!m.prefix.empty()) GetTextSize(m.prefix.c_str(), prefixW, dummyH);
+                if (!m.sender.empty()) GetTextSize(m.sender.c_str(), senderW, dummyH);
+                GetTextSize(m.text.c_str(), textW, dummyH);
+
+                int totalContentW = (m.prefix.empty() ? 0 : (prefixW + 10)) +
+                                    (m.sender.empty() ? 0 : (senderW + 12)) +
+                                    textW + 18;
+                int cardW = std::min(scrW - 32, std::max(110, totalContentW));
+                int cardX = m_barX;
+                const int alpha = 245;
+
+                DrawBox(cardX - 1, currentMsgBottomY - 1, cardW + 2, lineH + 2, 0, 0, 0, 130);
+
+                if (m.isServer)
                 {
-                    idx++;
-                    while (idx < m.text.length() && (m.text[idx] == ' ' || m.text[idx] == '\t'))
-                        idx++;
-                    safeRenderText = m.text.substr(idx);
-                    pDrawMsg = safeRenderText.c_str();
+                    DrawBox(cardX, currentMsgBottomY, cardW, lineH, 22, 15, 8, 215);
+                    DrawBox(cardX, currentMsgBottomY, cardW, 1, 255, 175, 35, 235);
+                    DrawBox(cardX, currentMsgBottomY + lineH - 1, cardW, 1, 65, 42, 16, 140);
+                    DrawBox(cardX, currentMsgBottomY, 2, lineH, 255, 185, 45, alpha);
+
+                    int posX = cardX + 7;
+                    int textY = currentMsgBottomY + (lineH - 13) / 2;
+
+                    if (!m.prefix.empty())
+                    {
+                        int badgePad = 3;
+                        int badgeW = prefixW + (badgePad * 2);
+                        int badgeH = lineH - 4;
+                        int badgeY = currentMsgBottomY + 2;
+
+                        DrawBox(posX, badgeY, badgeW, badgeH, 65, 38, 8, 220);
+                        DrawBox(posX, badgeY, badgeW, 1, 255, 175, 35, 240);
+                        DrawTextWithShadow(posX + badgePad, textY, m.prefix.c_str(), 1.0f, 0.84f, 0.35f);
+                        posX += badgeW + 6;
+                    }
+
+                    if (!m.sender.empty())
+                    {
+                        DrawTextWithShadow(posX, textY, m.sender.c_str(), 1.0f, 0.88f, 0.65f);
+                        posX += senderW + 1;
+                        DrawTextWithShadow(posX, textY, ":", 0.90f, 0.75f, 0.40f);
+                        posX += 6;
+                    }
+
+                    DrawTextWithShadow(posX, textY, m.text.c_str(), 1.0f, 0.98f, 0.94f);
+                }
+                else if (m.isCommand)
+                {
+                    DrawBox(cardX, currentMsgBottomY, cardW, lineH, 6, 6, 9, 215);
+                    DrawBox(cardX, currentMsgBottomY, cardW, 1, 75, 80, 90, 160);
+                    DrawBox(cardX, currentMsgBottomY + lineH - 1, cardW, 1, 30, 32, 38, 140);
+                    DrawBox(cardX, currentMsgBottomY, 2, lineH, 130, 135, 145, alpha);
+
+                    int posX = cardX + 7;
+                    int textY = currentMsgBottomY + (lineH - 13) / 2;
+
+                    if (!m.prefix.empty())
+                    {
+                        int badgePad = 3;
+                        int badgeW = prefixW + (badgePad * 2);
+                        int badgeH = lineH - 4;
+                        int badgeY = currentMsgBottomY + 2;
+
+                        DrawBox(posX, badgeY, badgeW, badgeH, 20, 20, 26, 220);
+                        DrawBox(posX, badgeY, badgeW, 1, 70, 75, 85, 240);
+                        DrawTextWithShadow(posX + badgePad, textY, m.prefix.c_str(), 0.85f, 0.88f, 0.92f);
+                        posX += badgeW + 6;
+                    }
+
+                    if (!m.sender.empty())
+                    {
+                        DrawTextWithShadow(posX, textY, m.sender.c_str(), 0.85f, 0.88f, 0.92f);
+                        posX += senderW + 1;
+                        DrawTextWithShadow(posX, textY, ":", 0.70f, 0.73f, 0.78f);
+                        posX += 6;
+                    }
+
+                    DrawTextWithShadow(posX, textY, m.text.c_str(), 0.98f, 0.98f, 1.0f);
+                }
+                else if (m.isTeam)
+                {
+                    DrawBox(cardX, currentMsgBottomY, cardW, lineH, 8, 22, 14, 215);
+                    DrawBox(cardX, currentMsgBottomY, cardW, 1, 46, 213, 115, 235);
+                    DrawBox(cardX, currentMsgBottomY + lineH - 1, cardW, 1, 46, 213, 115, 110);
+                    DrawBox(cardX, currentMsgBottomY, 2, lineH, 46, 213, 115, alpha);
+
+                    int posX = cardX + 7;
+                    int textY = currentMsgBottomY + (lineH - 13) / 2;
+
+                    if (!m.prefix.empty())
+                    {
+                        int badgePad = 3;
+                        int badgeW = prefixW + (badgePad * 2);
+                        int badgeH = lineH - 4;
+                        int badgeY = currentMsgBottomY + 2;
+
+                        DrawBox(posX, badgeY, badgeW, badgeH, 18, 75, 38, 210);
+                        DrawBox(posX, badgeY, badgeW, 1, 46, 213, 115, 230);
+                        DrawTextWithShadow(posX + badgePad, textY, m.prefix.c_str(), 0.40f, 1.0f, 0.60f);
+                        posX += badgeW + 6;
+                    }
+
+                    if (!m.sender.empty())
+                    {
+                        DrawTextWithShadow(posX, textY, m.sender.c_str(), 0.35f, 1.0f, 0.55f);
+                        posX += senderW + 1;
+                        DrawTextWithShadow(posX, textY, ":", 0.85f, 0.88f, 0.92f);
+                        posX += 6;
+                    }
+
+                    std::string tempOut;
+                    const char* pDrawMsg = GetCleanBody(m.sender, m.text, tempOut);
+                    DrawTextWithShadow(posX, textY, pDrawMsg, 0.96f, 0.97f, 1.0f);
+                }
+                else
+                {
+                    DrawBox(cardX, currentMsgBottomY, cardW, lineH, 10, 14, 22, 215);
+                    DrawBox(cardX, currentMsgBottomY, cardW, 1, 255, 255, 255, 45);
+                    DrawBox(cardX, currentMsgBottomY, 2, lineH,
+                            static_cast<int>(m.r * 255), static_cast<int>(m.g * 255), static_cast<int>(m.b * 255), alpha);
+
+                    int posX = cardX + 7;
+                    int textY = currentMsgBottomY + (lineH - 13) / 2;
+
+                    if (!m.prefix.empty())
+                    {
+                        int badgePad = 3;
+                        int badgeW = prefixW + (badgePad * 2);
+                        int badgeH = lineH - 4;
+                        int badgeY = currentMsgBottomY + 2;
+
+                        int bgR = static_cast<int>(m.r * 60);
+                        int bgG = static_cast<int>(m.g * 60);
+                        int bgB = static_cast<int>(m.b * 60);
+                        int borderR = static_cast<int>(m.r * 255);
+                        int borderG = static_cast<int>(m.g * 255);
+                        int borderB = static_cast<int>(m.b * 255);
+
+                        DrawBox(posX, badgeY, badgeW, badgeH, bgR, bgG, bgB, 210);
+                        DrawBox(posX, badgeY, badgeW, 1, borderR, borderG, borderB, 230);
+                        DrawTextWithShadow(posX + badgePad, textY, m.prefix.c_str(), 0.90f, 0.95f, 1.0f);
+                        posX += badgeW + 6;
+                    }
+
+                    if (!m.sender.empty())
+                    {
+                        DrawTextWithShadow(posX, textY, m.sender.c_str(), m.r, m.g, m.b);
+                        posX += senderW + 1;
+                        DrawTextWithShadow(posX, textY, ":", 0.85f, 0.88f, 0.92f);
+                        posX += 6;
+                    }
+
+                    std::string tempOut;
+                    const char* pDrawMsg = GetCleanBody(m.sender, m.text, tempOut);
+                    DrawTextWithShadow(posX, textY, pDrawMsg, 0.96f, 0.97f, 1.0f);
                 }
             }
-        }
-        if (pDrawMsg[0] == ':')
-        {
-            size_t idx = 1;
-            while (pDrawMsg[idx] == ' ' || pDrawMsg[idx] == '\t')
-                idx++;
-            safeRenderText = pDrawMsg + idx;
-            pDrawMsg = safeRenderText.c_str();
-        }
 
-        DrawTextWithShadow(posX, textY, pDrawMsg, 0.96f, 0.97f, 1.0f);
-        drawnPlayerCount++;
+            // Scrollbar Track & Thumb
+            if (maxScroll > 0)
+            {
+                int trackX = m_barX + m_barW + 5;
+                int trackTop = topMostMsgY;
+                int trackBottom = m_barY - 5;
+                int trackH = trackBottom - trackTop;
+
+                if (trackH > 20)
+                {
+                    DrawBox(trackX, trackTop, 3, trackH, 255, 255, 255, 30);
+                    int thumbH = std::max(14, (trackH * maxVisible) / totalMessages);
+                    float scrollFrac = static_cast<float>(m_scrollOffset) / static_cast<float>(maxScroll);
+                    int thumbY = (trackBottom - thumbH) - static_cast<int>(scrollFrac * (trackH - thumbH));
+                    int tR = (m_mode == ModernChatMode::SayTeam) ? 46 : 0;
+                    int tG = (m_mode == ModernChatMode::SayTeam) ? 213 : 220;
+                    int tB = (m_mode == ModernChatMode::SayTeam) ? 115 : 255;
+                    DrawBox(trackX, thumbY, 3, thumbH, tR, tG, tB, 230);
+                }
+            }
+
+            // Floating History Badge when user scrolled back (m_scrollOffset > 0)
+            if (m_scrollOffset > 0)
+            {
+                int badgeH = 17;
+                int badgeY = topMostMsgY - badgeH - 3;
+                int badgeW = std::min(m_barW, 320);
+                DrawBox(m_barX - 1, badgeY - 1, badgeW + 2, badgeH + 2, 0, 0, 0, 140);
+                DrawBox(m_barX, badgeY, badgeW, badgeH, 35, 25, 10, 225);
+                DrawBox(m_barX, badgeY, badgeW, 1, 255, 185, 45, 240);
+                DrawBox(m_barX, badgeY + badgeH - 1, badgeW, 1, 75, 50, 15, 180);
+
+                char scrollInfo[64]{};
+                std::snprintf(scrollInfo, sizeof(scrollInfo),
+                    "^ [ -%d / %d ] SCROLL DOWN FOR LATEST ^", m_scrollOffset, totalMessages);
+                DrawTextWithShadow(m_barX + 8, badgeY + 2, scrollInfo, 1.0f, 0.85f, 0.35f);
+            }
+        }
     }
 
     // =========================================================================
@@ -2028,9 +2281,21 @@ void ModernChat::Draw(int scrW, int scrH)
     int countW = 0;
     GetTextSize(countBuf, countW, dummyH);
 
-    DrawTextWithShadow(m_barX + 8, helpY + 1,
-        "[Enter] Send   *   [Esc] Cancel   *   [Tab] Switch Channel",
-        0.70f, 0.74f, 0.82f);
+    const int totalMessages = static_cast<int>(m_messages.size());
+    if (m_scrollOffset > 0)
+    {
+        char scrollHelp[128]{};
+        std::snprintf(scrollHelp, sizeof(scrollHelp),
+            "[Wheel] -%d / %d   *   [L-Click / Enter] Send   *   [R-Click / Esc] Cancel",
+            m_scrollOffset, totalMessages);
+        DrawTextWithShadow(m_barX + 8, helpY + 1, scrollHelp, 1.0f, 0.85f, 0.35f);
+    }
+    else
+    {
+        DrawTextWithShadow(m_barX + 8, helpY + 1,
+            "[L-Click / Enter] Send   *   [R-Click / Esc] Cancel   *   [Wheel] 20 Msg   *   [Tab] Mode",
+            0.70f, 0.74f, 0.82f);
+    }
 
     float countR = (m_buffer.size() > 100) ? 1.0f : 0.50f;
     float countG = (m_buffer.size() > 100) ? 0.35f : 0.75f;
