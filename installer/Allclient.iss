@@ -49,13 +49,13 @@ Source: "runtime\vc_redist.x64.exe"; Flags: dontcopy
 Source: "runtime\vcredist2010_x86.exe"; Flags: dontcopy
 Source: "runtime\vcredist2010_x64.exe"; Flags: dontcopy
 ; 1. Base files excluding maps and user config (so custom maps are never overwritten)
-Source: "{#SourceRoot}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "cstrike\maps\*,cstrike\userconfig.cfg,backups\*,cstrike_downloads\*,crashes\*,htmlcache\*,*.log,*.mdmp,debug.log,install.bat,unins000.exe,unins000.dat,*.bak*,*.bak_gameland*,update\*,demos\*,videos\*,*.pdb,*.git*,build-info.txt,hitbox_vis.asi*,*.asi.disabled,auto_launcher_tests.exe,allclient-install.ini,gameland_license.dat,client_tags.txt"
+Source: "{#SourceRoot}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "cstrike\maps\*,cstrike\userconfig.cfg,backups\*,cstrike_downloads\*,crashes\*,htmlcache\*,*.log,*.mdmp,debug.log,install.bat,unins000.exe,unins000.dat,*.bak*,*.bak_gameland*,update\*,demos\*,videos\*,*.pdb,*.git*,build-info.txt,hitbox_vis.asi*,*.asi.disabled,auto_launcher_tests.exe,allclient-install.ini,gameland_license.dat,client_tags.txt,*steam_autogen_id.dat*,*steam_id.ini*,*steam_auth.log*"
 ; 2. Game maps - NEVER overwrite existing maps! Custom and downloaded maps are 100% preserved
 Source: "{#SourceRoot}\cstrike\maps\*"; DestDir: "{app}\cstrike\maps"; Flags: onlyifdoesntexist recursesubdirs createallsubdirs; Excludes: "*.log,*.bak*,*.bak_gameland*"
 ; 3. User config template - only install if not already existing
 Source: "{#SourceRoot}\cstrike\userconfig.cfg"; DestDir: "{app}\cstrike"; Flags: onlyifdoesntexist;
 ; 4. Overlay latest compiled binaries and configs
-Source: "{#BinaryRoot}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "cstrike\maps\*,*.log,*.mdmp,debug.log,hitbox_vis.asi*,*.asi.disabled,auto_launcher_tests.exe,allclient-install.ini,*.pdb,*.git*,build-info.txt,*.bak*,*.bak_gameland*,gameland_license.dat,client_tags.txt"
+Source: "{#BinaryRoot}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "cstrike\maps\*,*.log,*.mdmp,debug.log,hitbox_vis.asi*,*.asi.disabled,auto_launcher_tests.exe,allclient-install.ini,*.pdb,*.git*,build-info.txt,*.bak*,*.bak_gameland*,gameland_license.dat,client_tags.txt,*steam_autogen_id.dat*,*steam_id.ini*,*steam_auth.log*"
 
 [INI]
 Filename: "{app}\allclient-install.ini"; Section: "Allclient"; Key: "Schema"; String: "1"

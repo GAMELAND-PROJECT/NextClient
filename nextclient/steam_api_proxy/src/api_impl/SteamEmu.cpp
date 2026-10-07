@@ -1,5 +1,6 @@
 #include "SteamEmu.h"
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <ctime>
 
@@ -54,15 +55,22 @@ namespace SteamEmu
                 if (fread(&saved, sizeof(saved), 1, f) == 1 && saved >= 10000000 && saved <= 0x7FFFFFFF)
                 {
                     fclose(f);
-                    g_AccountID = saved;
-                    g_SteamID = CSteamID(g_AccountID, k_EUniversePublic, k_EAccountTypeIndividual);
-                    return;
+                    // Discard the buggy hardcoded ID so affected clients get a fresh unique ID
+                    if (saved != 1792139526)
+                    {
+                        g_AccountID = saved;
+                        g_SteamID = CSteamID(g_AccountID, k_EUniversePublic, k_EAccountTypeIndividual);
+                        return;
+                    }
                 }
-                fclose(f);
+                else
+                {
+                    fclose(f);
+                }
             }
         }
 
-        // 2. Hardware Fingerprinting (Unique per PC in GameNet)
+        // 2. Hardware Fingerprinting (Unique per PC)
 #ifdef _WIN32
         DWORD volSerial = 0;
         GetVolumeInformationA("C:\\", NULL, 0, &volSerial, NULL, NULL, NULL, 0);
@@ -77,9 +85,24 @@ namespace SteamEmu
             RegCloseKey(hKey);
         }
 
+        char installId[128] = { 0 };
+        hKey = NULL;
+        if (RegOpenKeyExA(HKEY_CURRENT_USER, "Software\\NextClient", 0, KEY_READ, &hKey) == ERROR_SUCCESS ||
+            RegOpenKeyExA(HKEY_LOCAL_MACHINE, "Software\\NextClient", 0, KEY_READ, &hKey) == ERROR_SUCCESS)
+        {
+            DWORD dwType = REG_SZ;
+            DWORD dwSize = sizeof(installId) - 1;
+            RegQueryValueExA(hKey, "InstallID", NULL, &dwType, (LPBYTE)installId, &dwSize);
+            RegCloseKey(hKey);
+        }
+
         char computerName[MAX_COMPUTERNAME_LENGTH + 1] = { 0 };
         DWORD compSize = sizeof(computerName);
         GetComputerNameA(computerName, &compSize);
+
+        char userName[256] = { 0 };
+        DWORD userSize = sizeof(userName);
+        GetUserNameA(userName, &userSize);
 
         // FNV-1a 64-bit hash
         uint64_t hash = 14695981039346656037ULL;
@@ -91,14 +114,63 @@ namespace SteamEmu
             }
         };
 
-        mix(&volSerial, sizeof(volSerial));
+        if (volSerial != 0)
+            mix(&volSerial, sizeof(volSerial));
         if (machineGuid[0])
             mix(machineGuid, strlen(machineGuid));
+        if (installId[0])
+            mix(installId, strlen(installId));
         if (computerName[0])
             mix(computerName, strlen(computerName));
+        if (userName[0])
+            mix(userName, strlen(userName));
 
-        uint32_t accId = 1792139526; // Fixed target: STEAM_0:0:896069763
+        // Network adapters (MAC address)
+        HMODULE hIphlp = LoadLibraryA("iphlpapi.dll");
+        if (hIphlp)
+        {
+            typedef DWORD (WINAPI *GetAdaptersInfo_t)(void*, PULONG);
+            auto pGetAdaptersInfo = (GetAdaptersInfo_t)GetProcAddress(hIphlp, "GetAdaptersInfo");
+            if (pGetAdaptersInfo)
+            {
+                ULONG outBufLen = 0;
+                DWORD ret = pGetAdaptersInfo(nullptr, &outBufLen);
+                if ((ret == ERROR_BUFFER_OVERFLOW || ret == 111) && outBufLen > 0 && outBufLen < 65536)
+                {
+                    void* pBuf = malloc(outBufLen);
+                    if (pBuf)
+                    {
+                        if (pGetAdaptersInfo(pBuf, &outBufLen) == ERROR_SUCCESS)
+                        {
+                            mix(pBuf, outBufLen);
+                        }
+                        free(pBuf);
+                    }
+                }
+            }
+            FreeLibrary(hIphlp);
+        }
+
+        // If hash was somehow unaffected, add high-resolution counter entropy
+        if (hash == 14695981039346656037ULL)
+        {
+            LARGE_INTEGER qpc;
+            QueryPerformanceCounter(&qpc);
+            mix(&qpc.QuadPart, sizeof(qpc.QuadPart));
+        }
+
+        uint32_t accId = (uint32_t)(hash ^ (hash >> 32));
+#else
+        uint32_t accId = 12345678;
 #endif
+
+        accId &= 0x7FFFFFFF;
+        if (accId < 10000000)
+            accId += 10000000;
+
+        // Ensure we never land on the buggy hardcoded ID
+        if (accId == 1792139526)
+            accId = 1792139527;
 
         g_AccountID = accId;
         g_SteamID = CSteamID(g_AccountID, k_EUniversePublic, k_EAccountTypeIndividual);
@@ -111,7 +183,12 @@ namespace SteamEmu
             fwrite(&g_AccountID, sizeof(g_AccountID), 1, f);
             fclose(f);
         }
-        else if (fopen_s(&f, "steam_autogen_id.dat", "wb") == 0 && f)
+        if (fopen_s(&f, "steam_autogen_id.dat", "wb") == 0 && f)
+        {
+            fwrite(&g_AccountID, sizeof(g_AccountID), 1, f);
+            fclose(f);
+        }
+        if (fopen_s(&f, "cstrike\\steam_autogen_id.dat", "wb") == 0 && f)
         {
             fwrite(&g_AccountID, sizeof(g_AccountID), 1, f);
             fclose(f);

@@ -63,68 +63,26 @@ void SetSigHandlers()
 #endif
 
 #ifdef _WINDOWS
-static HMODULE g_hSmartSteamEmu = nullptr;
-
-static void TryLoadSmartSteamEmu()
+static void SyncSmartSteamEmuConfig()
 {
-    if (g_hSmartSteamEmu)
-        return;
-
     const wchar_t* candidates[] = {
-        L"platform\\steam\\games\\SmartEmu\\SmartSteamEmu\\SmartSteamEmu.dll",
-        L"platform\\steam\\games\\SmartEmu2\\SmartSteamEmu\\SmartSteamEmu.dll",
-        L"SmartSteamEmu.dll"
+        L"platform\\steam\\games\\SmartEmu\\SmartSteamEmu\\SmartSteamEmu.ini",
+        L"platform\\steam\\games\\SmartEmu\\SmartSteamEmu\\launcher.ini",
+        L"platform\\steam\\games\\SmartEmu2\\SmartSteamEmu\\SmartSteamEmu.ini",
+        L"platform\\steam\\games\\SmartEmu2\\SmartSteamEmu\\launcher.ini"
     };
+
+    uint64_t fullSteamId = SteamEmu::GetSteamID().ConvertToUint64();
+    wchar_t idBuf[32];
+    swprintf_s(idBuf, L"%llu", fullSteamId);
 
     for (const wchar_t* path : candidates)
     {
-        if (GetFileAttributesW(path) != INVALID_FILE_ATTRIBUTES)
+        wchar_t fullPath[MAX_PATH] = { 0 };
+        if (GetFullPathNameW(path, MAX_PATH, fullPath, nullptr))
         {
-            // Sync SteamID to SmartSteamEmu.ini and launcher.ini so SSE uses the exact same SteamID as our server auth ticket
-            uint64_t fullSteamId = SteamEmu::GetSteamID().ConvertToUint64();
-            wchar_t iniPath[MAX_PATH] = { 0 };
-            wcscpy_s(iniPath, path);
-            wchar_t* lastSlash = wcsrchr(iniPath, L'\\');
-            if (lastSlash)
-            {
-                *(lastSlash + 1) = L'\0';
-                std::wstring sseIni = std::wstring(iniPath) + L"SmartSteamEmu.ini";
-                std::wstring launcherIni = std::wstring(iniPath) + L"launcher.ini";
-
-                wchar_t idBuf[32];
-                swprintf_s(idBuf, L"%llu", fullSteamId);
-
-                WritePrivateProfileStringW(L"SmartSteamEmu", L"SteamIdGeneration", L"Manual", sseIni.c_str());
-                WritePrivateProfileStringW(L"SmartSteamEmu", L"ManualSteamId", idBuf, sseIni.c_str());
-                WritePrivateProfileStringW(L"SmartSteamEmu", L"EnableInGameVoice", L"1", sseIni.c_str());
-
-                WritePrivateProfileStringW(L"SmartSteamEmu", L"SteamIdGeneration", L"Manual", launcherIni.c_str());
-                WritePrivateProfileStringW(L"SmartSteamEmu", L"ManualSteamId", idBuf, launcherIni.c_str());
-                WritePrivateProfileStringW(L"SmartSteamEmu", L"EnableInGameVoice", L"1", launcherIni.c_str());
-            }
-
-            g_hSmartSteamEmu = LoadLibraryW(path);
-            if (g_hSmartSteamEmu)
-            {
-                typedef bool (*SteamAPI_Init_Fn)();
-                typedef ISteamUser* (*SteamUser_Fn)();
-
-                SteamAPI_Init_Fn pInit = (SteamAPI_Init_Fn)GetProcAddress(g_hSmartSteamEmu, "SteamAPI_Init");
-                SteamUser_Fn pUser = (SteamUser_Fn)GetProcAddress(g_hSmartSteamEmu, "SteamUser");
-
-                if (pInit)
-                    pInit();
-
-                if (pUser)
-                {
-                    ISteamUser* sseUser = pUser();
-                    if (sseUser)
-                    {
-                        g_SteamUserVoiceProxy.SetOriginal(sseUser);
-                    }
-                }
-                break;
-            }
+            WritePrivateProfileStringW(L"SmartSteamEmu", L"SteamIdGeneration", L"Manual", fullPath);
+            WritePrivateProfileStringW(L"SmartSteamEmu", L"ManualSteamId", idBuf, fullPath);
         }
     }
 }
@@ -139,7 +97,7 @@ void Initialize()
     SteamEmu::Initialize();
 
 #ifdef _WINDOWS
-    TryLoadSmartSteamEmu();
+    SyncSmartSteamEmuConfig();
 #endif
 
 #ifndef _WINDOWS
@@ -165,10 +123,7 @@ void Initialize()
 
 void UnInitialize()
 {
-    if (!g_SteamUserVoiceProxy.GetOriginal())
-    {
-        VoiceRecorder::GetInstance().Shutdown();
-    }
+    VoiceRecorder::GetInstance().Shutdown();
     g_bInitialized = false;
     g_ExceptionCallback = nullptr;
 }

@@ -193,6 +193,10 @@ if (NOT NEXTCLIENT_BUILD_TESTS)
                 COMMAND ${CMAKE_COMMAND} -E rm -f ${NEXTCLIENT_INSTALL_DIR}/crashpad_handler.exe
                 COMMAND ${CMAKE_COMMAND} -E rm -f ${NEXTCLIENT_INSTALL_DIR}/platform/defaults/MasterServer.vdf
                 COMMAND ${CMAKE_COMMAND} -E rm -f ${NEXTCLIENT_INSTALL_DIR}/platform/defaults/backend.json
+                COMMAND ${CMAKE_COMMAND} -E rm -f ${NEXTCLIENT_INSTALL_DIR}/platform/steam/steam_autogen_id.dat
+                COMMAND ${CMAKE_COMMAND} -E rm -f ${NEXTCLIENT_INSTALL_DIR}/platform/steam/steam_auth.log
+                COMMAND ${CMAKE_COMMAND} -E rm -f ${NEXTCLIENT_INSTALL_DIR}/steam_autogen_id.dat
+                COMMAND ${CMAKE_COMMAND} -E rm -f ${NEXTCLIENT_INSTALL_DIR}/cstrike/steam_autogen_id.dat
         )
 
         if (USE_PROFILER)
