@@ -1,11 +1,16 @@
 #include "SteamUserProxy.h"
+#include "SteamEmu.h"
 #include "../voice/SpeexVoiceManager.h"
+#include "../voice/VoiceRecorder.h"
+#include <cstring>
+#include <cstdio>
 
 #ifdef _WIN32
 #include <windows.h>
 
 static int DetectCallerClientIndex(const void* pExpectedCompressed, uint32 cbExpectedCompressed)
 {
+    (void)cbExpectedCompressed;
 #if defined(_M_IX86)
     __try
     {
@@ -22,18 +27,11 @@ static int DetectCallerClientIndex(const void* pExpectedCompressed, uint32 cbExp
             if (IsBadReadPtr(reinterpret_cast<void*>(cur_ebp), 32))
                 break;
 
-            // In hw.dll!Voice_AddIncomingData:
-            // [cur_ebp + 8]  = clientIndex (int)
-            // [cur_ebp + 12] = pCompressed (void*)
-            // Note: [cur_ebp + 16] was originally cbCompressed, but hw.dll zeroes it
-            // before calling DecompressVoice (mov [ebp+10h], ebx) and reuses it as
-            // &nBytesWritten. Therefore we must only verify cand_ptr == pExpectedCompressed.
             const void* cand_ptr = *reinterpret_cast<const void**>(cur_ebp + 12);
 
             if (cand_ptr == pExpectedCompressed)
             {
                 int idx = *reinterpret_cast<int*>(cur_ebp + 8);
-                // 156 / 0x9C / -100 is local microphone loopback
                 if (idx == 156 || idx == 0x9C || idx == -100)
                 {
                     return SpeexVoiceManager::kLoopbackChannel;
@@ -56,15 +54,120 @@ static int DetectCallerClientIndex(const void* pExpectedCompressed, uint32 cbExp
 #else
 static int DetectCallerClientIndex(const void* pExpectedCompressed, uint32 cbExpectedCompressed)
 {
+    (void)pExpectedCompressed;
+    (void)cbExpectedCompressed;
     return 0;
 }
 #endif
 
 SteamUserVoiceProxy g_SteamUserVoiceProxy;
 
-SteamUserVoiceProxy::SteamUserVoiceProxy()
-    : m_pOrig(nullptr)
+int SteamUserVoiceProxy::InitiateGameConnection(
+    void *pAuthBlob,
+    int cbMaxAuthBlob,
+    CSteamID steamIDGameServer,
+    uint32 unIPServer,
+    uint16 usPortServer,
+    bool bSecure
+)
 {
+    (void)steamIDGameServer;
+    (void)bSecure;
+
+    if (!pAuthBlob || cbMaxAuthBlob < (int)sizeof(SteamEmuAuthTicket))
+        return 0;
+
+    int res = (int)SteamEmu::GenerateAuthTicket(pAuthBlob, (size_t)cbMaxAuthBlob, unIPServer, usPortServer);
+
+    FILE* f = fopen("platform\\steam\\steam_auth.log", "a");
+    if (!f)
+        f = fopen("steam_auth.log", "a");
+    if (f)
+    {
+        uint32_t acc = SteamEmu::GetAccountID();
+        fprintf(f, "[SteamEmu] InitiateGameConnection: unIPServer=0x%08X usPortServer=%u TicketLen=%d SteamID=STEAM_0:%u:%u\n",
+            unIPServer, usPortServer, res, acc & 1, acc / 2);
+        fclose(f);
+    }
+
+    return res;
+}
+
+bool SteamUserVoiceProxy::GetUserDataFolder(char *pchBuffer, int cubBuffer)
+{
+    if (!pchBuffer || cubBuffer <= 0)
+        return false;
+
+#ifdef _WIN32
+    strncpy_s(pchBuffer, cubBuffer, "cstrike", _TRUNCATE);
+#else
+    strncpy(pchBuffer, "cstrike", cubBuffer);
+    pchBuffer[cubBuffer - 1] = '\0';
+#endif
+    return true;
+}
+
+HAuthTicket SteamUserVoiceProxy::GetAuthSessionTicket(void *pTicket, int cbMaxTicket, uint32 *pcbTicket)
+{
+    if (!pTicket || cbMaxTicket < (int)sizeof(SteamEmuAuthTicket))
+    {
+        if (pcbTicket) *pcbTicket = 0;
+        return k_HAuthTicketInvalid;
+    }
+
+    size_t sz = SteamEmu::GenerateAuthTicket(pTicket, (size_t)cbMaxTicket, 0, 0);
+    if (pcbTicket)
+        *pcbTicket = (uint32)sz;
+
+    return 1;
+}
+
+void SteamUserVoiceProxy::StartVoiceRecording()
+{
+    VoiceRecorder::GetInstance().StartRecording();
+}
+
+void SteamUserVoiceProxy::StopVoiceRecording()
+{
+    VoiceRecorder::GetInstance().StopRecording();
+}
+
+EVoiceResult SteamUserVoiceProxy::GetAvailableVoice(
+    uint32 *pcbCompressed,
+    uint32 *pcbUncompressed,
+    uint32 nUncompressedVoiceDesiredSampleRate
+)
+{
+    return VoiceRecorder::GetInstance().GetAvailableVoice(
+        pcbCompressed,
+        pcbUncompressed,
+        nUncompressedVoiceDesiredSampleRate
+    );
+}
+
+EVoiceResult SteamUserVoiceProxy::GetVoice(
+    bool bWantCompressed,
+    void *pDestBuffer,
+    uint32 cbDestBufferSize,
+    uint32 *nBytesWritten,
+    bool bWantUncompressed,
+    void *pUncompressedDestBuffer,
+    uint32 cbUncompressedDestBufferSize,
+    uint32 *nUncompressBytesWritten,
+    uint32 nUncompressedVoiceDesiredSampleRate
+)
+{
+    return VoiceRecorder::GetInstance().GetVoice(
+        bWantCompressed,
+        pDestBuffer,
+        cbDestBufferSize,
+        nBytesWritten,
+        bWantUncompressed,
+        pUncompressedDestBuffer,
+        cbUncompressedDestBufferSize,
+        nUncompressBytesWritten,
+        nUncompressedVoiceDesiredSampleRate
+    );
 }
 
 EVoiceResult SteamUserVoiceProxy::DecompressVoice(
@@ -82,45 +185,7 @@ EVoiceResult SteamUserVoiceProxy::DecompressVoice(
     if (!pCompressed || cbCompressed == 0 || !pDestBuffer || cbDestBufferSize == 0)
         return k_EVoiceResultNoData;
 
-    // 1. Primary path: Attempt original Steamworks Voice decompression (if official Steam is running)
-    EVoiceResult res = k_EVoiceResultDataCorrupted;
-    if (m_pOrig)
-    {
-#if defined(_WIN32) && defined(_MSC_VER)
-        __try
-        {
-            res = m_pOrig->DecompressVoice(
-                pCompressed,
-                cbCompressed,
-                pDestBuffer,
-                cbDestBufferSize,
-                nBytesWritten,
-                nDesiredSampleRate
-            );
-        }
-        __except (EXCEPTION_EXECUTE_HANDLER)
-        {
-            res = k_EVoiceResultDataCorrupted;
-        }
-#else
-        res = m_pOrig->DecompressVoice(
-            pCompressed,
-            cbCompressed,
-            pDestBuffer,
-            cbDestBufferSize,
-            nBytesWritten,
-            nDesiredSampleRate
-        );
-#endif
-    }
-
-    // If native Steam Voice successfully decoded audio bytes, return immediately
-    if (res == k_EVoiceResultOK && nBytesWritten && *nBytesWritten > 0)
-    {
-        return k_EVoiceResultOK;
-    }
-
-    // 2. Universal Voice Decoder Path:
+    // Universal Voice Decoder Path:
     // Decodes Opus, Silk, Speex (builds 3248, 4554, ReVoice, Steam) with per-player isolated channels
     int clientIndex = DetectCallerClientIndex(pCompressed, cbCompressed);
     uint32 voiceWritten = 0;
@@ -163,5 +228,5 @@ EVoiceResult SteamUserVoiceProxy::DecompressVoice(
         return k_EVoiceResultOK;
     }
 
-    return res;
+    return k_EVoiceResultDataCorrupted;
 }

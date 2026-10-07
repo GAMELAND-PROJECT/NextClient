@@ -937,31 +937,34 @@ static std::string GetActiveDemoOrMapName()
 
         if (down)
         {
-            if (pszCurrentBinding != nullptr)
+            bool isSayTeam = false;
+            bool isSayAll = false;
+
+            if (pszCurrentBinding != nullptr && *pszCurrentBinding != '\0')
             {
-                if (BindingEquals(pszCurrentBinding, "messagemode2"))
-                {
-                    ModernChat::Instance().Open(ModernChatMode::SayTeam);
-                    return 0;
-                }
-                if (BindingEquals(pszCurrentBinding, "messagemode"))
-                {
-                    ModernChat::Instance().Open(ModernChatMode::SayAll);
-                    return 0;
-                }
+                if (BindingEquals(pszCurrentBinding, "messagemode2") || BindingEquals(pszCurrentBinding, "say_team"))
+                    isSayTeam = true;
+                else if (BindingEquals(pszCurrentBinding, "messagemode") || BindingEquals(pszCurrentBinding, "say"))
+                    isSayAll = true;
             }
-            else
+
+            if (!isSayTeam && !isSayAll)
             {
                 if (keynum == 'u' || keynum == 'U')
-                {
-                    ModernChat::Instance().Open(ModernChatMode::SayTeam);
-                    return 0;
-                }
-                if (keynum == 'y' || keynum == 'Y')
-                {
-                    ModernChat::Instance().Open(ModernChatMode::SayAll);
-                    return 0;
-                }
+                    isSayTeam = true;
+                else if (keynum == 'y' || keynum == 'Y')
+                    isSayAll = true;
+            }
+
+            if (isSayTeam)
+            {
+                ModernChat::Instance().Open(ModernChatMode::SayTeam);
+                return 0;
+            }
+            if (isSayAll)
+            {
+                ModernChat::Instance().Open(ModernChatMode::SayAll);
+                return 0;
             }
         }
 
@@ -976,7 +979,7 @@ static std::string GetActiveDemoOrMapName()
 
             if (GameVideoRecorder::Instance().IsHighlightAwaitingConfirm())
             {
-                if (BindingEquals(pszCurrentBinding, "slot1") || keynum == '1' || keynum == 13) // 1 or Enter
+                if (BindingEquals(pszCurrentBinding, "slot1") || keynum == '1' || keynum == 13 || keynum == 169 || keynum == 250) // 1 or Enter / NumPad Enter
                 {
                     // Direct absolute jump to mark in timestamp (NO relative dem_jump offset!)
                     const float markIn = GameVideoRecorder::Instance().GetMarkInTime();
@@ -1120,7 +1123,7 @@ static std::string GetActiveDemoOrMapName()
         const auto& demos = GameVideoRecorder::Instance().GetCachedDemos();
         if (g_SelectedDemoIndex >= 0 && g_SelectedDemoIndex < static_cast<int>(demos.size()))
         {
-            if (BindingEquals(pszCurrentBinding, "slot1") || keynum == '1' || keynum == 13) // Enter or 1
+            if (BindingEquals(pszCurrentBinding, "slot1") || keynum == '1' || keynum == 13 || keynum == 169 || keynum == 250) // Enter or 1 or NumPad Enter
             {
                 const std::string demoFile = demos[g_SelectedDemoIndex].fileName;
                 int curW = 1024, curH = 768;

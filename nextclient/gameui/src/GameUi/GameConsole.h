@@ -57,6 +57,7 @@ public:
     void SetParent(int parent);
 
     static void OnCmdCondump();
+    static void OnCmdHostMenu();
 
     void PrintfWithoutJsEvent(Color color, const std::string& msg);
     void PrintfWithoutJsEvent(Color color, const std::wstring& msg);

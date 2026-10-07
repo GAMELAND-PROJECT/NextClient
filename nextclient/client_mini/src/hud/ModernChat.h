@@ -54,6 +54,8 @@ public:
 
     int HandleKey(int down, int keynum, const char* pszCurrentBinding);
     void Draw(int scrW, int scrH);
+    void ScrollHistory(int delta);
+    [[nodiscard]] int GetMaxVisibleMessages() const;
 
 private:
     ModernChat() = default;
@@ -61,6 +63,7 @@ private:
     ModernChatMode m_mode = ModernChatMode::Closed;
     std::string m_buffer;
     double m_openTime = 0.0;
+    int m_scrollOffset = 0;
 
     std::deque<LiveChatMessage> m_messages;
 

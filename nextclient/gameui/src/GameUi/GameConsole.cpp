@@ -61,15 +61,17 @@ void CGameConsole::Initialize()
     //m_pConsole->SetParent(g_pTaskbar->GetVPanel());
 
     vgui2::surface()->GetScreenSize(swide, stall);
-    int offset = 40;
-    m_pConsole->SetBounds(
-        offset, offset,
-        std::min( swide - 2 * offset, 560 ), std::min( stall - 2 * offset, 400 ) );
+    int offset = 30;
+    int targetW = std::clamp(740, 640, swide - 2 * offset);
+    int targetH = std::clamp(540, 460, stall - 2 * offset);
+    m_pConsole->SetBounds(offset, offset, targetW, targetH);
 
     GameConsoleNext().Initialize(m_pConsole);
     m_bInitialized = true;
 
     engine->pfnAddCommand("condump", CGameConsole::OnCmdCondump);
+    engine->pfnAddCommand("hostmenu", CGameConsole::OnCmdHostMenu);
+    engine->pfnAddCommand("host", CGameConsole::OnCmdHostMenu);
 
     // This provides a 1 frame delay to display the text after the temporary buffer from the engine
     TaskCoro::RunInMainThread([this]
@@ -237,3 +239,13 @@ void CGameConsole::OnCmdCondump()
 
     g_GameConsole.m_pConsole->DumpConsoleTextToFile();
 }
+
+void CGameConsole::OnCmdHostMenu()
+{
+    GameConsole().Activate();
+    if (GameConsole().m_pConsole)
+    {
+        GameConsole().m_pConsole->ShowLanHostGuide(true);
+    }
+}
+

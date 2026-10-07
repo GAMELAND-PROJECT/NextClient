@@ -19,10 +19,16 @@ endif ()
 
 add_library(${PROJECT_NAME} SHARED
         src/api_impl/SteamAPI.cpp
+        src/api_impl/SteamEmu.cpp
+        src/api_impl/SteamEmu.h
+        src/api_impl/SteamStubs.cpp
+        src/api_impl/SteamStubs.h
         src/api_impl/SteamUserProxy.cpp
         src/api_impl/SteamUserProxy.h
         src/voice/SpeexVoiceManager.cpp
         src/voice/SpeexVoiceManager.h
+        src/voice/VoiceRecorder.cpp
+        src/voice/VoiceRecorder.h
         src/public/steam/isteamapps.h
         src/public/steam/isteambilling.h
         src/public/steam/isteamclient.h
@@ -61,6 +67,8 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
         speex::speex
         opus
         silk
+        $<$<PLATFORM_ID:Windows>:ws2_32>
+        $<$<PLATFORM_ID:Windows>:winmm>
 )
 
 if (UNIX)
