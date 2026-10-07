@@ -76,6 +76,12 @@ SpeexVoiceManager::ChannelState::~ChannelState()
         resampler_wb = nullptr;
     }
 
+    if (resampler_dyn)
+    {
+        speex_resampler_destroy(resampler_dyn);
+        resampler_dyn = nullptr;
+    }
+
     if (nb_dec)
     {
         speex_decoder_destroy(nb_dec);
@@ -122,15 +128,17 @@ void SpeexVoiceManager::ChannelState::Init()
     resampler_nb = speex_resampler_init(1, kNarrowbandRate, kGoldSrcSampleRate, 4, &err);
     resampler_wb = speex_resampler_init(1, kWidebandRate, kGoldSrcSampleRate, 4, &err);
 
-    // Opus decoder initialization (8000 Hz, 1 channel mono)
+    // Opus decoder initialization (24000 Hz default, 1 channel mono)
     int opusSize = opus_decoder_get_size(1);
     opus_dec = static_cast<OpusDecoder*>(std::malloc(opusSize));
     if (opus_dec)
     {
-        opus_decoder_init(opus_dec, 8000, 1);
+        opus_decoder_init(opus_dec, 24000, 1);
+        opus_sample_rate = 24000;
     }
     opus_seq = 0;
     opus_seq_init = false;
+
 
     // Silk decoder initialization (8000 Hz mono)
     int silkSize = 0;
@@ -191,8 +199,33 @@ void SpeexVoiceManager::ChannelState::ResetState()
     if (resampler_wb)
         speex_resampler_reset_mem(resampler_wb);
 
+    if (resampler_dyn)
+        speex_resampler_reset_mem(resampler_dyn);
+
     leftover_count = 0;
 }
+
+SpeexResamplerState* SpeexVoiceManager::ChannelState::GetResampler(int in_rate, int out_rate)
+{
+    if (in_rate <= 0 || out_rate <= 0)
+        return resampler_nb;
+
+    if (!resampler_dyn)
+    {
+        int err = 0;
+        resampler_dyn = speex_resampler_init(1, in_rate, out_rate, 4, &err);
+        resampler_in_rate = in_rate;
+        resampler_out_rate = out_rate;
+    }
+    else if (resampler_in_rate != in_rate || resampler_out_rate != out_rate)
+    {
+        speex_resampler_set_rate(resampler_dyn, in_rate, out_rate);
+        resampler_in_rate = in_rate;
+        resampler_out_rate = out_rate;
+    }
+    return resampler_dyn;
+}
+
 
 SpeexVoiceManager::SpeexVoiceManager()
 {
@@ -350,7 +383,7 @@ bool SpeexVoiceManager::DecodeVoice(
             {
                 uint32_t wireCrc = *reinterpret_cast<const uint32_t*>(pByteData + cbCompressed - 4);
                 uint32_t calcCrc = CalculateCRC32(pCompressed, cbCompressed - 4);
-                if (calcCrc == wireCrc)
+                if (calcCrc == wireCrc || op == 11 || op == 6 || op == 5)
                 {
                     isSteamP2P = true;
                 }
@@ -361,7 +394,7 @@ bool SpeexVoiceManager::DecodeVoice(
         {
             const uint8_t* pStream = pByteData + 8;
             const uint8_t* pStreamEnd = pByteData + cbCompressed - 4;
-            int streamSampleRate = kNarrowbandRate;
+            int streamSampleRate = 24000;
 
             while (pStream < pStreamEnd)
             {
@@ -378,6 +411,14 @@ bool SpeexVoiceManager::DecodeVoice(
                     }
                     streamSampleRate = *reinterpret_cast<const uint16_t*>(pStream);
                     pStream += 2;
+                    if (channel.opus_dec && (streamSampleRate == 8000 || streamSampleRate == 12000 || streamSampleRate == 16000 || streamSampleRate == 24000 || streamSampleRate == 48000))
+                    {
+                        if (channel.opus_sample_rate != streamSampleRate)
+                        {
+                            opus_decoder_init(channel.opus_dec, streamSampleRate, 1);
+                            channel.opus_sample_rate = streamSampleRate;
+                        }
+                    }
                     break;
                 }
 
@@ -425,9 +466,10 @@ bool SpeexVoiceManager::DecodeVoice(
                         {
                             int nLoss = nCurSeq - channel.opus_seq;
                             if (nLoss > 10) nLoss = 10;
-                            for (int i = 0; i < nLoss && total_pcm_samples + 160 <= kMaxPcmSamples; ++i)
+                            int lossSamples = (streamSampleRate * 20) / 1000;
+                            for (int i = 0; i < nLoss && total_pcm_samples + lossSamples <= kMaxPcmSamples; ++i)
                             {
-                                int n = opus_decode(channel.opus_dec, nullptr, 0, reinterpret_cast<opus_int16*>(&pcm_intermediate[total_pcm_samples]), 160, 0);
+                                int n = opus_decode(channel.opus_dec, nullptr, 0, reinterpret_cast<opus_int16*>(&pcm_intermediate[total_pcm_samples]), lossSamples, 0);
                                 if (n > 0) total_pcm_samples += n;
                             }
                         }
@@ -438,17 +480,19 @@ bool SpeexVoiceManager::DecodeVoice(
                         if (nPayloadSize == 0)
                         {
                             // DTX / Silence
-                            if (total_pcm_samples + 160 <= kMaxPcmSamples)
+                            int silenceSamples = (streamSampleRate * 20) / 1000;
+                            if (total_pcm_samples + silenceSamples <= kMaxPcmSamples)
                             {
-                                std::memset(&pcm_intermediate[total_pcm_samples], 0, 160 * sizeof(int16_t));
-                                total_pcm_samples += 160;
+                                std::memset(&pcm_intermediate[total_pcm_samples], 0, silenceSamples * sizeof(int16_t));
+                                total_pcm_samples += silenceSamples;
                             }
                         }
                         else
                         {
-                            if (total_pcm_samples + 480 <= kMaxPcmSamples)
+                            int maxSamples = kMaxPcmSamples - total_pcm_samples;
+                            if (maxSamples > 0)
                             {
-                                int n = opus_decode(channel.opus_dec, pOpus, nPayloadSize, reinterpret_cast<opus_int16*>(&pcm_intermediate[total_pcm_samples]), 480, 0);
+                                int n = opus_decode(channel.opus_dec, pOpus, nPayloadSize, reinterpret_cast<opus_int16*>(&pcm_intermediate[total_pcm_samples]), maxSamples, 0);
                                 if (n > 0) total_pcm_samples += n;
                             }
                         }
@@ -456,8 +500,8 @@ bool SpeexVoiceManager::DecodeVoice(
                     }
 
                     pStream += streamLen;
-                    in_sample_rate = streamSampleRate > 0 ? streamSampleRate : kNarrowbandRate;
-                    active_resampler = (in_sample_rate == kWidebandRate) ? channel.resampler_wb : channel.resampler_nb;
+                    in_sample_rate = streamSampleRate > 0 ? streamSampleRate : 24000;
+                    active_resampler = channel.GetResampler(in_sample_rate, nDesiredSampleRate);
                     break;
                 }
 
@@ -495,17 +539,19 @@ bool SpeexVoiceManager::DecodeVoice(
 
                         if (nPayloadSize == 0)
                         {
-                            if (total_pcm_samples + 160 <= kMaxPcmSamples)
+                            int silenceSamples = (streamSampleRate * 20) / 1000;
+                            if (total_pcm_samples + silenceSamples <= kMaxPcmSamples)
                             {
-                                std::memset(&pcm_intermediate[total_pcm_samples], 0, 160 * sizeof(int16_t));
-                                total_pcm_samples += 160;
+                                std::memset(&pcm_intermediate[total_pcm_samples], 0, silenceSamples * sizeof(int16_t));
+                                total_pcm_samples += silenceSamples;
                             }
                         }
                         else
                         {
-                            if (total_pcm_samples + 480 <= kMaxPcmSamples)
+                            int maxSamples = kMaxPcmSamples - total_pcm_samples;
+                            if (maxSamples > 0)
                             {
-                                int n = opus_decode(channel.opus_dec, pOpus, nPayloadSize, reinterpret_cast<opus_int16*>(&pcm_intermediate[total_pcm_samples]), 480, 0);
+                                int n = opus_decode(channel.opus_dec, pOpus, nPayloadSize, reinterpret_cast<opus_int16*>(&pcm_intermediate[total_pcm_samples]), maxSamples, 0);
                                 if (n > 0) total_pcm_samples += n;
                             }
                         }
@@ -513,10 +559,11 @@ bool SpeexVoiceManager::DecodeVoice(
                     }
 
                     pStream += streamLen;
-                    in_sample_rate = streamSampleRate > 0 ? streamSampleRate : kNarrowbandRate;
-                    active_resampler = (in_sample_rate == kWidebandRate) ? channel.resampler_wb : channel.resampler_nb;
+                    in_sample_rate = streamSampleRate > 0 ? streamSampleRate : 24000;
+                    active_resampler = channel.GetResampler(in_sample_rate, nDesiredSampleRate);
                     break;
                 }
+
 
                 case 4: // PLT_Silk
                 {

@@ -30,6 +30,7 @@ public:
 
         // Opus
         OpusDecoder* opus_dec{nullptr};
+        int opus_sample_rate{24000};
         uint16_t opus_seq{0};
         bool opus_seq_init{false};
 
@@ -40,6 +41,9 @@ public:
         // Resampling
         SpeexResamplerState* resampler_nb{nullptr};
         SpeexResamplerState* resampler_wb{nullptr};
+        SpeexResamplerState* resampler_dyn{nullptr};
+        int resampler_in_rate{0};
+        int resampler_out_rate{0};
         uint32_t last_packet_time_ms{0};
         int detected_frame_size{0};
         int16_t leftover_pcm[kMaxLeftover]{0};
@@ -52,7 +56,9 @@ public:
         void ResetState();
         void ResetOpus();
         void ResetSilk();
+        SpeexResamplerState* GetResampler(int in_rate, int out_rate);
     };
+
 
     static SpeexVoiceManager& GetInstance();
 
