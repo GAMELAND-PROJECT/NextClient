@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.21)
 project(NextClient VERSION 0.0.1)
 
-option(GAMELAND_HOME_CLIENT "Build GameLand Home Client edition (removes LAN / listen server)" OFF)
+option(GAMELAND_HOME_CLIENT "Build GameLand Home Client edition" ON)
 if (GAMELAND_HOME_CLIENT)
     add_compile_definitions(GAMELAND_HOME_CLIENT=1)
 endif ()
