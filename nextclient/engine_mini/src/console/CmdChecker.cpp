@@ -246,6 +246,15 @@ bool CmdChecker::FilterSingleCmd(const std::string_view& cmd, CommandSource comm
         return false;
     }
 
+#if defined(GAMELAND_HOME_CLIENT) && GAMELAND_HOME_CLIENT
+    // Home Client: block local listen server creation from console
+    if (EqualsIgnoreCase(cmd_name, "map") ||
+        EqualsIgnoreCase(cmd_name, "OpenCreateMultiplayerGameDialog"))
+    {
+        return false;
+    }
+#endif
+
     // Direct cheat commands: blocked under all circumstances
     if (EqualsIgnoreCase(cmd_name, "god") ||
         EqualsIgnoreCase(cmd_name, "noclip") ||

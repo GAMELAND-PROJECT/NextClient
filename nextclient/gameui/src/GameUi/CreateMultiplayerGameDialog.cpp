@@ -205,6 +205,11 @@ void CCreateMultiplayerGameDialog::SetTitle(const char *title, bool surfaceTitle
 //-----------------------------------------------------------------------------
 bool CCreateMultiplayerGameDialog::OnOK(bool applyOnly)
 {
+#if defined(GAMELAND_HOME_CLIENT) && GAMELAND_HOME_CLIENT
+    BaseClass::OnOK(applyOnly);
+    Close();
+    return false;
+#else
     BaseClass::OnOK(applyOnly);
 
     // get these values from m_pServerPage and store them temporarily
@@ -326,6 +331,7 @@ bool CCreateMultiplayerGameDialog::OnOK(bool applyOnly)
     Close();
 
     return true;
+#endif
 }
 
 //-----------------------------------------------------------------------------

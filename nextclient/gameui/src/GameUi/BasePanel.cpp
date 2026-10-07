@@ -645,10 +645,14 @@ void CBasePanel::PaintBackground(void)
     if (!m_hOptionsDialog.Get())
     {
         m_hOptionsDialog = new COptionsDialog(this);
+#if !defined(GAMELAND_HOME_CLIENT) || !GAMELAND_HOME_CLIENT
         m_hCreateMultiplayerGameDialog = new CCreateMultiplayerGameDialog(this);
+#endif
 
         PositionDialog(m_hOptionsDialog);
+#if !defined(GAMELAND_HOME_CLIENT) || !GAMELAND_HOME_CLIENT
         PositionDialog(m_hCreateMultiplayerGameDialog);
+#endif
     }
 
     if (!GameUI().IsInLevel() || g_hLoadingDialog.Get())
@@ -1095,6 +1099,12 @@ CGameMenu *CBasePanel::RecursiveLoadGameMenu(vgui2::Panel *parent, KeyValues *da
         if (cmd && (!Q_stricmp(cmd, "ConnectToRandomServer") || !Q_stricmp(cmd, "OpenHelpUrl")))
             continue;
 
+#if defined(GAMELAND_HOME_CLIENT) && GAMELAND_HOME_CLIENT
+        // Home Client: completely remove New Game from main menu root
+        if (cmd && !Q_stricmp(cmd, "OpenCreateMultiplayerGameDialog"))
+            continue;
+#endif
+
         // Never load blank separators or ghost buttons with empty label or command
         if (!cmd || !*cmd || !label || !*label)
             continue;
@@ -1314,7 +1324,11 @@ void CBasePanel::RunMenuCommand(const char *command)
     }
     else if (!Q_stricmp(command, "OpenCreateMultiplayerGameDialog"))
     {
+#if defined(GAMELAND_HOME_CLIENT) && GAMELAND_HOME_CLIENT
+        return;
+#else
         OnOpenCreateMultiplayerGameDialog();
+#endif
     }
     else if (!Q_stricmp(command, "OpenOptionsDialog"))
     {
@@ -1485,6 +1499,9 @@ void CBasePanel::OnOpenPlayerListDialog()
 
 void CBasePanel::OnOpenCreateMultiplayerGameDialog(void)
 {
+#if defined(GAMELAND_HOME_CLIENT) && GAMELAND_HOME_CLIENT
+    return;
+#else
     if (!m_hCreateMultiplayerGameDialog.Get())
     {
         m_hCreateMultiplayerGameDialog = new CCreateMultiplayerGameDialog(this);
@@ -1492,6 +1509,7 @@ void CBasePanel::OnOpenCreateMultiplayerGameDialog(void)
     }
 
     m_hCreateMultiplayerGameDialog->Activate();
+#endif
 }
 
 void CBasePanel::OnOpenDemoUploaderDialog(void)
