@@ -3,6 +3,8 @@
 #include <unordered_set>
 #include <variant>
 #include <vector>
+#include <atomic>
+#include <mutex>
 #include <steam/steam_api.h>
 
 #include "MatchmakingService.h"
@@ -22,17 +24,21 @@ namespace service::matchmaking
         int server_list_request_counter_{};
         std::unordered_map<HServerListRequest, std::variant<SteamServersListRequestData, ServerListRequestData>> server_requests_{};
         std::shared_ptr<MultiSourceQuery> source_query_{};
-std::shared_ptr<MatchmakingService> matchmaking_service_{};
-std::shared_ptr<HttpMasterClient> pinned_http_client_{};
-std::shared_ptr<FileMasterClient> pinned_cache_client_{};
-std::shared_ptr<HttpMasterClient> mix_http_client_{};
-std::shared_ptr<FileMasterClient> mix_cache_client_{};
-std::shared_ptr<taskcoro::CancellationToken> pinned_cancellation_token_{};
-std::unordered_set<uint64_t> pinned_servers_{};
-std::unordered_set<uint64_t> mix_servers_{};
-OnlineServerEndpoints online_endpoints_{};
-bool pinned_servers_initialized_{};
-bool managed_refresh_in_progress_{};
+        std::shared_ptr<MatchmakingService> matchmaking_service_{};
+        std::shared_ptr<HttpMasterClient> pinned_http_client_{};
+        std::shared_ptr<FileMasterClient> pinned_cache_client_{};
+        std::shared_ptr<HttpMasterClient> mix_http_client_{};
+        std::shared_ptr<FileMasterClient> mix_cache_client_{};
+        std::shared_ptr<taskcoro::CancellationToken> pinned_cancellation_token_{};
+        std::unordered_set<uint64_t> pinned_servers_{};
+        std::unordered_set<uint64_t> mix_servers_{};
+        OnlineServerEndpoints online_endpoints_{};
+        bool pinned_servers_initialized_{};
+        bool managed_refresh_in_progress_{};
+
+        std::atomic<uint32_t> server_query_counter_{0};
+        std::unordered_map<HServerQuery, std::shared_ptr<taskcoro::CancellationToken>> active_queries_{};
+        std::mutex active_queries_mutex_{};
 
     public:
 explicit MatchmakingSteamComp();

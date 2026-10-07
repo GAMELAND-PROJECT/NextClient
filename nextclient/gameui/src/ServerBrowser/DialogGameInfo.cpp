@@ -20,10 +20,28 @@
 #include <cstdio>
 #include <cstdlib>
 #include <steam/steam_api.h>
+#include <next_engine_mini/engine_mini.h>
 
 using namespace vgui2;
 
 static const long RETRY_TIME = 2500;
+
+static bool IsAddressString(const char* str)
+{
+    if (!str || !str[0])
+        return false;
+
+    int dots = 0;
+    int digits = 0;
+    for (const char* p = str; *p; ++p)
+    {
+        if (*p >= '0' && *p <= '9') digits++;
+        else if (*p == '.') dots++;
+        else if (*p == ':' || *p == ' ' || *p == '\t') {}
+        else return false;
+    }
+    return (dots == 3 && digits >= 4);
+}
 
 CDialogGameInfo::CDialogGameInfo(vgui2::Panel *parent, uint32 ip, uint16 port) :
     Frame(parent, "DialogGameInfo"),
@@ -53,14 +71,14 @@ CDialogGameInfo::CDialogGameInfo(vgui2::Panel *parent, uint32 ip, uint16 port) :
     m_pAutoRetryAlert = new RadioButton(this, "AutoRetryAlert", "#ServerBrowser_AlertMeWhenSlotOpens");
     m_pAutoRetryJoin = new RadioButton(this, "AutoRetryJoin", "#ServerBrowser_JoinWhenSlotOpens");
     m_pPlayerList = new ListPanel(this, "PlayerList");
-    m_pPlayerList->AddColumnHeader(0, "PlayerName", "#ServerBrowser_PlayerName", 156);
-    m_pPlayerList->AddColumnHeader(1, "Score", "#ServerBrowser_Score", 64);
-    m_pPlayerList->AddColumnHeader(2, "Time", "#ServerBrowser_Time", 64);
+    m_pPlayerList->AddColumnHeader(0, "PlayerName", "#ServerBrowser_PlayerName", 180);
+    m_pPlayerList->AddColumnHeader(1, "Score", "#ServerBrowser_Score", 80);
+    m_pPlayerList->AddColumnHeader(2, "Time", "#ServerBrowser_Time", 90);
 
+    m_pPlayerList->SetSortFunc(1, &PlayerScoreColumnSortFunc);
     m_pPlayerList->SetSortFunc(2, &PlayerTimeColumnSortFunc);
 
-    PostMessage(m_pPlayerList, new KeyValues("SetSortColumn", "column", 2));
-    PostMessage(m_pPlayerList, new KeyValues("SetSortColumn", "column", 1));
+    m_pPlayerList->SetSortColumn(1);
     PostMessage(m_pPlayerList, new KeyValues("SetSortColumn", "column", 1));
 
     m_pAutoRetryAlert->SetSelected(true);
@@ -92,12 +110,16 @@ CDialogGameInfo::~CDialogGameInfo()
 
 void CDialogGameInfo::Run(const char *titleName, bool queryDetails)
 {
-    if (titleName && titleName[0])
+    if (titleName && titleName[0] && !IsAddressString(titleName))
+    {
         SetTitle("#ServerBrowser_GameInfoWithNameTitle", true);
+        SetDialogVariable("game", titleName);
+    }
     else
+    {
         SetTitle("#ServerBrowser_GameInfoTitle", true);
-
-    SetDialogVariable("game", (titleName && titleName[0]) ? titleName : "");
+        SetDialogVariable("game", "");
+    }
 
     if (queryDetails)
         SendPingQueryIfNotAny();
@@ -197,10 +219,10 @@ void CDialogGameInfo::PerformLayout()
     SetControlVisible("ServerIPText", false);
 
     std::string srvName = server_item_.GetName();
-    if (srvName.empty() || srvName == server_item_.m_NetAdr.GetConnectionAddressString())
-        srvName = m_bServerNotResponding ? "#ServerBrowser_ServerNotResponding" : "";
+    if (srvName.empty() || srvName == server_item_.m_NetAdr.GetConnectionAddressString() || IsAddressString(srvName.c_str()))
+        srvName = m_bServerNotResponding ? "#ServerBrowser_ServerNotResponding" : (m_bServerHadSuccessfulResponse ? "Counter-Strike Server" : "");
     SetControlStringNoLocalize("ServerText", srvName.c_str());
-    SetControlStringNoLocalize("GameText", server_item_.m_szGameDescription);
+    SetControlStringNoLocalize("GameText", server_item_.m_szGameDescription[0] ? server_item_.m_szGameDescription : "Counter-Strike");
     SetControlStringNoLocalize("MapText", server_item_.m_szMap);
 
 
@@ -246,7 +268,7 @@ void CDialogGameInfo::PerformLayout()
 
     if (m_bServerHadSuccessfulResponse && server_item_.m_nPing < 1200)
     {
-        Q_snprintf(buf, sizeof(buf), "%d", server_item_.m_nPing);
+        Q_snprintf(buf, sizeof(buf), "%d ms", server_item_.m_nPing);
         SetControlStringNoLocalize("PingText", buf);
     }
     else
@@ -278,8 +300,12 @@ void CDialogGameInfo::PerformLayout()
 
     if (m_bServerHadSuccessfulResponse && (server_item_.m_nPlayers + server_item_.m_nBotPlayers) == 0)
         m_pPlayerList->SetEmptyListText("#ServerBrowser_ServerHasNoPlayers");
-    else
+    else if (first_player_responded_)
+        m_pPlayerList->SetEmptyListText("");
+    else if (m_bServerNotResponding)
         m_pPlayerList->SetEmptyListText("#ServerBrowser_ServerNotResponding");
+    else
+        m_pPlayerList->SetEmptyListText("#ServerBrowser_RefreshingServerList");
 
     m_pAutoRetry->SetVisible(m_bShowAutoRetryToggle);
 
@@ -295,7 +321,8 @@ void CDialogGameInfo::AddPlayerToList(const char *playerName, int score, float t
     }
 
     KeyValues::AutoDelete player = KeyValues::AutoDelete("player");
-    player->SetString("PlayerName", playerName);
+    const char* displayName = (playerName && playerName[0]) ? playerName : "Unnamed";
+    player->SetString("PlayerName", displayName);
     player->SetInt("Score", score);
     player->SetInt("TimeSec", (int)timePlayedSeconds);
 
@@ -310,9 +337,9 @@ void CDialogGameInfo::AddPlayerToList(const char *playerName, int score, float t
     buf[0] = 0;
 
     if (hours)
-        Q_snprintf(buf, sizeof(buf), "%dh %dm %ds", hours, minutes, seconds);
+        Q_snprintf(buf, sizeof(buf), "%dh %02dm %02ds", hours, minutes, seconds);
     else if (minutes)
-        Q_snprintf(buf, sizeof(buf), "%dm %ds", minutes, seconds);
+        Q_snprintf(buf, sizeof(buf), "%dm %02ds", minutes, seconds);
     else
         Q_snprintf(buf, sizeof(buf), "%ds", seconds);
 
@@ -323,13 +350,20 @@ void CDialogGameInfo::AddPlayerToList(const char *playerName, int score, float t
 
 void CDialogGameInfo::PlayersFailedToRespond()
 {
-    ClearPlayerList();
     players_server_query_ = 0;
+    if (!first_player_responded_)
+        m_pPlayerList->SetEmptyListText("#ServerBrowser_ServerNotResponding");
+    InvalidateLayout();
+    Repaint();
 }
 
 void CDialogGameInfo::PlayersRefreshComplete()
 {
     players_server_query_ = 0;
+    if (!first_player_responded_)
+        m_pPlayerList->SetEmptyListText("#ServerBrowser_ServerHasNoPlayers");
+    InvalidateLayout();
+    Repaint();
 }
 
 void CDialogGameInfo::ServerResponded(gameserveritem_t &server)
@@ -409,14 +443,22 @@ void CDialogGameInfo::SendPlayerQuery()
         return;
 
     first_player_responded_ = false;
-    players_server_query_ = SteamMatchmakingServers()->PlayerDetails(server_ip_, server_port_, this);
+    ISteamMatchmakingServers* pMM = EngineMini() ? EngineMini()->GetSteamMatchmakingServers() : SteamMatchmakingServers();
+    if (pMM)
+    {
+        uint32 queryIP = server_item_.m_NetAdr.GetIP() ? server_item_.m_NetAdr.GetIP() : server_ip_;
+        uint16 queryPort = server_item_.m_NetAdr.GetQueryPort() ? server_item_.m_NetAdr.GetQueryPort() : server_port_;
+        players_server_query_ = pMM->PlayerDetails(queryIP, queryPort, this);
+    }
 }
 
 void CDialogGameInfo::CancelPlayerQuery()
 {
     if (players_server_query_)
     {
-        SteamMatchmakingServers()->CancelServerQuery(players_server_query_);
+        ISteamMatchmakingServers* pMM = EngineMini() ? EngineMini()->GetSteamMatchmakingServers() : SteamMatchmakingServers();
+        if (pMM)
+            pMM->CancelServerQuery(players_server_query_);
         players_server_query_ = 0;
     }
 }
@@ -427,7 +469,13 @@ void CDialogGameInfo::SendPingQueryIfNotAny()
         return;
 
     m_iRequestRetry = system()->GetTimeMillis() + RETRY_TIME;
-    m_hPingServerQuery = SteamMatchmakingServers()->PingServer(server_ip_, server_port_, this);
+    ISteamMatchmakingServers* pMM = EngineMini() ? EngineMini()->GetSteamMatchmakingServers() : SteamMatchmakingServers();
+    if (pMM)
+    {
+        uint32 queryIP = server_item_.m_NetAdr.GetIP() ? server_item_.m_NetAdr.GetIP() : server_ip_;
+        uint16 queryPort = server_item_.m_NetAdr.GetQueryPort() ? server_item_.m_NetAdr.GetQueryPort() : server_port_;
+        m_hPingServerQuery = pMM->PingServer(queryIP, queryPort, this);
+    }
 }
 
 void CDialogGameInfo::CancelPingQuery()
@@ -435,8 +483,9 @@ void CDialogGameInfo::CancelPingQuery()
     m_iRequestRetry = 0;
     if (m_hPingServerQuery)
     {
-        SteamMatchmakingServers()->CancelServerQuery(m_hPingServerQuery);
-        m_iRequestRetry = 0;
+        ISteamMatchmakingServers* pMM = EngineMini() ? EngineMini()->GetSteamMatchmakingServers() : SteamMatchmakingServers();
+        if (pMM)
+            pMM->CancelServerQuery(m_hPingServerQuery);
         m_hPingServerQuery = 0;
     }
 }
@@ -505,6 +554,19 @@ int CDialogGameInfo::PlayerTimeColumnSortFunc(ListPanel *pPanel, const ListPanel
     if (p1time > p2time)
         return -1;
     if (p1time < p2time)
+        return 1;
+
+    return 0;
+}
+
+int CDialogGameInfo::PlayerScoreColumnSortFunc(ListPanel *pPanel, const ListPanelItem &p1, const ListPanelItem &p2)
+{
+    int p1score = p1.kv->GetInt("Score");
+    int p2score = p2.kv->GetInt("Score");
+
+    if (p1score > p2score)
+        return -1;
+    if (p1score < p2score)
         return 1;
 
     return 0;

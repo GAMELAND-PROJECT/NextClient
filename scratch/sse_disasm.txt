@@ -1,0 +1,14 @@
+Microsoft (R) COFF/PE Dumper Version 14.44.35207.1
+Copyright (C) Microsoft Corporation.  All rights reserved.
+
+
+Dump of file f:\NextClient-1\scratch\sse_disasm.obj
+
+File Type: COFF OBJECT
+
+  Summary
+
+          20 .chks64
+          78 .debug$S
+          2F .drectve
+         500 .mycode

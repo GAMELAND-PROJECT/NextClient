@@ -223,14 +223,12 @@ namespace SteamEmu
         SteamEmuAuthTicket* t = reinterpret_cast<SteamEmuAuthTicket*>(pDest);
         memset(t, 0, sizeof(*t));
 
-        // 28-byte ticket recognized by Reunion and DProto (SC2009 / AVSMP)
-        t->header_len = 0x14; // 20
-        t->unk1 = 0;
-        t->unk2 = 0;
-        t->account_id = g_AccountID; // 1792139526 -> STEAM_0:0:896069763
-        t->unk3 = 0;
-        t->unk4 = 0;
-        t->unk5 = 0;
+        // SteamEmu ticket recognized universally by Reunion (cid_SteamEmu) and DProto:
+        // Size: 0x300 (768 bytes)
+        // [0x50] == 0xFFFFFFFF
+        // [0x54] == g_AccountID ^ 0xC9710266
+        t->magic = 0xFFFFFFFF;
+        t->account_xor = g_AccountID ^ 0xC9710266;
 
         return sizeof(SteamEmuAuthTicket);
     }

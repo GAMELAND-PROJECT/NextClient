@@ -5,20 +5,19 @@
 #include <steam/isteamclient.h>
 
 #pragma pack(push, 1)
-// 28-byte ticket recognized by Reunion and DProto (SC2009 / AVSMP)
+// 768-byte (0x300) ticket format recognized by Reunion and DProto as SteamEmu (DP_AUTH_STEAMEMU).
+// This avoids classification as AVSMP (which was triggered by 28-byte header_len=0x14)
+// which Russian servers (like 46.174.52.26:27241) reject with "Sorry, AVSMP clients are not allowed on this server".
 struct SteamEmuAuthTicket
 {
-    uint32_t header_len;     // 0x00: 20 (0x14)
-    uint32_t unk1;           // 0x04: 0
-    uint32_t unk2;           // 0x08: 0
-    uint32_t account_id;     // 0x0C: AccountID (1792139526 -> STEAM_0:0:896069763)
-    uint32_t unk3;           // 0x10: 0
-    uint32_t unk4;           // 0x14: 0
-    uint32_t unk5;           // 0x18: 0
+    uint8_t  prefix[0x50];           // 0x00 - 0x4F: zeroes
+    uint32_t magic;                  // 0x50 - 0x53: 0xFFFFFFFF (-1)
+    uint32_t account_xor;            // 0x54 - 0x57: g_AccountID ^ 0xC9710266
+    uint8_t  suffix[0x300 - 0x58];   // 0x58 - 0x2FF: zeroes
 };
 #pragma pack(pop)
 
-static_assert(sizeof(SteamEmuAuthTicket) == 28, "SteamEmuAuthTicket must be exactly 28 bytes");
+static_assert(sizeof(SteamEmuAuthTicket) == 0x300, "SteamEmuAuthTicket must be exactly 768 (0x300) bytes");
 
 namespace SteamEmu
 {
