@@ -413,7 +413,10 @@ void CScriptObject::WriteToConfig(void)
     char command[256];
 
     if (bSetInfo)
+    {
         Q_snprintf(command, sizeof(command), "setinfo %s \"%s\"\n", pszKey, szValue);
+        engine->PlayerInfo_SetValueForKey(pszKey, szValue);
+    }
     else
         Q_snprintf(command, sizeof(command), "%s \"%s\"\n", pszKey, szValue);
 
@@ -929,6 +932,14 @@ void CDescription::TransferCurrentValues(const char *pszConfigFile)
 
             Q_strncpy(pObj->defValue, szValue, sizeof(pObj->defValue));
             pObj->fdefValue = (float)atof(szValue);
+        }
+        else if (pObj->bSetInfo && !strcmp(pObj->cvarname, "_vgui_menus"))
+        {
+            // If userinfo does not have _vgui_menus yet, synchronize the user.scr default into userinfo
+            engine->PlayerInfo_SetValueForKey(pObj->cvarname, pObj->defValue);
+            char cmd[64];
+            Q_snprintf(cmd, sizeof(cmd), "setinfo %s \"%s\"\n", pObj->cvarname, pObj->defValue);
+            engine->pfnClientCmd(cmd);
         }
 
         pObj = pObj->pNext;

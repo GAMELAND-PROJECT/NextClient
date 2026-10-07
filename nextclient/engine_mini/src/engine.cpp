@@ -1027,6 +1027,14 @@ static void OnGameInitialized()
     gEngfuncs.pfnRegisterVariable("gl_allclient_signature", "GL_PERMANENT_VERIFIED_ALLCLIENT_2026", 0);
     gEngfuncs.pfnClientCmd("setinfo _gltoken GAMELAND_ALLCLIENT_PRO_2026\n");
 
+    const char* vgui_menus = gEngfuncs.PlayerInfo_ValueForKey ? gEngfuncs.PlayerInfo_ValueForKey(1, "_vgui_menus") : nullptr;
+    if (!vgui_menus || !vgui_menus[0])
+    {
+        if (gEngfuncs.PlayerInfo_SetValueForKey)
+            gEngfuncs.PlayerInfo_SetValueForKey("_vgui_menus", "0");
+        gEngfuncs.pfnClientCmd("setinfo _vgui_menus \"0\"\n");
+    }
+
     CL_CreateHttpDownloadManager(g_pGameUi, g_pLocalize, g_SettingGuard);
     CL_CvarsSandboxInit();
     CL_StringRegistryInit();
