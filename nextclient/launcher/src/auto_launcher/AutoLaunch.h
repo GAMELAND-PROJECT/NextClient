@@ -82,6 +82,7 @@ inline void ConfigureEmulator(const std::filesystem::path& config, const std::fi
     auto document = LoadConfig(config);
     SetText(document.Get(), L"/Config/AppList[AppId='10']/Path", (gameRoot / L"cstrike.exe").c_str());
     SetText(document.Get(), L"/Config/AppList[AppId='10']/StartIn", gameRoot.c_str());
+    SetText(document.Get(), L"/Config/AppList[AppId='10']/CommandLine", L"-steam -gl -fullscreen");
     // Set both levels explicitly: an app override must not defeat auto mode.
     SetText(document.Get(), L"/Config/AppList[AppId='10']/EnableInGameVoice", voice ? L"1" : L"0");
     SetText(document.Get(), L"/Config/EnableInGameVoice", voice ? L"true" : L"false");

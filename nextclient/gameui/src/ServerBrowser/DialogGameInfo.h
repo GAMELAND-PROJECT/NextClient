@@ -20,6 +20,7 @@ public:
     void Run(const char *titleName, bool queryDetails = true);
     void Connect();
     void SetKnownServer(const gameserveritem_t& server);
+    void SetServerFullAndAutoRetry();
 
     servernetadr_t GetAddress();
 
@@ -61,6 +62,7 @@ private:
     void ApplyConnectCommand(const gameserveritem_t &server);
 
     static int PlayerTimeColumnSortFunc(vgui2::ListPanel *pPanel, const vgui2::ListPanelItem &p1, const vgui2::ListPanelItem &p2);
+    static int PlayerScoreColumnSortFunc(vgui2::ListPanel *pPanel, const vgui2::ListPanelItem &p1, const vgui2::ListPanelItem &p2);
 
 private:
     long m_iRequestRetry;

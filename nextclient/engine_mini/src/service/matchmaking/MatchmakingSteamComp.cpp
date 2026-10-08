@@ -43,6 +43,16 @@ MatchmakingSteamComp::~MatchmakingSteamComp()
 
     for (const auto request_id : request_ids)
         ReleaseRequest(request_id);
+
+    {
+        std::lock_guard<std::mutex> lock(active_queries_mutex_);
+        for (auto& [id, ct] : active_queries_)
+        {
+            if (ct)
+                ct->SetCanceled();
+        }
+        active_queries_.clear();
+    }
 }
 
 void MatchmakingSteamComp::InitializePinnedServers()
@@ -284,6 +294,16 @@ void MatchmakingSteamComp::CancelAllQueries()
 
     for (const auto request_id : request_ids)
         CancelQuery(request_id);
+
+    {
+        std::lock_guard<std::mutex> lock(active_queries_mutex_);
+        for (auto& [id, ct] : active_queries_)
+        {
+            if (ct)
+                ct->SetCanceled();
+        }
+        active_queries_.clear();
+    }
 }
 
 HServerListRequest MatchmakingSteamComp::RequestInternetServerList(
@@ -619,22 +639,180 @@ void MatchmakingSteamComp::RefreshServer(HServerListRequest request_id, int serv
 
 HServerQuery MatchmakingSteamComp::PingServer(uint32 ip, uint16 port, ISteamMatchmakingPingResponse* response_callback)
 {
-    return SteamMatchmakingServers()->PingServer(ip, port, response_callback);
+    if (!response_callback || !source_query_)
+        return 0;
+
+    HServerQuery query_id = (HServerQuery)++server_query_counter_;
+    auto ct = CancellationToken::Create();
+    {
+        std::lock_guard<std::mutex> lock(active_queries_mutex_);
+        active_queries_[query_id] = ct;
+    }
+
+    netadr_t addr(ip, port);
+
+    TaskCoro::RunInMainThread([this, query_id, addr, response_callback, ct]() -> result<void>
+    {
+        try
+        {
+            auto resp = co_await source_query_->GetInfoAsync(addr);
+            if (ct->IsCanceled())
+                co_return;
+
+            {
+                std::lock_guard<std::mutex> lock(active_queries_mutex_);
+                active_queries_.erase(query_id);
+            }
+
+            if (resp.error_code == SQErrorCode::Ok)
+            {
+                gameserveritem_t server = MatchmakingService::ConvertToGameServerItem(resp);
+                response_callback->ServerResponded(server);
+            }
+            else
+            {
+                response_callback->ServerFailedToRespond();
+            }
+        }
+        catch (...)
+        {
+            {
+                std::lock_guard<std::mutex> lock(active_queries_mutex_);
+                active_queries_.erase(query_id);
+            }
+            if (!ct->IsCanceled())
+                response_callback->ServerFailedToRespond();
+        }
+        co_return;
+    });
+
+    return query_id;
 }
 
 HServerQuery MatchmakingSteamComp::PlayerDetails(uint32 unIP, uint16 usPort, ISteamMatchmakingPlayersResponse* pRequestServersResponse)
 {
-    return SteamMatchmakingServers()->PlayerDetails(unIP, usPort, pRequestServersResponse);
+    if (!pRequestServersResponse || !source_query_)
+        return 0;
+
+    HServerQuery query_id = (HServerQuery)++server_query_counter_;
+    auto ct = CancellationToken::Create();
+    {
+        std::lock_guard<std::mutex> lock(active_queries_mutex_);
+        active_queries_[query_id] = ct;
+    }
+
+    netadr_t addr(unIP, usPort);
+
+    TaskCoro::RunInMainThread([this, query_id, addr, pRequestServersResponse, ct]() -> result<void>
+    {
+        try
+        {
+            auto resp = co_await source_query_->GetPlayersAsync(addr);
+            if (ct->IsCanceled())
+                co_return;
+
+            {
+                std::lock_guard<std::mutex> lock(active_queries_mutex_);
+                active_queries_.erase(query_id);
+            }
+
+            if (resp.error_code == SQErrorCode::Ok)
+            {
+                for (const auto& player : resp.value)
+                {
+                    if (ct->IsCanceled())
+                        co_return;
+                    pRequestServersResponse->AddPlayerToList(player.player_name.c_str(), player.kills, player.time_connected);
+                }
+                pRequestServersResponse->PlayersRefreshComplete();
+            }
+            else
+            {
+                pRequestServersResponse->PlayersFailedToRespond();
+            }
+        }
+        catch (...)
+        {
+            {
+                std::lock_guard<std::mutex> lock(active_queries_mutex_);
+                active_queries_.erase(query_id);
+            }
+            if (!ct->IsCanceled())
+                pRequestServersResponse->PlayersFailedToRespond();
+        }
+        co_return;
+    });
+
+    return query_id;
 }
 
 HServerQuery MatchmakingSteamComp::ServerRules(uint32 unIP, uint16 usPort, ISteamMatchmakingRulesResponse* pRequestServersResponse)
 {
-    return SteamMatchmakingServers()->ServerRules(unIP, usPort, pRequestServersResponse);
+    if (!pRequestServersResponse || !source_query_)
+        return 0;
+
+    HServerQuery query_id = (HServerQuery)++server_query_counter_;
+    auto ct = CancellationToken::Create();
+    {
+        std::lock_guard<std::mutex> lock(active_queries_mutex_);
+        active_queries_[query_id] = ct;
+    }
+
+    netadr_t addr(unIP, usPort);
+
+    TaskCoro::RunInMainThread([this, query_id, addr, pRequestServersResponse, ct]() -> result<void>
+    {
+        try
+        {
+            auto resp = co_await source_query_->GetRulesAsync(addr);
+            if (ct->IsCanceled())
+                co_return;
+
+            {
+                std::lock_guard<std::mutex> lock(active_queries_mutex_);
+                active_queries_.erase(query_id);
+            }
+
+            if (resp.error_code == SQErrorCode::Ok)
+            {
+                for (const auto& rule : resp.value)
+                {
+                    if (ct->IsCanceled())
+                        co_return;
+                    pRequestServersResponse->RulesResponded(rule.name.c_str(), rule.value.c_str());
+                }
+                pRequestServersResponse->RulesRefreshComplete();
+            }
+            else
+            {
+                pRequestServersResponse->RulesFailedToRespond();
+            }
+        }
+        catch (...)
+        {
+            {
+                std::lock_guard<std::mutex> lock(active_queries_mutex_);
+                active_queries_.erase(query_id);
+            }
+            if (!ct->IsCanceled())
+                pRequestServersResponse->RulesFailedToRespond();
+        }
+        co_return;
+    });
+
+    return query_id;
 }
 
 void MatchmakingSteamComp::CancelServerQuery(HServerQuery hServerQuery)
 {
-    SteamMatchmakingServers()->CancelServerQuery(hServerQuery);
+    std::lock_guard<std::mutex> lock(active_queries_mutex_);
+    auto it = active_queries_.find(hServerQuery);
+    if (it != active_queries_.end())
+    {
+        if (it->second)
+            it->second->SetCanceled();
+        active_queries_.erase(it);
+    }
 }
 
 result<void> MatchmakingSteamComp::RequestServerList(

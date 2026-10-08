@@ -1,4 +1,5 @@
 #include "VoiceRecorder.h"
+#include "api_impl/SteamEmu.h"
 #include <cstring>
 #include <algorithm>
 #include <opus/opus.h>
@@ -55,28 +56,31 @@ bool VoiceRecorder::Init()
     if (m_initialized.load())
         return true;
 
-    // 1. Initialize Opus Encoder (8000 Hz, mono VOIP)
+    // 1. Initialize Opus Encoder (24000 Hz, mono VOIP)
     int err = 0;
-    OpusEncoder* enc = opus_encoder_create(8000, 1, OPUS_APPLICATION_VOIP, &err);
+    OpusEncoder* enc = opus_encoder_create(24000, 1, OPUS_APPLICATION_VOIP, &err);
     if (err == OPUS_OK && enc)
     {
-        opus_encoder_ctl(enc, OPUS_SET_BITRATE(24000));
+        opus_encoder_ctl(enc, OPUS_SET_BITRATE(32000));
         opus_encoder_ctl(enc, OPUS_SET_SIGNAL(OPUS_SIGNAL_VOICE));
+        opus_encoder_ctl(enc, OPUS_SET_COMPLEXITY(10));
+        opus_encoder_ctl(enc, OPUS_SET_INBAND_FEC(1));
+        opus_encoder_ctl(enc, OPUS_SET_PACKET_LOSS_PERC(10));
         opus_encoder_ctl(enc, OPUS_SET_DTX(0));
         m_opusEncoder = enc;
     }
 
-    // 2. Initialize Speex Resampler (from 8000 Hz to 11025 Hz for uncompressed engine loopback)
+    // 2. Initialize Speex Resampler (from 24000 Hz to 11025 Hz for uncompressed engine loopback)
     int resErr = 0;
-    m_resampler = speex_resampler_init(1, 8000, 11025, 3, &resErr);
+    m_resampler = speex_resampler_init(1, 24000, 11025, 3, &resErr);
 
 #ifdef _WIN32
-    // 3. Initialize Windows waveIn Audio Capture
+    // 3. Initialize Windows waveIn Audio Capture (24000 Hz 16-bit mono)
     WAVEFORMATEX wfx{};
     wfx.wFormatTag = WAVE_FORMAT_PCM;
     wfx.nChannels = 1;
-    wfx.nSamplesPerSec = 8000;
-    wfx.nAvgBytesPerSec = 16000;
+    wfx.nSamplesPerSec = 24000;
+    wfx.nAvgBytesPerSec = 48000;
     wfx.nBlockAlign = 2;
     wfx.wBitsPerSample = 16;
     wfx.cbSize = 0;
@@ -96,6 +100,22 @@ bool VoiceRecorder::Init()
         0,
         CALLBACK_EVENT
     );
+
+    if (mmres != MMSYSERR_NOERROR || !m_hWaveIn)
+    {
+        // Fallback to 16000 Hz if 24000 Hz is not accepted by driver
+        wfx.nSamplesPerSec = 16000;
+        wfx.nAvgBytesPerSec = 32000;
+        mmres = waveInOpen(
+            &m_hWaveIn,
+            WAVE_MAPPER,
+            &wfx,
+            reinterpret_cast<DWORD_PTR>(m_hWaveEvent),
+            0,
+            CALLBACK_EVENT
+        );
+    }
+
 
     if (mmres != MMSYSERR_NOERROR || !m_hWaveIn)
     {
@@ -301,7 +321,7 @@ EVoiceResult VoiceRecorder::GetAvailableVoice(
     {
         uint32_t rate = (nUncompressedVoiceDesiredSampleRate > 0) ? nUncompressedVoiceDesiredSampleRate : 11025;
         uint32_t uncompSamples = static_cast<uint32_t>(numFrames * kFrameSamples);
-        *pcbUncompressed = (uncompSamples * rate / 8000) * sizeof(int16_t);
+        *pcbUncompressed = (uncompSamples * rate / 24000) * sizeof(int16_t);
     }
 
     return k_EVoiceResultOK;
@@ -336,18 +356,17 @@ EVoiceResult VoiceRecorder::GetVoice(
         uint8_t* pOut = static_cast<uint8_t*>(pDestBuffer);
         uint32_t maxOut = cbDestBufferSize;
 
-        // 1. SteamID (8 bytes): ReVoice universal SteamID header (0x00000011, 0x01100001)
-        uint32_t id_low = 0x00000011;
-        uint32_t id_high = 0x01100001;
-        std::memcpy(pOut, &id_low, 4);
-        std::memcpy(pOut + 4, &id_high, 4);
+        // 1. SteamID (8 bytes): Player's actual SteamID from SteamEmu (matches server slot)
+        uint64_t fullSteamId = SteamEmu::GetSteamID().ConvertToUint64();
+        std::memcpy(pOut, &fullSteamId, 8);
         uint32_t pos = 8;
 
-        // 2. Opcode 11 (SamplingRate = 8000)
+        // 2. Opcode 11 (SamplingRate = 24000)
         pOut[pos++] = 11;
-        uint16_t rate = 8000;
+        uint16_t rate = 24000;
         std::memcpy(pOut + pos, &rate, 2);
         pos += 2;
+
 
         // 3. Opcode 6 (PLT_OPUS_PLC)
         pOut[pos++] = 6;

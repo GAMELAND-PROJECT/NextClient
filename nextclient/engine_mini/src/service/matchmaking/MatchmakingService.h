@@ -60,6 +60,7 @@ namespace service::matchmaking
         );
 
         concurrencpp::result<gameserveritem_t> RefreshServer(uint32_t ip, uint16_t port);
+        static gameserveritem_t ConvertToGameServerItem(const SQResponseInfo<SQ_INFO>& sq_info);
 
     private:
         concurrencpp::result<RequestServerListResult> RequestServerListWithCacheRespect(
@@ -96,6 +97,5 @@ namespace service::matchmaking
         );
 
         static bool IsServerListForcedToBeEmpty(const std::vector<ServerInfo>& servers);
-        static gameserveritem_t ConvertToGameServerItem(const SQResponseInfo<SQ_INFO>& sq_info);
     };
 }

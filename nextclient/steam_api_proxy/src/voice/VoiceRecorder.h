@@ -70,12 +70,14 @@ private:
     HANDLE m_hWaveEvent{nullptr};
     HANDLE m_hThread{nullptr};
 
+    static constexpr int kOpusRate = 24000;
     static constexpr int kNumWaveBuffers = 4;
-    static constexpr int kFrameSamples = 160; // 20 ms @ 8000 Hz
+    static constexpr int kFrameSamples = 480; // 20 ms @ 24000 Hz
     static constexpr int kWaveBufferSize = kFrameSamples * sizeof(int16_t);
 
     WAVEHDR m_waveHeaders[kNumWaveBuffers]{};
     int16_t m_waveBuffers[kNumWaveBuffers][kFrameSamples]{};
+
 #endif
 
     std::mutex m_mutex;

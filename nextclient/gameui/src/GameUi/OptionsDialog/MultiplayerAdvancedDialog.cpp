@@ -159,14 +159,15 @@ void CMultiplayerAdvancedDialog::GatherCurrentValues(void)
             {
                 pCombo = (vgui2::ComboBox *)pList->pControl;
                 int activeItem = pCombo->GetActiveItem();
+                int row = (activeItem >= 0) ? pCombo->GetRowByItemId(activeItem) : -1;
+                if (row < 0)
+                    row = (int)pObj->fdefValue;
+
                 pItem = pObj->pListItems;
-                int n = (int)pObj->fdefValue;
-
-                while (pItem)
+                int curRow = 0;
+                while (pItem && curRow < row)
                 {
-                    if (!activeItem--)
-                        break;
-
+                    curRow++;
                     pItem = pItem->pNext;
                 }
 
@@ -176,7 +177,6 @@ void CMultiplayerAdvancedDialog::GatherCurrentValues(void)
                 }
                 else
                 {
-                    assert(!("Couldn't find string in list, using default value"));
                     sprintf(szValue, "%s", pObj->defValue);
                 }
 

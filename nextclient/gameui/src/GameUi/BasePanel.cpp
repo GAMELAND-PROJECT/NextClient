@@ -1099,6 +1099,12 @@ CGameMenu *CBasePanel::RecursiveLoadGameMenu(vgui2::Panel *parent, KeyValues *da
         if (cmd && (!Q_stricmp(cmd, "ConnectToRandomServer") || !Q_stricmp(cmd, "OpenHelpUrl")))
             continue;
 
+#if defined(GAMELAND_HOME_CLIENT) && GAMELAND_HOME_CLIENT
+        // Home Client: completely remove New Game from main menu root
+        if (cmd && !Q_stricmp(cmd, "OpenCreateMultiplayerGameDialog"))
+            continue;
+#endif
+
         // Never load blank separators or ghost buttons with empty label or command
         if (!cmd || !*cmd || !label || !*label)
             continue;

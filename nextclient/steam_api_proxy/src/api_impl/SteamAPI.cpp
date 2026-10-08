@@ -62,6 +62,32 @@ void SetSigHandlers()
 }
 #endif
 
+#ifdef _WINDOWS
+static void SyncSmartSteamEmuConfig()
+{
+    const wchar_t* candidates[] = {
+        L"platform\\steam\\games\\SmartEmu\\SmartSteamEmu\\SmartSteamEmu.ini",
+        L"platform\\steam\\games\\SmartEmu\\SmartSteamEmu\\launcher.ini",
+        L"platform\\steam\\games\\SmartEmu2\\SmartSteamEmu\\SmartSteamEmu.ini",
+        L"platform\\steam\\games\\SmartEmu2\\SmartSteamEmu\\launcher.ini"
+    };
+
+    uint64_t fullSteamId = SteamEmu::GetSteamID().ConvertToUint64();
+    wchar_t idBuf[32];
+    swprintf_s(idBuf, L"%llu", fullSteamId);
+
+    for (const wchar_t* path : candidates)
+    {
+        wchar_t fullPath[MAX_PATH] = { 0 };
+        if (GetFullPathNameW(path, MAX_PATH, fullPath, nullptr))
+        {
+            WritePrivateProfileStringW(L"SmartSteamEmu", L"SteamIdGeneration", L"Manual", fullPath);
+            WritePrivateProfileStringW(L"SmartSteamEmu", L"ManualSteamId", idBuf, fullPath);
+        }
+    }
+}
+#endif
+
 void Initialize()
 {
     if (g_bInitialized)
@@ -69,6 +95,10 @@ void Initialize()
 
     g_bInitialized = true;
     SteamEmu::Initialize();
+
+#ifdef _WINDOWS
+    SyncSmartSteamEmuConfig();
+#endif
 
 #ifndef _WINDOWS
     remove("crash_backtrace.txt");
@@ -97,6 +127,7 @@ void UnInitialize()
     g_bInitialized = false;
     g_ExceptionCallback = nullptr;
 }
+
 
 bool IsInitialized()
 {

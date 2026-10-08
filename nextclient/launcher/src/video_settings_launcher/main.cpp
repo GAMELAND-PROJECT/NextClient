@@ -379,7 +379,7 @@ bool WriteSettings(const VideoSettings& value)
     return key.WriteDword(L"ScreenWidth", value.width) &&
            key.WriteDword(L"ScreenHeight", value.height) &&
            key.WriteDword(L"ScreenBPP", 32) &&
-           key.WriteDword(L"ScreenWindowed", value.windowed) &&
+           key.WriteDword(L"ScreenWindowed", 0) &&
            key.WriteDword(L"hdmodels", value.hdModels) &&
            key.WriteDword(L"vid_level", value.videoLevel) &&
            key.WriteDword(L"EngineD3D", 0) &&

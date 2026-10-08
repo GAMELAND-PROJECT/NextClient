@@ -26,7 +26,7 @@ public:
 
     EVoiceResult DecompressVoice(const void *pCompressed, uint32 cbCompressed, void *pDestBuffer, uint32 cbDestBufferSize, uint32 *nBytesWritten, uint32 nDesiredSampleRate) override;
 
-    uint32 GetVoiceOptimalSampleRate() override { return 12000; }
+    uint32 GetVoiceOptimalSampleRate() override { return m_pOrig ? m_pOrig->GetVoiceOptimalSampleRate() : 12000; }
 
     HAuthTicket GetAuthSessionTicket(void *pTicket, int cbMaxTicket, uint32 *pcbTicket) override;
     EBeginAuthSessionResult BeginAuthSession(const void *pAuthTicket, int cbAuthTicket, CSteamID steamID) override { (void)pAuthTicket; (void)cbAuthTicket; (void)steamID; return k_EBeginAuthSessionResultOK; }
@@ -37,6 +37,12 @@ public:
     void AdvertiseGame(CSteamID steamIDGameServer, uint32 unIPServer, uint16 usPortServer) override { (void)steamIDGameServer; (void)unIPServer; (void)usPortServer; }
     SteamAPICall_t RequestEncryptedAppTicket(void *pDataToInclude, int cbDataToInclude) override { (void)pDataToInclude; (void)cbDataToInclude; return k_uAPICallInvalid; }
     bool GetEncryptedAppTicket(void *pTicket, int cbMaxTicket, uint32 *pcbTicket) override { (void)pTicket; (void)cbMaxTicket; (void)pcbTicket; return false; }
+
+    void SetOriginal(ISteamUser* orig) { m_pOrig = orig; }
+    ISteamUser* GetOriginal() const { return m_pOrig; }
+
+private:
+    ISteamUser* m_pOrig{nullptr};
 };
 
 extern SteamUserVoiceProxy g_SteamUserVoiceProxy;

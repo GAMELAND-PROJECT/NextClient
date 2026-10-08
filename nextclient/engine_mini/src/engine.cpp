@@ -706,23 +706,19 @@ static void OnGameInitializing(void* mainwindow, HDC* pmaindc, HGLRC* pbaseRC, c
         if (target_kind == ConnectTargetKind::Online)
         {
 #if defined(GAMELAND_HOME_CLIENT) && GAMELAND_HOME_CLIENT
-            // Unconditionally remove any tag prefix from player name in Home Client
+            // Home Client: 100% full freedom for player names (custom tags like [S]H1RON, brackets, symbols, etc.)
+            // Only clean up leftover cafe tags if specifically present from an old installation:
             cvar_t* name_cvar = Cvar_FindVar("name");
             if (name_cvar && name_cvar->string)
             {
                 std::string_view cur_name = name_cvar->string;
-                if (!cur_name.empty() && cur_name.front() == '[')
+                if (cur_name.starts_with("[GAMELAND] "))
                 {
-                    size_t close_bracket = cur_name.find(']');
-                    if (close_bracket != std::string_view::npos)
-                    {
-                        size_t after_tag = close_bracket + 1;
-                        while (after_tag < cur_name.size() && cur_name[after_tag] == ' ')
-                            after_tag++;
-                        std::string clean_name = std::string(cur_name.substr(after_tag));
-                        if (!clean_name.empty())
-                            Cvar_Set("name", clean_name.c_str());
-                    }
+                    Cvar_Set("name", std::string(cur_name.substr(11)).c_str());
+                }
+                else if (cur_name.starts_with("[GL] "))
+                {
+                    Cvar_Set("name", std::string(cur_name.substr(5)).c_str());
                 }
             }
 #else
@@ -1030,6 +1026,14 @@ static void OnGameInitialized()
     // GAMELAND Permanent AllClient Engine Signature (FCVAR_PROTECTED: Immutable, cannot be forged via console)
     gEngfuncs.pfnRegisterVariable("gl_allclient_signature", "GL_PERMANENT_VERIFIED_ALLCLIENT_2026", 0);
     gEngfuncs.pfnClientCmd("setinfo _gltoken GAMELAND_ALLCLIENT_PRO_2026\n");
+
+    const char* vgui_menus = gEngfuncs.PlayerInfo_ValueForKey ? gEngfuncs.PlayerInfo_ValueForKey(1, "_vgui_menus") : nullptr;
+    if (!vgui_menus || !vgui_menus[0])
+    {
+        if (gEngfuncs.PlayerInfo_SetValueForKey)
+            gEngfuncs.PlayerInfo_SetValueForKey("_vgui_menus", "0");
+        gEngfuncs.pfnClientCmd("setinfo _vgui_menus \"0\"\n");
+    }
 
     CL_CreateHttpDownloadManager(g_pGameUi, g_pLocalize, g_SettingGuard);
     CL_CvarsSandboxInit();

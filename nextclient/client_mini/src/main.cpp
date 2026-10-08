@@ -1979,6 +1979,21 @@ public:
 
         ModernChat::Instance().Init(nitro_api);
         g_Unsub.emplace_back(eng()->Con_MessageMode_f |= [](const auto& /*next*/) {
+            int argc = (gEngfuncs.Cmd_Argc ? gEngfuncs.Cmd_Argc() : 1);
+            if (argc > 1 && gEngfuncs.Cmd_Argv != nullptr)
+            {
+                const char* cmdArg = gEngfuncs.Cmd_Argv(1);
+                if (cmdArg && *cmdArg)
+                {
+                    if (!Q_stricmp(cmdArg, "say"))
+                        ModernChat::Instance().Open(ModernChatMode::SayAll);
+                    else if (!Q_stricmp(cmdArg, "say_team"))
+                        ModernChat::Instance().Open(ModernChatMode::SayTeam);
+                    else
+                        ModernChat::Instance().OpenCustom(cmdArg);
+                    return;
+                }
+            }
             ModernChat::Instance().Open(ModernChatMode::SayAll);
         });
         g_Unsub.emplace_back(eng()->Con_MessageMode2_f |= [](const auto& /*next*/) {

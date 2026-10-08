@@ -43,6 +43,7 @@
 #include "FavoriteGames.h"
 #include "LanGames.h"
 #include "GameUi.h"
+#include "../utils/GameServerHelpers.h"
 
 #include <netadr.h>
 
@@ -434,6 +435,18 @@ CDialogGameInfo *CServerBrowserDialog::JoinGame(IGameList *gameList, unsigned in
     gameDialog->AddActionSignalTarget(this);
     const auto name = server.GetName();
     const char* srvTitle = (name.empty() || name == server.m_NetAdr.GetConnectionAddressString()) ? "" : name.c_str();
+
+    // If server is known to be full, do not trigger an immediate rejected connect.
+    // Instead, open the Server Info dialog directly with Auto-Join enabled!
+    if (server.m_nMaxPlayers > 0 && GetHumanPlayerCount(server) >= server.m_nMaxPlayers)
+    {
+        gameDialog->Run(srvTitle, true);
+        gameDialog->MoveToCenterOfScreen();
+        m_GameInfoDialogs[m_GameInfoDialogs.AddToTail()] = gameDialog;
+        gameDialog->SetServerFullAndAutoRetry();
+        return gameDialog;
+    }
+
     gameDialog->Run(srvTitle, false);
     gameDialog->MoveToCenterOfScreen();
     m_GameInfoDialogs[m_GameInfoDialogs.AddToTail()] = gameDialog;

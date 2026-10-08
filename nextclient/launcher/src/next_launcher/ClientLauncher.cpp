@@ -558,18 +558,40 @@ void ClientLauncher::PrepareEngineCommandLine()
     cmd_line_->AppendParm("+setinfo", "_gltoken GAMELAND_ALLCLIENT_PRO_2026");
     cmd_line_->AppendParm("+_allclient_build", "GAMELAND_PRO_2026");
 
+    // Ensure _vgui_menus is initialized to Old Style Menus (0) unless overridden
+    if (!strstr(cmd_line_->GetCmdLine(), "_vgui_menus"))
+    {
+        cmd_line_->AppendParm("+setinfo", "_vgui_menus 0");
+    }
+
+    // Always enforce OpenGL renderer: remove software/d3d switches and ensure -gl
+    cmd_line_->RemoveParm("-software");
+    cmd_line_->RemoveParm("-soft");
+    cmd_line_->RemoveParm("-d3d");
+    if (!cmd_line_->CheckParm("-gl"))
+        cmd_line_->AppendParm("-gl", nullptr);
+
     // disable glBlitFramebuffer feature, because this makes blackscreen on some Nvidia GPU when enables MSSA technology
     if (!cmd_line_->CheckParm("-nodirectblit") && !cmd_line_->CheckParm("-directblit"))
         cmd_line_->AppendParm("-nodirectblit", nullptr);
 
     if (!cmd_line_->CheckParm("-num_edicts"))
         cmd_line_->AppendParm("-num_edicts", "4096");
-    if (!cmd_line_->CheckParm("-windowed") && !cmd_line_->CheckParm("-sw")) cmd_line_->AppendParm("-fullscreen", nullptr);
 
+    // Always enforce fullscreen mode unless performing an offline demo render
     if (cmd_line_->CheckParm("-demorender"))
     {
         cmd_line_->AppendParm("+host_framerate", "60");
         cmd_line_->AppendParm("-windowed", nullptr);
+    }
+    else
+    {
+        cmd_line_->RemoveParm("-windowed");
+        cmd_line_->RemoveParm("-window");
+        cmd_line_->RemoveParm("-sw");
+        cmd_line_->RemoveParm("-startwindowed");
+        if (!cmd_line_->CheckParm("-fullscreen"))
+            cmd_line_->AppendParm("-fullscreen", nullptr);
     }
 }
 
@@ -634,7 +656,11 @@ void ClientLauncher::FixScreenResolution()
         hl_registry_->WriteInt("ScreenWidth", kDefaultWidth);
         hl_registry_->WriteInt("ScreenHeight", kDefaultHeight);
     }
-    if (!cmd_line_->CheckParm("-windowed") && !cmd_line_->CheckParm("-sw")) hl_registry_->WriteInt("ScreenWindowed", 0);
+    hl_registry_->WriteInt("ScreenBPP", 32);
+    hl_registry_->WriteInt("ScreenWindowed", 0);
+    hl_registry_->WriteInt("EngineD3D", 0);
+    hl_registry_->WriteString("EngineDLL", "hw.dll");
+    hl_registry_->WriteInt("CrashInitializingVideoMode", 0);
 }
 
 bool ClientLauncher::GlobalMutexCheck()
