@@ -28,10 +28,16 @@ New-Item -ItemType Directory -Force -Path $outDir | Out-Null
 $targetGameDir = if (Test-Path -LiteralPath $BaseGameDir) { $BaseGameDir } elseif (Test-Path "F:\Allclient") { "F:\Allclient" } else { "install" }
 
 # ---- Step 1: Compile binaries via CMake ----
-Write-Step "Building target binaries (BUILD_ALL)..."
+Write-Step "Configuring and building target binaries for Edition '$Edition' (BUILD_ALL)..."
 $installStage = Join-Path $rootDir "install"
 New-Item -ItemType Directory -Force -Path $installStage | Out-Null
 New-Item -ItemType Directory -Force -Path (Join-Path $installStage "cstrike\cl_dlls") | Out-Null
+
+$homeClientFlag = if ($Edition -eq "Home") { "ON" } else { "OFF" }
+cmake --preset vs2022 -DGAMELAND_HOME_CLIENT=$homeClientFlag
+if ($LASTEXITCODE -ne 0) {
+    throw "CMake configuration failed!"
+}
 
 cmake --build --preset vs2022-release --target BUILD_ALL -- /nodeReuse:false /v:minimal
 if ($LASTEXITCODE -ne 0) {
