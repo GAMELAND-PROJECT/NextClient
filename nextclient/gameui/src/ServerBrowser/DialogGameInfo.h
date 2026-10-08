@@ -20,6 +20,7 @@ public:
     void Run(const char *titleName, bool queryDetails = true);
     void Connect();
     void SetKnownServer(const gameserveritem_t& server);
+    void SetServerFullAndAutoRetry();
 
     servernetadr_t GetAddress();
 

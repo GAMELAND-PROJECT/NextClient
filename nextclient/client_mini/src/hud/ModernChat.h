@@ -9,7 +9,8 @@ enum class ModernChatMode
 {
     Closed,
     SayAll,
-    SayTeam
+    SayTeam,
+    CustomCommand
 };
 
 struct LiveChatMessage
@@ -37,10 +38,12 @@ public:
     void Reset();
 
     void Open(ModernChatMode mode);
+    void OpenCustom(const std::string& customCommand);
     void Close();
     void Send();
     void Cancel();
     void ToggleMode();
+    [[nodiscard]] const std::string& GetCustomCommand() const { return m_customCommand; }
 
     void AddChatMessage(int clientIndex, const std::string& prefix, const std::string& sender, const std::string& text, float r, float g, float b, bool isTeam = false, bool isServer = false, bool isCommand = false);
     bool OnSayTextPacket(int clientIndex, const std::vector<std::string>& strings);
@@ -61,6 +64,7 @@ private:
     ModernChat() = default;
 
     ModernChatMode m_mode = ModernChatMode::Closed;
+    std::string m_customCommand;
     std::string m_buffer;
     double m_openTime = 0.0;
     int m_scrollOffset = 0;

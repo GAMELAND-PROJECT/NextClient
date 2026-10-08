@@ -30,6 +30,8 @@
 #include "DemoPlayerDialog.h"
 #include "OptionsSubMiscellaneous.h"
 #include "IClientVGUI.h"
+#include "../ServerBrowser/ServerBrowserDialog.h"
+#include "../ServerBrowser/DialogGameInfo.h"
 
 #include <utils/TaskRun.h>
 #include <utils/TaskRunImpl.h>
@@ -310,6 +312,10 @@ void CGameUI::ConnectToServer(const char *game, int IP, int port)
     // a gameplay frame.
     auxiliary_tasks_suspended_ = true;
 
+    servernetadr_t addr{};
+    addr.Init(IP, port, port);
+    GameUINext().SetLastConnectionInfo(addr, GuiConnectionSource::Unknown, "");
+
     if (g_pServerBrowser)
         g_pServerBrowser->ConnectToGame(IP, port);
 
@@ -402,6 +408,38 @@ int CGameUI::ContinueProgressBar(int progressPoint, float progressFraction)
 
 void CGameUI::StopProgressBar(bool bError, const char *failureReason, const char *extendedReason)
 {
+    if (bError)
+    {
+        auto containsFull = [](const char* s) {
+            if (!s || *s == '\0') return false;
+            std::string lower(s);
+            for (char& c : lower) c = (char)tolower((unsigned char)c);
+            return (lower.find("full") != std::string::npos);
+        };
+
+        if (containsFull(failureReason) || containsFull(extendedReason))
+        {
+            if (g_hLoadingDialog.Get())
+            {
+                g_hLoadingDialog->Close();
+                g_hLoadingDialog = NULL;
+            }
+
+            LastConnectionInfo info{};
+            GameUINext().GetLastConnectionInfo(&info);
+            if (info.address.GetIP() != 0 && info.address.GetConnectionPort() != 0)
+            {
+                uint16 qPort = info.address.GetQueryPort() ? info.address.GetQueryPort() : info.address.GetConnectionPort();
+                CDialogGameInfo *pGameDlg = ServerBrowserDialog().OpenGameInfoDialog(info.address.GetIP(), qPort, "");
+                if (pGameDlg)
+                {
+                    pGameDlg->SetServerFullAndAutoRetry();
+                }
+            }
+            return;
+        }
+    }
+
     if (!g_hLoadingDialog.Get() && bError)
         g_hLoadingDialog = new CLoadingDialog(BasePanel());
 

@@ -48,6 +48,9 @@ CDialogGameInfo::CDialogGameInfo(vgui2::Panel *parent, uint32 ip, uint16 port) :
     server_ip_(ip),
     server_port_(port)
 {
+    if (ip != 0 && port != 0)
+        server_item_.m_NetAdr.Init(ip, port, port);
+
     SetBounds(0, 0, 512, 512);
     SetMinimumSize(416, 340);
     SetDeleteSelfOnClose(true);
@@ -387,7 +390,7 @@ void CDialogGameInfo::ServerResponded(gameserveritem_t &server)
             FlashWindow();
 
             if (m_pAutoRetryJoin->IsSelected())
-                connect_success = ConnectToServer();
+                connect_success = ConnectToServer(false);
         }
         else
         {
@@ -435,6 +438,24 @@ void CDialogGameInfo::ShowAutoRetryOptions(bool state)
 
     SetBounds(x, y, wide, tall + growSize);
     InvalidateLayout();
+}
+
+void CDialogGameInfo::SetServerFullAndAutoRetry()
+{
+    m_bServerFull = true;
+    m_bShowAutoRetryToggle = true;
+
+    ShowAutoRetryOptions(true);
+
+    if (m_pAutoRetry)
+        m_pAutoRetry->SetSelected(true);
+    if (m_pAutoRetryJoin)
+        m_pAutoRetryJoin->SetSelected(true);
+
+    SendPingQueryIfNotAny();
+    SendPlayerQuery();
+    InvalidateLayout();
+    Repaint();
 }
 
 void CDialogGameInfo::SendPlayerQuery()
