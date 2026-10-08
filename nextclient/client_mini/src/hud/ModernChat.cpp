@@ -379,85 +379,97 @@ void ModernChat::Close()
 
 void ModernChat::Send()
 {
-    if (!m_buffer.empty())
+    // Convert Persian/Arabic digits (UTF-8 0xDB 0x90-0x99 and 0xD9 0xA0-0xA9) to standard ASCII 0-9
+    std::string normalized;
+    normalized.reserve(m_buffer.size());
+    for (size_t i = 0; i < m_buffer.size(); ++i)
     {
-        // Convert Persian/Arabic digits (UTF-8 0xDB 0x90-0x99 and 0xD9 0xA0-0xA9) to standard ASCII 0-9
-        std::string normalized;
-        normalized.reserve(m_buffer.size());
-        for (size_t i = 0; i < m_buffer.size(); ++i)
+        unsigned char b1 = static_cast<unsigned char>(m_buffer[i]);
+        if (b1 == 0xDB && i + 1 < m_buffer.size())
         {
-            unsigned char b1 = static_cast<unsigned char>(m_buffer[i]);
-            if (b1 == 0xDB && i + 1 < m_buffer.size())
+            unsigned char b2 = static_cast<unsigned char>(m_buffer[i + 1]);
+            if (b2 >= 0x90 && b2 <= 0x99) // Persian ۰ - ۹
             {
-                unsigned char b2 = static_cast<unsigned char>(m_buffer[i + 1]);
-                if (b2 >= 0x90 && b2 <= 0x99) // Persian ۰ - ۹
-                {
-                    normalized.push_back(static_cast<char>('0' + (b2 - 0x90)));
-                    i++;
-                    continue;
-                }
-            }
-            else if (b1 == 0xD9 && i + 1 < m_buffer.size())
-            {
-                unsigned char b2 = static_cast<unsigned char>(m_buffer[i + 1]);
-                if (b2 >= 0xA0 && b2 <= 0xA9) // Arabic ٠ - ٩
-                {
-                    normalized.push_back(static_cast<char>('0' + (b2 - 0xA0)));
-                    i++;
-                    continue;
-                }
-            }
-            normalized.push_back(m_buffer[i]);
-        }
-
-        std::string escaped;
-        escaped.reserve(normalized.size() + 8);
-        for (char c : normalized)
-        {
-            if (c == '"' || c == ';')
+                normalized.push_back(static_cast<char>('0' + (b2 - 0x90)));
+                i++;
                 continue;
-            escaped.push_back(c);
+            }
         }
-
-        if (!escaped.empty())
+        else if (b1 == 0xD9 && i + 1 < m_buffer.size())
         {
-            char cmd[320]{};
-            if (m_mode == ModernChatMode::CustomCommand && !m_customCommand.empty())
+            unsigned char b2 = static_cast<unsigned char>(m_buffer[i + 1]);
+            if (b2 >= 0xA0 && b2 <= 0xA9) // Arabic ٠ - ٩
             {
-                std::snprintf(cmd, sizeof(cmd), "%s \"%s\"\n", m_customCommand.c_str(), escaped.c_str());
+                normalized.push_back(static_cast<char>('0' + (b2 - 0xA0)));
+                i++;
+                continue;
             }
-            else if (m_mode == ModernChatMode::SayTeam)
-            {
-                std::snprintf(cmd, sizeof(cmd), "say_team \"%s\"\n", escaped.c_str());
-            }
-            else
-            {
-                std::snprintf(cmd, sizeof(cmd), "say \"%s\"\n", escaped.c_str());
-            }
+        }
+        normalized.push_back(m_buffer[i]);
+    }
 
-            m_lastLocalSentText = escaped;
-            m_lastLocalSentTime = (gEngfuncs.GetClientTime ? gEngfuncs.GetClientTime() : 0.0);
+    std::string escaped;
+    escaped.reserve(normalized.size() + 8);
+    for (char c : normalized)
+    {
+        if (c == '"' || c == ';')
+            continue;
+        escaped.push_back(c);
+    }
 
-            if (gEngfuncs.pfnClientCmd != nullptr)
-                gEngfuncs.pfnClientCmd(cmd);
+    // Check if input is only whitespace
+    bool isWhitespaceOnly = true;
+    for (char c : escaped)
+    {
+        if (static_cast<unsigned char>(c) > 32)
+        {
+            isWhitespaceOnly = false;
+            break;
+        }
+    }
+    if (isWhitespaceOnly)
+    {
+        escaped.clear();
+    }
 
-            if (m_mode != ModernChatMode::CustomCommand)
-            {
-                std::string_view sv = escaped;
-                while (!sv.empty() && (sv.front() == ' ' || sv.front() == '\t'))
-                    sv.remove_prefix(1);
+    char cmd[320]{};
+    if (m_mode == ModernChatMode::CustomCommand && !m_customCommand.empty())
+    {
+        std::snprintf(cmd, sizeof(cmd), "%s \"%s\"\n", m_customCommand.c_str(), escaped.c_str());
+    }
+    else if (m_mode == ModernChatMode::SayTeam)
+    {
+        std::snprintf(cmd, sizeof(cmd), "say_team \"%s\"\n", escaped.c_str());
+    }
+    else
+    {
+        std::snprintf(cmd, sizeof(cmd), "say \"%s\"\n", escaped.c_str());
+    }
 
-                if (sv.starts_with("/"))
-                {
-                    const char* myName = (gEngfuncs.pfnGetCvarString != nullptr ? gEngfuncs.pfnGetCvarString("name") : "");
-                    std::string sender = (myName != nullptr && *myName != 0) ? myName : "Me";
-                    AddChatMessage(0, "[CMD]", sender, escaped, 0.85f, 0.88f, 0.92f, false, false, true);
-                }
-                else
-                {
-                    OnLocalPlayerSend(m_mode, escaped);
-                }
-            }
+    if (!escaped.empty())
+    {
+        m_lastLocalSentText = escaped;
+        m_lastLocalSentTime = (gEngfuncs.GetClientTime ? gEngfuncs.GetClientTime() : 0.0);
+    }
+
+    if (gEngfuncs.pfnClientCmd != nullptr)
+        gEngfuncs.pfnClientCmd(cmd);
+
+    if (!escaped.empty() && m_mode != ModernChatMode::CustomCommand)
+    {
+        std::string_view sv = escaped;
+        while (!sv.empty() && (sv.front() == ' ' || sv.front() == '\t'))
+            sv.remove_prefix(1);
+
+        if (sv.starts_with("/"))
+        {
+            const char* myName = (gEngfuncs.pfnGetCvarString != nullptr ? gEngfuncs.pfnGetCvarString("name") : "");
+            std::string sender = (myName != nullptr && *myName != 0) ? myName : "Me";
+            AddChatMessage(0, "[CMD]", sender, escaped, 0.85f, 0.88f, 0.92f, false, false, true);
+        }
+        else
+        {
+            OnLocalPlayerSend(m_mode, escaped);
         }
     }
 
@@ -1530,7 +1542,7 @@ void ModernChat::OnLocalPlayerSend(ModernChatMode mode, const std::string& messa
     AddChatMessage(localIndex, prefix, (myName && *myName) ? myName : "Me", message, r, g, b, isTeam, false, false);
 }
 
-int ModernChat::HandleKey(int down, int keynum, const char* /*pszCurrentBinding*/)
+int ModernChat::HandleKey(int down, int keynum, const char* pszCurrentBinding)
 {
     if (!IsOpen())
         return 1;
@@ -1565,8 +1577,9 @@ int ModernChat::HandleKey(int down, int keynum, const char* /*pszCurrentBinding*
         return 0;
     }
 
-    if (keynum == kMouse1) // Left Click -> Do NOT send prematurely while aiming/clicking
+    if (keynum == kMouse1) // Left Click -> Send!
     {
+        Send();
         return 0;
     }
 
@@ -1582,14 +1595,14 @@ int ModernChat::HandleKey(int down, int keynum, const char* /*pszCurrentBinding*
     }
 
     // 2. Keyboard Navigation
-    // GoldSrc Enter keys: K_ENTER (13), K_KP_ENTER (141 or 170), 250
-    if (keynum == 13 || keynum == 141 || keynum == 170 || keynum == 250)
+    // GoldSrc Enter keys: K_ENTER (13), K_KP_ENTER (141 or 169), 250
+    if (keynum == 13 || keynum == 141 || keynum == 169 || keynum == 250)
     {
         Send();
         return 0;
     }
 
-    if (keynum == 27) // Escape (K_ESCAPE 27)
+    if (keynum == 27 || (pszCurrentBinding != nullptr && (!Q_stricmp(pszCurrentBinding, "cancelselect") || !Q_stricmp(pszCurrentBinding, "escape")))) // Escape -> Instant Cancel!
     {
         Cancel();
         return 0;
@@ -1613,24 +1626,25 @@ int ModernChat::HandleKey(int down, int keynum, const char* /*pszCurrentBinding*
         return 0;
     }
 
-    // NumPad digits and symbols in GoldSrc:
+    // NumPad digits and symbols in GoldSrc (from engine/keydefs.h):
     char npChar = 0;
     switch (keynum)
     {
-        case 160: npChar = '0'; break; // K_KP_INS
-        case 161: npChar = '1'; break; // K_KP_END
-        case 162: npChar = '2'; break; // K_KP_DOWNARROW
-        case 163: npChar = '3'; break; // K_KP_PGDN
-        case 164: npChar = '4'; break; // K_KP_LEFTARROW
-        case 165: npChar = '5'; break; // K_KP_5
-        case 166: npChar = '6'; break; // K_KP_RIGHTARROW
-        case 167: npChar = '7'; break; // K_KP_HOME
-        case 168: npChar = '8'; break; // K_KP_UPARROW
-        case 169: npChar = '9'; break; // K_KP_PGUP (NumPad 9!)
-        case 171: npChar = '/'; break; // K_KP_SLASH
-        case 172: npChar = '-'; break; // K_KP_MINUS
-        case 173: npChar = '+'; break; // K_KP_PLUS
-        case 174: npChar = '.'; break; // K_KP_DEL
+        case 170: npChar = '0'; break; // K_KP_INS
+        case 166: npChar = '1'; break; // K_KP_END
+        case 167: npChar = '2'; break; // K_KP_DOWNARROW
+        case 168: npChar = '3'; break; // K_KP_PGDN
+        case 163: npChar = '4'; break; // K_KP_LEFTARROW
+        case 164: npChar = '5'; break; // K_KP_5
+        case 165: npChar = '6'; break; // K_KP_RIGHTARROW
+        case 160: npChar = '7'; break; // K_KP_HOME
+        case 161: npChar = '8'; break; // K_KP_UPARROW
+        case 162: npChar = '9'; break; // K_KP_PGUP
+        case 171: npChar = '.'; break; // K_KP_DEL
+        case 172: npChar = '/'; break; // K_KP_SLASH
+        case 173: npChar = '-'; break; // K_KP_MINUS
+        case 174: npChar = '+'; break; // K_KP_PLUS
+        case 42:  npChar = '*'; break; // Keypad multiply '*'
         default: break;
     }
 

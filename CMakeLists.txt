@@ -1,8 +1,11 @@
 cmake_minimum_required(VERSION 3.21)
 project(NextClient VERSION 0.0.1)
 
-option(GAMELAND_HOME_CLIENT "Build GameLand Home Client edition" ON)
-if (GAMELAND_HOME_CLIENT)
+option(GAMELAND_HOME_CLIENT "Build GameLand Home Client edition (removes LAN / listen server)" ON)
+if (GAMELAND_HOME_CLIENT STREQUAL "OFF" OR GAMELAND_HOME_CLIENT STREQUAL "0" OR GAMELAND_HOME_CLIENT STREQUAL "FALSE")
+    message(STATUS ">>> Building GameLand GAMENET edition (LAN and New Game enabled)")
+else ()
+    message(STATUS ">>> Building GameLand HOME Client edition (Home Client restrictions enabled)")
     add_compile_definitions(GAMELAND_HOME_CLIENT=1)
 endif ()
 
@@ -128,22 +131,12 @@ if (MSVC)
 endif ()
 
 # Install directory: cache variable with env fallback and branch auto-detection
-if (DEFINED ENV{NEXTCLIENT_INSTALL_DIR} AND NOT NEXTCLIENT_INSTALL_DIR)
-    set(NEXTCLIENT_INSTALL_DIR "$ENV{NEXTCLIENT_INSTALL_DIR}" CACHE PATH "NextClient install directory")
-elseif (NOT NEXTCLIENT_INSTALL_DIR)
-    execute_process(
-        COMMAND git rev-parse --abbrev-ref HEAD
-        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-        OUTPUT_VARIABLE CURRENT_GIT_BRANCH
-        OUTPUT_STRIP_TRAILING_WHITESPACE
-        ERROR_QUIET
-    )
-    if (CURRENT_GIT_BRANCH STREQUAL "کلاین-های-خونگی")
-        set(NEXTCLIENT_INSTALL_DIR "F:/Allclient" CACHE PATH "NextClient install directory")
-    else ()
-        set(NEXTCLIENT_INSTALL_DIR "D:/Allclient" CACHE PATH "NextClient install directory")
-    endif ()
+if (GAMELAND_HOME_CLIENT STREQUAL "OFF" OR GAMELAND_HOME_CLIENT STREQUAL "0" OR GAMELAND_HOME_CLIENT STREQUAL "FALSE")
+    set(NEXTCLIENT_INSTALL_DIR "D:/Allclient" CACHE PATH "NextClient install directory" FORCE)
+else ()
+    set(NEXTCLIENT_INSTALL_DIR "F:/Allclient" CACHE PATH "NextClient install directory" FORCE)
 endif ()
+message(STATUS ">>> NEXTCLIENT_INSTALL_DIR configured as: ${NEXTCLIENT_INSTALL_DIR}")
 
 # custom build target
 if (NOT NEXTCLIENT_BUILD_TESTS)
