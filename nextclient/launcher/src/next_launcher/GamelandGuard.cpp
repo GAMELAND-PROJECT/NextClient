@@ -216,6 +216,198 @@ namespace gameland_guard
         return true;
     }
 
+    // Returns the resolved destination address of a JMP/CALL/Detour instruction,
+    // following up to 4 relay/trampoline jumps if needed.
+    static uintptr_t ResolveHookDestination(const unsigned char* pfn)
+    {
+        if (!pfn)
+            return 0;
+
+        __try
+        {
+            uintptr_t current = reinterpret_cast<uintptr_t>(pfn);
+            for (int depth = 0; depth < 4; ++depth)
+            {
+                const unsigned char* b = reinterpret_cast<const unsigned char*>(current);
+                if (!b)
+                    break;
+
+                // 0xE9 xx xx xx xx : JMP rel32
+                if (b[0] == 0xE9)
+                {
+                    int32_t rel = *reinterpret_cast<const int32_t*>(b + 1);
+                    current = current + 5 + rel;
+                }
+                // 0xEB xx : JMP rel8
+                else if (b[0] == 0xEB)
+                {
+                    int8_t rel = *reinterpret_cast<const int8_t*>(b + 1);
+                    current = current + 2 + rel;
+                }
+                // 0xFF 0x25 xx xx xx xx : JMP dword ptr [addr]
+                else if (b[0] == 0xFF && b[1] == 0x25)
+                {
+                    uintptr_t* pDword = *reinterpret_cast<uintptr_t* const*>(b + 2);
+                    if (pDword && !IsBadReadPtr(pDword, sizeof(uintptr_t)))
+                        current = *pDword;
+                    else
+                        break;
+                }
+                // 0x68 xx xx xx xx 0xC3 : PUSH imm32; RET
+                else if (b[0] == 0x68 && b[5] == 0xC3)
+                {
+                    current = *reinterpret_cast<const uintptr_t*>(b + 1);
+                }
+                else
+                {
+                    return current;
+                }
+            }
+            return current;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            return 0;
+        }
+    }
+
+    // Check if an address belongs to an authorized recording, streaming, overlay, or system module
+    static bool IsAddressInWhitelistedModule(uintptr_t addr)
+    {
+        if (addr == 0)
+            return false;
+
+        HMODULE hMod = nullptr;
+        if (GetModuleHandleExW(
+                GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                reinterpret_cast<LPCWSTR>(addr),
+                &hMod) && hMod)
+        {
+            wchar_t modulePath[MAX_PATH] = { 0 };
+            if (GetModuleFileNameW(hMod, modulePath, MAX_PATH))
+            {
+                std::wstring pathLower = ToLower(modulePath);
+                const wchar_t* fileName = wcsrchr(modulePath, L'\\');
+                std::wstring fileLower = ToLower(fileName ? (fileName + 1) : modulePath);
+
+                static const wchar_t* kWhitelistedModules[] = {
+                    // OBS Studio & Streamlabs
+                    L"graphics-hook32.dll",
+                    L"graphics-hook64.dll",
+                    L"obs-hook32.dll",
+                    L"obs-hook64.dll",
+                    L"obs-vulkan32.dll",
+                    L"obs-vulkan64.dll",
+                    L"hook32.dll",
+                    L"hook64.dll",
+                    // Steam Client Overlay
+                    L"gameoverlayrenderer.dll",
+                    L"gameoverlayrenderer64.dll",
+                    // Discord Overlay
+                    L"discordhook.dll",
+                    L"discordhook32.dll",
+                    L"discordhook64.dll",
+                    // RivaTuner Statistics Server (RTSS) / MSI Afterburner
+                    L"rtsshooks.dll",
+                    L"rtsshooks64.dll",
+                    L"rtss.dll",
+                    // Bandicam
+                    L"bdcam32.dll",
+                    L"bdcam64.dll",
+                    L"bdcam.dll",
+                    L"bdcap32.dll",
+                    // Mirillis Action!
+                    L"action_x86.dll",
+                    L"action_x64.dll",
+                    // Fraps
+                    L"fraps32.dll",
+                    L"fraps64.dll",
+                    L"fraps.dll",
+                    // Overwolf / Medal.tv
+                    L"owclient.dll",
+                    L"owexplorer.dll",
+                    L"medal-hook32.dll",
+                    L"medal-hook64.dll",
+                    // NVIDIA ShadowPlay / GeForce Experience
+                    L"nvspcap.dll",
+                    L"nvspcap64.dll",
+                    L"geforce_overlay.dll",
+                    L"nvvideoencode.dll",
+                    L"nvd3d9wrap.dll",
+                    // AMD Radeon ReLive
+                    L"amdfcd32.dll",
+                    L"amdfcd64.dll",
+                    L"amdfld32.dll",
+                    // PresentMon
+                    L"presentmon.dll",
+                    // System graphics & core runtimes
+                    L"opengl32.dll",
+                    L"gdi32.dll",
+                    L"user32.dll",
+                    L"d3d9.dll",
+                    L"dxgi.dll",
+                    L"nvoglv32.dll",
+                    L"atio6axx.dll",
+                    L"ig9ic32.dll",
+                    L"ig4ic32.dll",
+                    L"kernel32.dll",
+                    L"ntdll.dll",
+                    // Game internal binaries
+                    L"cstrike.exe",
+                    L"allclient.exe",
+                    L"next_engine_mini.dll",
+                    L"nitro_api2.dll",
+                    L"vgui2.dll",
+                    L"filesystem_proxy.dll",
+                    L"client_mini.dll",
+                    L"gameui.dll"
+                };
+
+                for (const auto* whitelisted : kWhitelistedModules)
+                {
+                    if (fileLower == whitelisted)
+                        return true;
+                }
+
+                // Path keyword checks for authorized software installations
+                if (pathLower.find(L"obs-studio") != std::wstring::npos ||
+                    pathLower.find(L"streamlabs") != std::wstring::npos ||
+                    pathLower.find(L"discord") != std::wstring::npos ||
+                    pathLower.find(L"steam") != std::wstring::npos ||
+                    pathLower.find(L"rivatuner") != std::wstring::npos ||
+                    pathLower.find(L"bandicam") != std::wstring::npos ||
+                    pathLower.find(L"nvidia") != std::wstring::npos ||
+                    pathLower.find(L"overwolf") != std::wstring::npos ||
+                    pathLower.find(L"medal") != std::wstring::npos)
+                {
+                    return true;
+                }
+            }
+        }
+        else
+        {
+            MEMORY_BASIC_INFORMATION mbi;
+            if (VirtualQuery(reinterpret_cast<LPCVOID>(addr), &mbi, sizeof(mbi)) != 0)
+            {
+                wchar_t mappedName[MAX_PATH] = { 0 };
+                if (GetMappedFileNameW(GetCurrentProcess(), mbi.BaseAddress, mappedName, MAX_PATH) > 0)
+                {
+                    std::wstring mappedLower = ToLower(mappedName);
+                    if (mappedLower.find(L"graphics-hook") != std::wstring::npos ||
+                        mappedLower.find(L"obs") != std::wstring::npos ||
+                        mappedLower.find(L"discord") != std::wstring::npos ||
+                        mappedLower.find(L"gameoverlay") != std::wstring::npos ||
+                        mappedLower.find(L"rtss") != std::wstring::npos)
+                    {
+                        return true;
+                    }
+                }
+            }
+        }
+
+        return false;
+    }
+
     // Verify OpenGL export function prologues for Wallhack/Chams hooks
     static void ScanOpenGLHooks()
     {
@@ -244,13 +436,143 @@ namespace gameland_guard
             // 0xE9 = relative JMP (detour)
             // 0xFF 0x25 = absolute indirect JMP
             // 0xEB = short JMP
-            if (bytes[0] == 0xE9 || (bytes[0] == 0xFF && bytes[1] == 0x25) || bytes[0] == 0xEB)
+            // 0x68 ... 0xC3 = PUSH addr; RET
+            bool isHooked = (bytes[0] == 0xE9) ||
+                            (bytes[0] == 0xFF && bytes[1] == 0x25) ||
+                            (bytes[0] == 0xEB) ||
+                            (bytes[0] == 0x68 && bytes[5] == 0xC3);
+
+            if (isHooked)
             {
+                uintptr_t destAddr = ResolveHookDestination(bytes);
+
+                // Check if the destination belongs to a whitelisted recording/overlay tool:
+                if (IsAddressInWhitelistedModule(destAddr))
+                {
+                    // Authorized capture/overlay tool (e.g. OBS Studio, Steam Overlay, Discord) -> PERMITTED!
+                    continue;
+                }
+
+                // For wglSwapBuffers specifically:
+                // Wallhacks do NOT operate through wglSwapBuffers (they must alter geometry/depth in glBegin/glClear/glDepthFunc).
+                // If wglSwapBuffers is hooked, check if it's any legitimate capture tool
+                if (strcmp(fnName, "wglSwapBuffers") == 0)
+                {
+                    HMODULE hDestMod = nullptr;
+                    if (GetModuleHandleExW(
+                            GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                            reinterpret_cast<LPCWSTR>(destAddr),
+                            &hDestMod) && hDestMod)
+                    {
+                        wchar_t destModPath[MAX_PATH] = { 0 };
+                        if (GetModuleFileNameW(hDestMod, destModPath, MAX_PATH))
+                        {
+                            std::wstring destLower = ToLower(destModPath);
+                            if (destLower.find(L"hook") != std::wstring::npos ||
+                                destLower.find(L"capture") != std::wstring::npos ||
+                                destLower.find(L"record") != std::wstring::npos ||
+                                destLower.find(L"stream") != std::wstring::npos ||
+                                destLower.find(L"overlay") != std::wstring::npos ||
+                                destLower.find(L"video") != std::wstring::npos)
+                            {
+                                continue;
+                            }
+                        }
+                    }
+                }
+
+                // If not whitelisted and truly an unauthorized hook -> Trigger Anti-Cheat violation!
                 wchar_t desc[256];
                 swprintf_s(desc, L"تغییر غیرمجاز در تابع رندرینگ %hs (OpenGL Hook/Wallhack)", fnName);
                 OnViolation(L"هوک رندرینگ گرافیکی (وال‌هک)", desc);
             }
         }
+    }
+
+    // Check if an external overlay process is an authorized recording, streaming, or system tool
+    static bool IsWhitelistedOverlayProcess(DWORD pid)
+    {
+        if (pid == 0 || pid == GetCurrentProcessId())
+            return true;
+
+        HANDLE hProc = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+        if (!hProc)
+            return false;
+
+        wchar_t procPath[MAX_PATH] = { 0 };
+        DWORD pathLen = MAX_PATH;
+        bool whitelisted = false;
+
+        if (QueryFullProcessImageNameW(hProc, 0, procPath, &pathLen))
+        {
+            std::wstring pathLower = ToLower(procPath);
+            const wchar_t* fileName = wcsrchr(procPath, L'\\');
+            std::wstring exeLower = ToLower(fileName ? (fileName + 1) : procPath);
+
+            static const wchar_t* kWhitelistedProcesses[] = {
+                L"obs64.exe",
+                L"obs32.exe",
+                L"obs.exe",
+                L"streamlabs obs.exe",
+                L"streamlabs desktop.exe",
+                L"slobs.exe",
+                L"discord.exe",
+                L"discordcanary.exe",
+                L"discordptb.exe",
+                L"steam.exe",
+                L"gameoverlayui.exe",
+                L"rtss.exe",
+                L"msiafterburner.exe",
+                L"bdcam.exe",
+                L"action.exe",
+                L"fraps.exe",
+                L"nvidia share.exe",
+                L"nvcontainer.exe",
+                L"nvsphelper64.exe",
+                L"radeonsoftware.exe",
+                L"amdrsserv.exe",
+                L"dwm.exe",
+                L"explorer.exe",
+                L"applicationframehost.exe",
+                L"shellexperiencehost.exe",
+                L"textinputhost.exe",
+                L"ctfmon.exe",
+                L"sharex.exe",
+                L"lightshot.exe",
+                L"snippingtool.exe",
+                L"screentogif.exe",
+                L"overwolf.exe",
+                L"overwolfbrowser.exe",
+                L"medal.exe"
+            };
+
+            for (const auto* target : kWhitelistedProcesses)
+            {
+                if (exeLower == target)
+                {
+                    whitelisted = true;
+                    break;
+                }
+            }
+
+            if (!whitelisted)
+            {
+                if (pathLower.find(L"obs-studio") != std::wstring::npos ||
+                    pathLower.find(L"streamlabs") != std::wstring::npos ||
+                    pathLower.find(L"discord") != std::wstring::npos ||
+                    pathLower.find(L"steam") != std::wstring::npos ||
+                    pathLower.find(L"nvidia") != std::wstring::npos ||
+                    pathLower.find(L"overwolf") != std::wstring::npos ||
+                    pathLower.find(L"medal") != std::wstring::npos ||
+                    pathLower.find(L"bandicam") != std::wstring::npos)
+                {
+                    whitelisted = true;
+                }
+            }
+        }
+
+        CloseHandle(hProc);
+        return whitelisted;
     }
 
     // Scan for transparent external overlay windows (External ESP)
@@ -273,6 +595,31 @@ namespace gameland_guard
         // External ESP overlays typically have WS_EX_LAYERED and WS_EX_TRANSPARENT
         if ((exStyle & WS_EX_LAYERED) && (exStyle & WS_EX_TRANSPARENT))
         {
+            // Check process ownership of this window first
+            DWORD pid = 0;
+            GetWindowThreadProcessId(hwnd, &pid);
+            if (pid != 0 && pid != GetCurrentProcessId())
+            {
+                if (IsWhitelistedOverlayProcess(pid))
+                {
+                    // Authorized recording/overlay/system window -> Skip!
+                    return TRUE;
+                }
+            }
+
+            // Check window class name (e.g. Windows capture frame or tooltips)
+            wchar_t className[128] = { 0 };
+            GetClassNameW(hwnd, className, 127);
+            std::wstring classLower = ToLower(className);
+            if (classLower.find(L"graphicscapture") != std::wstring::npos ||
+                classLower.find(L"corewindow") != std::wstring::npos ||
+                classLower.find(L"tooltip") != std::wstring::npos ||
+                classLower.find(L"dwm") != std::wstring::npos ||
+                classLower.find(L"qt") != std::wstring::npos)
+            {
+                return TRUE;
+            }
+
             RECT winRect;
             if (GetWindowRect(hwnd, &winRect))
             {

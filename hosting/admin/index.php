@@ -597,21 +597,43 @@ function readUpdatesData(): array
 {
     $path = dataPath(FILE_UPDATES);
     if (!is_file($path)) {
-        return [];
+        return ['home' => [], 'gamenet' => []];
     }
     $content = file_get_contents($path);
     if ($content === false) {
-        return [];
+        return ['home' => [], 'gamenet' => []];
     }
     $decoded = json_decode($content, true);
-    return is_array($decoded) ? $decoded : [];
+    if (!is_array($decoded)) {
+        return ['home' => [], 'gamenet' => []];
+    }
+
+    if (isset($decoded['home']) || isset($decoded['gamenet'])) {
+        return [
+            'home' => is_array($decoded['home'] ?? null) ? $decoded['home'] : [],
+            'gamenet' => is_array($decoded['gamenet'] ?? null) ? $decoded['gamenet'] : []
+        ];
+    }
+
+    $normalized = ['home' => [], 'gamenet' => []];
+    foreach ($decoded as $key => $val) {
+        if (!is_array($val)) continue;
+        $ed = strtolower((string)($val['edition'] ?? ''));
+        if ($ed === 'home' || strcasecmp((string)$key, 'HOME') === 0) {
+            $normalized['home'][(string)$key] = $val;
+        } else {
+            $normalized['gamenet'][(string)$key] = $val;
+        }
+    }
+    return $normalized;
 }
 
 function writeUpdatesData(array $data): void
 {
     $content = json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
-    backupAndAtomicWrite(FILE_UPDATES, $content !== false ? $content : '{}');
+    backupAndAtomicWrite(FILE_UPDATES, $content !== false ? $content : '{"home":{},"gamenet":{}}');
 }
+
 
 function iranToday(): DateTimeImmutable
 {
@@ -953,7 +975,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             writeSubscriptionRows($rows);
             flash('success', 'رمز نصب گیمنت باطل شد.');
         } elseif ($action === 'upload_update') {
+            $edition = strtolower(trim((string)($_POST['update_edition'] ?? 'home')));
+            if ($edition !== 'gamenet') {
+                $edition = 'home';
+            }
             $tag = strtoupper(trim((string)($_POST['update_tag'] ?? '')));
+            if ($edition === 'home') {
+                $tag = 'HOME';
+            }
             $version = trim((string)($_POST['update_version'] ?? ''));
             $forced = !empty($_POST['update_forced']);
 
@@ -1000,8 +1029,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             if ($version === '' && preg_match('/Version:\s*([0-9\.]+)/i', $bInfo, $mVer)) {
                                 $version = trim($mVer[1]);
                             }
-                            if (($tag === '' || $tag === 'DEFAULT') && preg_match('/Client tag:\s*([A-Za-z0-9_-]+)/i', $bInfo, $mTag)) {
-                                $tag = strtoupper(trim($mTag[1]));
+                            if ($edition === 'gamenet' && ($tag === '' || $tag === 'DEFAULT') && preg_match('/Client tag:\s*([A-Za-z0-9_-]+)/i', $bInfo, $mTag)) {
+                                $detectedTag = strtoupper(trim($mTag[1]));
+                                if ($detectedTag !== 'HOME') {
+                                    $tag = $detectedTag;
+                                }
                             }
                         }
                         $zip->close();
@@ -1015,20 +1047,35 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     }
                 }
 
-                // 3. شناسایی تگ از نام فایل در صورت نیاز
-                if ($tag === '' || $tag === 'DEFAULT') {
-                    if (preg_match('/[aA]llclient-([A-Za-z0-9_-]+)-/', $originalName, $fnTag)) {
-                        $tag = strtoupper($fnTag[1]);
+                // 3. شناسایی خودکار نسخه و تگ از نام فایل در صورت لزوم
+                if (preg_match('/[aA]llclient[-_]?[hH]ome/i', $originalName) || preg_match('/[hH]ome[-_]?[pP]atch/i', $originalName)) {
+                    $edition = 'home';
+                    $tag = 'HOME';
+                } elseif ($edition === 'gamenet') {
+                    if ($tag === '' || $tag === 'DEFAULT') {
+                        if (preg_match('/[aA]llclient-([A-Za-z0-9_-]+)-/', $originalName, $fnTag)) {
+                            $detected = strtoupper($fnTag[1]);
+                            if ($detected === 'HOME') {
+                                $edition = 'home';
+                                $tag = 'HOME';
+                            } else {
+                                $tag = $detected;
+                            }
+                        }
+                    }
+                    if ($tag === '') {
+                        $tag = 'GAMELAND';
                     }
                 }
-                if ($tag === '') {
-                    $tag = 'GAMELAND';
+
+                if ($edition === 'home') {
+                    $tag = 'HOME';
                 }
 
                 // 4. افزایش خودکار نسخه در صورت عدم تشخیص
                 $updates = readUpdatesData();
                 if ($version === '') {
-                    $lastVer = $updates[$tag]['version'] ?? '0.0.1';
+                    $lastVer = $updates[$edition][$tag]['version'] ?? '0.0.1';
                     $parts = explode('.', $lastVer);
                     if (count($parts) >= 2) {
                         $parts[count($parts) - 1] = (int)$parts[count($parts) - 1] + 1;
@@ -1042,7 +1089,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     throw new RuntimeException('شماره نسخه باید قالبی مانند 0.0.2 یا 1.0.0 داشته باشد.');
                 }
 
-                $filename = "Allclient_Patch_{$tag}_v{$version}.{$origExt}";
+                if ($edition === 'home') {
+                    $filename = "Allclient_Patch_HOME_v{$version}.{$origExt}";
+                } else {
+                    $filename = "Allclient_Patch_GAMENET_{$tag}_v{$version}.{$origExt}";
+                }
                 $destPath = $downloadsDir . DIRECTORY_SEPARATOR . $filename;
 
                 if (!move_uploaded_file($file['tmp_name'], $destPath)) {
@@ -1071,7 +1122,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $version = '0.0.2';
                     }
                 }
-                if ($tag === '') {
+                if ($edition === 'home') {
+                    $tag = 'HOME';
+                } elseif ($tag === '') {
                     $tag = 'GAMELAND';
                 }
             } else {
@@ -1079,7 +1132,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
 
             $updates = readUpdatesData();
-            $updates[$tag] = [
+            $updates[$edition][$tag] = [
+                'edition' => $edition,
                 'tag' => $tag,
                 'version' => $version,
                 'download_url' => $downloadUrl,
@@ -1092,14 +1146,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'updated_at_jalali' => dateTimeToJalali(iranToday()) . ' ' . (new DateTime('now', new DateTimeZone('Asia/Tehran')))->format('H:i')
             ];
             writeUpdatesData($updates);
-            flash('success', "آپدیت نسخه {$version} برای تگ {$tag} با موفقیت فعال شد.");
+            $editionTitle = ($edition === 'home') ? 'نسخه خانگی (Home)' : "نسخه گیم‌نت ({$tag})";
+            flash('success', "آپدیت نسخه {$version} برای {$editionTitle} با موفقیت فعال شد.");
         } elseif ($action === 'delete_update') {
+            $edition = strtolower(trim((string)($_POST['update_edition'] ?? 'gamenet')));
+            if ($edition !== 'home') {
+                $edition = 'gamenet';
+            }
             $tag = strtoupper(trim((string)($_POST['update_tag'] ?? '')));
             $updates = readUpdatesData();
-            if (isset($updates[$tag])) {
-                unset($updates[$tag]);
+            if (isset($updates[$edition][$tag])) {
+                unset($updates[$edition][$tag]);
                 writeUpdatesData($updates);
-                flash('success', "آپدیت مربوط به تگ {$tag} غیرفعال شد.");
+                $editionTitle = ($edition === 'home') ? 'نسخه خانگی' : "تگ گیم‌نت {$tag}";
+                flash('success', "آپدیت مربوط به {$editionTitle} غیرفعال شد.");
             } else {
                 throw new RuntimeException('آپدیت مورد نظر یافت نشد.');
             }
@@ -1222,7 +1282,7 @@ $defaultHomeExpiry = addJalaliMonths(dateTimeToJalali(iranToday()), 1);
       <button class="panel-tab active" type="button" data-panel="dashboard" aria-selected="true"><span class="tab-icon">⌂</span><span>داشبورد</span></button>
       <button class="panel-tab" type="button" data-panel="subscriptions" aria-selected="false"><span class="tab-icon">◫</span><span>اشتراک‌ها</span><b><?= count($tagRows) ?></b></button>
       <button class="panel-tab" type="button" data-panel="home_clients" aria-selected="false"><span class="tab-icon">🏠</span><span>کلاینت‌های خانگی</span><b><?= count($homeClientRows) ?></b></button>
-      <button class="panel-tab" type="button" data-panel="updates" aria-selected="false"><span class="tab-icon">↑</span><span>آپدیت‌ها</span><b><?= count($updatesData ?? []) ?></b></button>
+      <button class="panel-tab" type="button" data-panel="updates" aria-selected="false"><span class="tab-icon">↑</span><span>آپدیت‌ها</span><b><?= (count($updatesData['home'] ?? []) + count($updatesData['gamenet'] ?? [])) ?></b></button>
       <button class="panel-tab" type="button" data-panel="settings" aria-selected="false"><span class="tab-icon">⚙</span><span>تنظیمات</span></button>
     </nav>
 
@@ -1482,27 +1542,52 @@ $defaultHomeExpiry = addJalaliMonths(dateTimeToJalali(iranToday()), 1);
 
     <section class="updates panel-view" data-panel-view="updates">
       <div class="section-heading">
-        <div><span class="eyebrow">UPDATES SYSTEM</span><h2>مدیریت و بارگذاری آپدیت کلاینت</h2><p>انتشار آپدیت‌های سبک (ZIP) یا نصبی (EXE)، تعیین نسخه و اعمال خودکار به کلاینت‌ها</p></div>
+        <div><span class="eyebrow">UPDATES SYSTEM</span><h2>مدیریت و بارگذاری آپدیت کلاینت (تفکیک خانگی و گیم‌نت)</h2><p>انتشار مستقل پچ‌های سبک (ZIP) یا نصبی برای نسخه خانگی و نسخه گیم‌نت به صورت کاملاً ایزوله</p></div>
       </div>
 
       <div class="grid dashboard-grid" style="margin-bottom: 24px;">
         <article class="card">
-          <div class="card-title"><div><h2>بارگذاری آپدیت جدید</h2><p>فایل پچ فشرده (.zip حدود ۳ تا ۱۰ مگابایت) یا اینستالر (.exe) را آپلود کنید.</p></div><span class="pill">UPLOAD</span></div>
+          <div class="card-title"><div><h2>بارگذاری آپدیت جدید</h2><p>فایل پچ فشرده (.zip حدود ۳ تا ۱۰ مگابایت) یا اینستالر (.exe) را انتخاب کنید.</p></div><span class="pill">UPLOAD</span></div>
           <form method="post" enctype="multipart/form-data" autocomplete="off">
             <input type="hidden" name="csrf" value="<?= escape(csrfToken()) ?>">
             <input type="hidden" name="action" value="upload_update">
             
-            <label>تگ گیم‌نت / کلاینت
-              <select id="update-tag-select" name="update_tag" class="ltr" style="min-height: 44px; border: 1px solid #334c67; border-radius: 10px; padding: 11px 13px; background: var(--input); color: var(--text);">
-                <option value="GAMELAND">GAMELAND (پیش‌فرض عمومی)</option>
-                <option value="DEFAULT">DEFAULT (همگانی برای تمامی تگ‌ها)</option>
-                <?php foreach ($tagRows as $tRow): ?>
-                  <?php if (strtoupper($tRow['build']) !== 'GAMELAND'): ?>
-                    <option value="<?= escape($tRow['build']) ?>"><?= escape($tRow['build']) ?> (<?= escape($tRow['player']) ?>)</option>
-                  <?php endif; ?>
-                <?php endforeach; ?>
-              </select>
+            <label style="margin-bottom: 6px;">کانال و نسخه کلاینت هدف:
+              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 6px;">
+                <label id="lbl-edition-home" style="display: flex; flex-direction: column; gap: 6px; padding: 12px 14px; border: 2px solid var(--primary); background: rgba(0, 210, 160, 0.08); border-radius: 10px; cursor: pointer;">
+                  <div style="display: flex; align-items: center; gap: 8px;">
+                    <input type="radio" name="update_edition" value="home" checked id="edition-radio-home" style="width: auto; min-height: auto;">
+                    <strong style="color: var(--text);">🏠 نسخه خانگی (Home)</strong>
+                  </div>
+                  <span style="font-size: 11px; color: var(--muted); line-height: 1.5;">ویژه بازیکنان خانگی (بدون Listen Server، احراز هویت با دیوایس‌هش)</span>
+                </label>
+                <label id="lbl-edition-gamenet" style="display: flex; flex-direction: column; gap: 6px; padding: 12px 14px; border: 1px solid var(--border); background: var(--input); border-radius: 10px; cursor: pointer;">
+                  <div style="display: flex; align-items: center; gap: 8px;">
+                    <input type="radio" name="update_edition" value="gamenet" id="edition-radio-gamenet" style="width: auto; min-height: auto;">
+                    <strong style="color: var(--text);">🎮 نسخه گیم‌نت (GameNet)</strong>
+                  </div>
+                  <span style="font-size: 11px; color: var(--muted); line-height: 1.5;">ویژه سیستم‌های گیم‌نت و کلوب‌ها (دارای LAN، تگ‌های اختصاصی)</span>
+                </label>
+              </div>
             </label>
+
+            <div id="home-tag-notice" style="padding: 10px 14px; background: rgba(0,210,160,0.1); border: 1px solid rgba(0,210,160,0.25); border-radius: 8px; color: #45d59a; font-size: 12px; margin-bottom: 12px;">
+              ✓ پچ به صورت یکپارچه و ایزوله برای تمامی کلاینت‌های خانگی منتشر می‌شود (تگ هدف: <strong>HOME</strong>). کلاینت‌های گیم‌نت به این پچ دسترسی نخواهند داشت.
+            </div>
+
+            <div id="gamenet-tag-wrapper" style="display: none; margin-bottom: 12px;">
+              <label>تگ گیم‌نت / کلوب
+                <select id="update-tag-select" name="update_tag" class="ltr" style="min-height: 44px; border: 1px solid #334c67; border-radius: 10px; padding: 11px 13px; background: var(--input); color: var(--text);">
+                  <option value="GAMELAND">GAMELAND (پیش‌فرض عمومی گیم‌نت)</option>
+                  <option value="DEFAULT">DEFAULT (همگانی برای تمامی گیم‌نت‌ها)</option>
+                  <?php foreach ($tagRows as $tRow): ?>
+                    <?php if (strtoupper($tRow['build']) !== 'GAMELAND'): ?>
+                      <option value="<?= escape($tRow['build']) ?>"><?= escape($tRow['build']) ?> (<?= escape($tRow['player']) ?>)</option>
+                    <?php endif; ?>
+                  <?php endforeach; ?>
+                </select>
+              </label>
+            </div>
 
             <label>شماره نسخه جدید (اختیاری - خودکار از فایل استخراج می‌شود)
               <input id="update-version-input" class="ltr" type="text" name="update_version" placeholder="خودکار از فایل یا دلخواه (مثلاً 0.0.2)" pattern="^\d+(\.\d+){1,3}$">
@@ -1527,30 +1612,43 @@ $defaultHomeExpiry = addJalaliMonths(dateTimeToJalali(iranToday()), 1);
         </article>
 
         <article class="card">
-          <div class="card-title"><div><h2>راهنمای پچ سبک و تست زنده</h2><p>مشخصات فنی سیستم پچ و ابزار بررسی API</p></div><span class="pill">INFO</span></div>
+          <div class="card-title"><div><h2>راهنمای فنی و تفکیک کانال‌ها</h2><p>ایزولاسیون کامل نسخه خانگی و نسخه گیم‌نت</p></div><span class="pill">ISOLATED</span></div>
           <div style="font-size: 13px; line-height: 1.8; color: var(--muted);">
-            <p><strong style="color: var(--text);">نسخه پایه کلاینت:</strong> <code class="ltr" style="color: var(--primary);">0.0.1</code></p>
-            <p><strong style="color: var(--text);">عملکرد خودکار کلاینت:</strong> در زمان باز شدن بازی، کلاینت به آدرس <code class="ltr" style="color: #45d59a;">/update_api.php</code> درخواست می‌زند. اگر نسخه‌ای که در پنل قرار می‌دهید بزرگتر از نسخه کلاینت باشد، برنامه به صورت خودکار کاربر را به آپدیت هدایت می‌کند.</p>
-            <p><strong style="color: var(--text);">پچ کم‌حجم ZIP:</strong> پچ زیپ شامل فایل‌های <code class="ltr">GameUI.dll</code>, <code class="ltr">client_mini.dll</code>, <code class="ltr">cstrike.exe</code> و کتابخانه‌ها است (حدود ۴ مگابایت فشرده) و توسط <code class="ltr">updater.exe</code> بدون نیاز به نصب مجدد بازی سریعاً جایگزین می‌شود.</p>
+            <p><strong style="color: var(--text);">ایزولاسیون کامل:</strong> پچ نسخه خانگی فقط توسط لانچرهای نسخه خانگی دریافت می‌شود و به هیچ عنوان به گیم‌نت‌ها داده نمی‌شود. بالعکس، پچ‌های گیم‌نت فقط توسط سیستم‌های کلوب دریافت خواهند شد.</p>
+            <p><strong style="color: var(--text);">پچ کم‌حجم ZIP:</strong> پچ زیپ شامل فایل‌های <code class="ltr">GameUI.dll</code>, <code class="ltr">client_mini.dll</code>, <code class="ltr">cstrike.exe</code> و کتابخانه‌ها است (حدود ۴ مگابایت فشرده) و توسط <code class="ltr">updater.exe</code> بدون دستکاری کانفیگ شخصی یا لیسنس کاربر سریعاً جایگزین می‌شود.</p>
           </div>
           <hr style="border: 0; border-top: 1px solid var(--border); margin: 15px 0;">
-          <label>تست زنده API برای تگ GAMELAND با نسخه 0.0.1:
-            <div style="display: flex; gap: 8px; margin-top: 6px;">
-              <a href="../update_api.php?tag=GAMELAND&version=0.0.1" target="_blank" class="button secondary" style="text-decoration: none; display: flex; align-items: center; justify-content: center; width: 100%;">بررسی پاسخ JSON در پنجره جدید ↗</a>
-            </div>
-          </label>
+          <div style="display: flex; flex-direction: column; gap: 10px;">
+            <label>تست زنده API برای نسخه خانگی (Home):
+              <div style="display: flex; gap: 8px; margin-top: 4px;">
+                <a href="../update_api.php?edition=home&version=0.0.1" target="_blank" class="button secondary" style="text-decoration: none; display: flex; align-items: center; justify-content: center; width: 100%;">بررسی پاسخ JSON نسخه خانگی (0.0.1) ↗</a>
+              </div>
+            </label>
+            <label>تست زنده API برای نسخه گیم‌نت (GameNet):
+              <div style="display: flex; gap: 8px; margin-top: 4px;">
+                <a href="../update_api.php?edition=gamenet&tag=GAMELAND&version=0.0.1" target="_blank" class="button secondary" style="text-decoration: none; display: flex; align-items: center; justify-content: center; width: 100%;">بررسی پاسخ JSON گیم‌نت GAMELAND ↗</a>
+              </div>
+            </label>
+          </div>
         </article>
       </div>
 
-      <div class="card">
-        <div class="card-title"><div><h2>لیست آپدیت‌های فعال</h2><p>تمام آپدیت‌های فعال به تفکیک تگ در فایل updates.json</p></div><span class="pill"><?= count($updatesData ?? []) ?> فعال</span></div>
-        <?php if (!empty($updatesData)): ?>
+      <!-- 1. Home Edition Active Updates -->
+      <div class="card" style="margin-bottom: 24px; border-top: 3px solid #00d2a0;">
+        <div class="card-title">
+          <div>
+            <h2>🏠 آپدیت‌های فعال نسخه خانگی (Home Edition)</h2>
+            <p>پچ اختصاصی برای کاربران خانگی Allclient در کانال home</p>
+          </div>
+          <span class="pill" style="background: rgba(0,210,160,0.15); color: #00d2a0; border: 1px solid rgba(0,210,160,0.3);"><?= count($updatesData['home'] ?? []) ?> فعال</span>
+        </div>
+        <?php if (!empty($updatesData['home'])): ?>
           <div style="overflow-x: auto;">
             <table style="width: 100%; border-collapse: collapse; text-align: right; font-size: 13px;">
               <thead>
                 <tr style="border-bottom: 1px solid var(--border); color: var(--muted);">
-                  <th style="padding: 10px;">تگ کلاینت</th>
-                  <th style="padding: 10px;">نسخه هدف</th>
+                  <th style="padding: 10px;">کانال و تگ</th>
+                  <th style="padding: 10px;">نسخه فعال</th>
                   <th style="padding: 10px;">نوع و حجم</th>
                   <th style="padding: 10px;">تاریخ انتشار</th>
                   <th style="padding: 10px;">لینک دانلود</th>
@@ -1559,18 +1657,19 @@ $defaultHomeExpiry = addJalaliMonths(dateTimeToJalali(iranToday()), 1);
                 </tr>
               </thead>
               <tbody>
-                <?php foreach ($updatesData as $uTag => $uInfo): ?>
+                <?php foreach ($updatesData['home'] as $uTag => $uInfo): ?>
                   <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
-                    <td style="padding: 12px 10px;"><strong class="ltr" style="color: #45cfff;"><?= escape((string)$uTag) ?></strong></td>
-                    <td style="padding: 12px 10px;"><span class="ltr" style="background: rgba(69, 207, 255, 0.15); padding: 4px 8px; border-radius: 6px; font-weight: bold; color: #45cfff;"><?= escape((string)($uInfo['version'] ?? '')) ?></span></td>
+                    <td style="padding: 12px 10px;"><strong class="ltr" style="color: #00d2a0;">🏠 <?= escape((string)$uTag) ?></strong></td>
+                    <td style="padding: 12px 10px;"><span class="ltr" style="background: rgba(0, 210, 160, 0.15); padding: 4px 8px; border-radius: 6px; font-weight: bold; color: #00d2a0;"><?= escape((string)($uInfo['version'] ?? '')) ?></span></td>
                     <td style="padding: 12px 10px;"><?= escape((string)($uInfo['size'] ?? '')) ?> (<?= escape(strtoupper((string)($uInfo['type'] ?? 'ZIP'))) ?>)</td>
                     <td style="padding: 12px 10px;"><?= escape((string)($uInfo['updated_at_jalali'] ?? $uInfo['updated_at'] ?? '')) ?></td>
-                    <td style="padding: 12px 10px;"><a href="<?= escape((string)($uInfo['download_url'] ?? '')) ?>" target="_blank" class="ltr" style="color: var(--primary); text-decoration: none; word-break: break-all;" title="دانلود مستقیم فایل">دریافت فایل ⤓</a></td>
-                    <td style="padding: 12px 10px;"><a href="../update_api.php?tag=<?= urlencode((string)$uTag) ?>&version=0.0.1" target="_blank" style="color: var(--green); text-decoration: none;">تست (0.0.1) ↗</a></td>
+                    <td style="padding: 12px 10px;"><a href="<?= escape((string)($uInfo['download_url'] ?? '')) ?>" target="_blank" class="ltr" style="color: var(--primary); text-decoration: none; word-break: break-all;" title="دانلود مستقیم پچ">دریافت فایل ⤓</a></td>
+                    <td style="padding: 12px 10px;"><a href="../update_api.php?edition=home&tag=<?= urlencode((string)$uTag) ?>&version=0.0.1" target="_blank" style="color: var(--green); text-decoration: none;">تست (0.0.1) ↗</a></td>
                     <td style="padding: 12px 10px;">
-                      <form method="post" class="confirm-form" data-confirm="آیا از غیرفعال‌سازی این آپدیت مطمئن هستید؟" style="margin: 0;">
+                      <form method="post" class="confirm-form" data-confirm="آیا از غیرفعال‌سازی این آپدیت برای نسخه خانگی مطمئن هستید؟" style="margin: 0;">
                         <input type="hidden" name="csrf" value="<?= escape(csrfToken()) ?>">
                         <input type="hidden" name="action" value="delete_update">
+                        <input type="hidden" name="update_edition" value="home">
                         <input type="hidden" name="update_tag" value="<?= escape((string)$uTag) ?>">
                         <button class="button danger" type="submit" style="min-height: 32px; padding: 4px 12px; font-size: 12px;">حذف</button>
                       </form>
@@ -1581,9 +1680,63 @@ $defaultHomeExpiry = addJalaliMonths(dateTimeToJalali(iranToday()), 1);
             </table>
           </div>
         <?php else: ?>
-          <div class="empty-state" style="text-align: center; padding: 30px; color: var(--muted);">
-            <strong>در حال حاضر هیچ آپدیتی ثبت نشده است.</strong>
-            <p style="margin-top: 6px;">با استفاده از فرم بالا می‌توانید اولین فایل آپدیت را برای تگ دلخواه بارگذاری کنید.</p>
+          <div class="empty-state" style="text-align: center; padding: 25px; color: var(--muted);">
+            <strong>در حال حاضر هیچ آپدیتی برای نسخه خانگی ثبت نشده است.</strong>
+            <p style="margin-top: 6px;">با استفاده از فرم بالا و انتخاب گزینه «نسخه خانگی» می‌توانید اولین پچ خانگی را بارگذاری کنید.</p>
+          </div>
+        <?php endif; ?>
+      </div>
+
+      <!-- 2. GameNet Edition Active Updates -->
+      <div class="card" style="border-top: 3px solid #45cfff;">
+        <div class="card-title">
+          <div>
+            <h2>🎮 آپدیت‌های فعال نسخه گیم‌نت (GameNet Edition)</h2>
+            <p>پچ‌های اختصاصی کلوب‌ها و گیم‌نت‌ها به تفکیک تگ در کانال gamenet</p>
+          </div>
+          <span class="pill" style="background: rgba(69, 207, 255, 0.15); color: #45cfff; border: 1px solid rgba(69, 207, 255, 0.3);"><?= count($updatesData['gamenet'] ?? []) ?> فعال</span>
+        </div>
+        <?php if (!empty($updatesData['gamenet'])): ?>
+          <div style="overflow-x: auto;">
+            <table style="width: 100%; border-collapse: collapse; text-align: right; font-size: 13px;">
+              <thead>
+                <tr style="border-bottom: 1px solid var(--border); color: var(--muted);">
+                  <th style="padding: 10px;">تگ گیم‌نت</th>
+                  <th style="padding: 10px;">نسخه فعال</th>
+                  <th style="padding: 10px;">نوع و حجم</th>
+                  <th style="padding: 10px;">تاریخ انتشار</th>
+                  <th style="padding: 10px;">لینک دانلود</th>
+                  <th style="padding: 10px;">تست API</th>
+                  <th style="padding: 10px;">عملیات</th>
+                </tr>
+              </thead>
+              <tbody>
+                <?php foreach ($updatesData['gamenet'] as $uTag => $uInfo): ?>
+                  <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
+                    <td style="padding: 12px 10px;"><strong class="ltr" style="color: #45cfff;">🎮 <?= escape((string)$uTag) ?></strong></td>
+                    <td style="padding: 12px 10px;"><span class="ltr" style="background: rgba(69, 207, 255, 0.15); padding: 4px 8px; border-radius: 6px; font-weight: bold; color: #45cfff;"><?= escape((string)($uInfo['version'] ?? '')) ?></span></td>
+                    <td style="padding: 12px 10px;"><?= escape((string)($uInfo['size'] ?? '')) ?> (<?= escape(strtoupper((string)($uInfo['type'] ?? 'ZIP'))) ?>)</td>
+                    <td style="padding: 12px 10px;"><?= escape((string)($uInfo['updated_at_jalali'] ?? $uInfo['updated_at'] ?? '')) ?></td>
+                    <td style="padding: 12px 10px;"><a href="<?= escape((string)($uInfo['download_url'] ?? '')) ?>" target="_blank" class="ltr" style="color: var(--primary); text-decoration: none; word-break: break-all;" title="دانلود مستقیم فایل">دریافت فایل ⤓</a></td>
+                    <td style="padding: 12px 10px;"><a href="../update_api.php?edition=gamenet&tag=<?= urlencode((string)$uTag) ?>&version=0.0.1" target="_blank" style="color: var(--green); text-decoration: none;">تست (0.0.1) ↗</a></td>
+                    <td style="padding: 12px 10px;">
+                      <form method="post" class="confirm-form" data-confirm="آیا از غیرفعال‌سازی این آپدیت برای گیم‌نت مطمئن هستید؟" style="margin: 0;">
+                        <input type="hidden" name="csrf" value="<?= escape(csrfToken()) ?>">
+                        <input type="hidden" name="action" value="delete_update">
+                        <input type="hidden" name="update_edition" value="gamenet">
+                        <input type="hidden" name="update_tag" value="<?= escape((string)$uTag) ?>">
+                        <button class="button danger" type="submit" style="min-height: 32px; padding: 4px 12px; font-size: 12px;">حذف</button>
+                      </form>
+                    </td>
+                  </tr>
+                <?php endforeach; ?>
+              </tbody>
+            </table>
+          </div>
+        <?php else: ?>
+          <div class="empty-state" style="text-align: center; padding: 25px; color: var(--muted);">
+            <strong>در حال حاضر هیچ آپدیتی برای نسخه گیم‌نت ثبت نشده است.</strong>
+            <p style="margin-top: 6px;">با استفاده از فرم بالا و انتخاب گزینه «نسخه گیم‌نت» می‌توانید پچ‌های کلوب‌ها را بارگذاری کنید.</p>
           </div>
         <?php endif; ?>
       </div>

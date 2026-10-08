@@ -9,7 +9,8 @@
 param(
     [string]$Version = "0.0.1",
     [string]$Tag = "GAMELAND",
-    [string]$BaseGameDir = "F:\Allclient",
+    [ValidateSet("Home", "GameNet", "All")][string]$Edition = "GameNet",
+    [string]$BaseGameDir = "D:\Allclient",
     [switch]$PatchOnly,
     [switch]$InstallerOnly
 )
@@ -23,6 +24,8 @@ function Write-Warn($msg) { Write-Host "    [WARN] $msg" -ForegroundColor Yellow
 $rootDir = $PSScriptRoot
 $outDir  = Join-Path $rootDir "out_release"
 New-Item -ItemType Directory -Force -Path $outDir | Out-Null
+
+$targetGameDir = if (Test-Path -LiteralPath $BaseGameDir) { $BaseGameDir } elseif (Test-Path "F:\Allclient") { "F:\Allclient" } else { "install" }
 
 # ---- Step 1: Compile binaries via CMake ----
 Write-Step "Building target binaries (BUILD_ALL)..."
@@ -56,17 +59,20 @@ foreach ($dll in $clDllsToSync) {
     }
 }
 
-# Sync to D:\Allclient
-foreach ($bin in $binariesToSync) {
-    $src = Join-Path $outBin $bin
-    if (Test-Path -LiteralPath $src -PathType Leaf) {
-        Copy-Item -LiteralPath $src -Destination (Join-Path "F:\Allclient" $bin) -Force
+# Sync to target client directory (D:\Allclient / BaseGameDir)
+if (Test-Path -LiteralPath $targetGameDir) {
+    Write-Step "Syncing built binaries to base game directory: $targetGameDir"
+    foreach ($bin in $binariesToSync) {
+        $src = Join-Path $outBin $bin
+        if (Test-Path -LiteralPath $src -PathType Leaf) {
+            Copy-Item -LiteralPath $src -Destination (Join-Path $targetGameDir $bin) -Force
+        }
     }
-}
-foreach ($dll in $clDllsToSync) {
-    $src = Join-Path $outBin "cstrike\cl_dlls\$dll"
-    if (Test-Path -LiteralPath $src -PathType Leaf) {
-        Copy-Item -LiteralPath $src -Destination (Join-Path "F:\Allclient" "cstrike\cl_dlls\$dll") -Force
+    foreach ($dll in $clDllsToSync) {
+        $src = Join-Path $outBin "cstrike\cl_dlls\$dll"
+        if (Test-Path -LiteralPath $src -PathType Leaf) {
+            Copy-Item -LiteralPath $src -Destination (Join-Path $targetGameDir "cstrike\cl_dlls\$dll") -Force
+        }
     }
 }
 
@@ -89,7 +95,7 @@ if (-not $InstallerOnly) {
     New-Item -ItemType Directory -Force -Path (Join-Path $patchStage "cstrike\cl_dlls") | Out-Null
 
     $outBin = Join-Path $rootDir "out\bin\Release"
-    $allclientDir = "F:\Allclient"
+    $allclientDir = $targetGameDir
 
     $binaries = @(
         "Allclient.exe",
@@ -103,8 +109,7 @@ if (-not $InstallerOnly) {
         "pinned_servers.txt",
         "mix_servers.txt",
         "build-info.txt",
-        "version.txt",
-        "allclient-install.ini"
+        "version.txt"
     )
 
     foreach ($bin in $binaries) {
@@ -134,8 +139,9 @@ if (-not $InstallerOnly) {
         }
     }
 
-    $versionedPatchZip = Join-Path $outDir "Allclient-v$Version-Patch.zip"
-    $latestPatchZip    = Join-Path $outDir "Allclient-Patch.zip"
+    $editionSuffix = if ($Edition -eq "Home") { "Home" } elseif ($Edition -eq "GameNet") { "GameNet" } else { "Universal" }
+    $versionedPatchZip = Join-Path $outDir "Allclient-$editionSuffix-v$Version-Patch.zip"
+    $latestPatchZip    = Join-Path $outDir "Allclient-$editionSuffix-Patch.zip"
 
     Remove-Item -LiteralPath $versionedPatchZip -Force -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $latestPatchZip -Force -ErrorAction SilentlyContinue
@@ -144,7 +150,7 @@ if (-not $InstallerOnly) {
     Copy-Item -LiteralPath $versionedPatchZip -Destination $latestPatchZip -Force
 
     $patchMb = [math]::Round((Get-Item -LiteralPath $versionedPatchZip).Length / 1MB, 2)
-    Write-OK "Patch ZIP created successfully ($patchMb MB):"
+    Write-OK "Patch ZIP created successfully ($patchMb MB, Edition: $editionSuffix):"
     Write-Host "    -> $versionedPatchZip" -ForegroundColor Yellow
     Write-Host "    -> $latestPatchZip" -ForegroundColor Yellow
 }

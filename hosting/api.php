@@ -50,28 +50,52 @@ if ($action === 'get_tags') {
 }
 
 if ($action === 'upload_update') {
-    $tag = $_POST['tag'] ?? '';
-    $version = $_POST['version'] ?? '';
+    $edition = strtolower(trim((string)($_POST['edition'] ?? '')));
+    $tag = trim((string)($_POST['tag'] ?? ''));
+    $version = trim((string)($_POST['version'] ?? ''));
+
+    if ($edition === 'home' || strcasecmp($tag, 'HOME') === 0) {
+        $edition = 'home';
+        $tag = 'HOME';
+    } else {
+        $edition = 'gamenet';
+        if ($tag === '') $tag = 'DEFAULT';
+    }
     
-    if (!$tag || !$version || !isset($_FILES['file'])) {
+    if (!$version || !isset($_FILES['file'])) {
         echo json_encode(['success' => false, 'error' => 'Missing parameters']);
         exit;
     }
     
     $file = $_FILES['file'];
     $ext = pathinfo($file['name'], PATHINFO_EXTENSION);
-    $filename = "patch_{$tag}_v{$version}.{$ext}";
+    if ($edition === 'home') {
+        $filename = "Allclient_Patch_HOME_v{$version}.{$ext}";
+    } else {
+        $filename = "Allclient_Patch_GAMENET_{$tag}_v{$version}.{$ext}";
+    }
     $destination = $download_host_dir . $filename;
     
     if (move_uploaded_file($file['tmp_name'], $destination)) {
-        $updates = json_decode(file_get_contents($updates_file), true);
-        $updates[$tag] = [
+        $updates = json_decode(file_get_contents($updates_file), true) ?: [];
+        if (!isset($updates['home'])) $updates['home'] = [];
+        if (!isset($updates['gamenet'])) $updates['gamenet'] = [];
+
+        $payload = [
+            'edition' => $edition,
+            'tag' => $tag,
             'version' => $version,
             'download_url' => "http://dl.gameland.cam/downloads/" . $filename,
+            'filename' => $filename,
             'updated_at' => date('Y-m-d H:i:s')
         ];
-        file_put_contents($updates_file, json_encode($updates, JSON_PRETTY_PRINT));
-        echo json_encode(['success' => true, 'message' => 'Upload successful']);
+
+        $updates[$edition][$tag] = $payload;
+        // Keep flat structure for backwards compatibility
+        $updates[$tag] = $payload;
+
+        file_put_contents($updates_file, json_encode($updates, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+        echo json_encode(['success' => true, 'message' => 'Upload successful', 'edition' => $edition, 'tag' => $tag]);
     } else {
         echo json_encode(['success' => false, 'error' => 'Failed to move uploaded file']);
     }
