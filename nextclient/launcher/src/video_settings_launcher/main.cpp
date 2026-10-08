@@ -499,6 +499,26 @@ std::string ReadInstallGameNetTag()
     return data;
 }
 
+bool IsHomeClientEdition()
+{
+#if defined(GAMELAND_HOME_CLIENT) && GAMELAND_HOME_CLIENT
+    return true;
+#else
+    const auto iniPath = ExecutableRoot() / L"allclient-install.ini";
+    char clientType[64] = {0};
+    GetPrivateProfileStringA("Allclient", "ClientType", "", clientType, sizeof(clientType), NarrowUtf8(iniPath.wstring()).c_str());
+    if (_stricmp(clientType, "Home") == 0)
+        return true;
+
+    char devHash[64] = {0};
+    GetPrivateProfileStringA("Allclient", "DeviceHash", "", devHash, sizeof(devHash), NarrowUtf8(iniPath.wstring()).c_str());
+    if (strlen(devHash) == 24 && _stricmp(clientType, "GameNet") != 0)
+        return true;
+
+    return false;
+#endif
+}
+
 std::string ReadInstalledClientVersion()
 {
     // 1. Try reading version.txt directly from client root
@@ -2588,9 +2608,16 @@ void CheckLauncherUpdates(HWND window)
 {
     SetStatus(L"در حال بررسی بروزرسانی کلاینت...");
 
-    std::string tag = NEXTCLIENT_TAG;
+    const bool isHome = IsHomeClientEdition();
+    const std::string edition = isHome ? "home" : "gamenet";
+    std::string tag = isHome ? "HOME" : ReadInstallGameNetTag();
+    if (tag.empty())
+        tag = isHome ? "HOME" : NEXTCLIENT_TAG;
+    if (tag.empty())
+        tag = "GAMELAND";
+
     std::string version = ReadInstalledClientVersion();
-    std::string url = "http://gameland.cam/update_api.php?tag=" + tag + "&version=" + version;
+    std::string url = "http://gameland.cam/update_api.php?edition=" + edition + "&tag=" + UrlEncode(tag) + "&version=" + UrlEncode(version);
 
     HINTERNET hInternet = InternetOpenA("AllclientLauncher", INTERNET_OPEN_TYPE_DIRECT, NULL, NULL, 0);
     if (!hInternet)

@@ -9,6 +9,7 @@
 param(
     [string]$Version = "0.0.1",
     [string]$Tag = "GAMELAND",
+    [ValidateSet("Home", "GameNet", "All")][string]$Edition = "Home",
     [string]$BaseGameDir = "F:\Allclient",
     [switch]$PatchOnly,
     [switch]$InstallerOnly
@@ -103,8 +104,7 @@ if (-not $InstallerOnly) {
         "pinned_servers.txt",
         "mix_servers.txt",
         "build-info.txt",
-        "version.txt",
-        "allclient-install.ini"
+        "version.txt"
     )
 
     foreach ($bin in $binaries) {
@@ -134,8 +134,9 @@ if (-not $InstallerOnly) {
         }
     }
 
-    $versionedPatchZip = Join-Path $outDir "Allclient-v$Version-Patch.zip"
-    $latestPatchZip    = Join-Path $outDir "Allclient-Patch.zip"
+    $editionSuffix = if ($Edition -eq "Home") { "Home" } elseif ($Edition -eq "GameNet") { "GameNet" } else { "Universal" }
+    $versionedPatchZip = Join-Path $outDir "Allclient-$editionSuffix-v$Version-Patch.zip"
+    $latestPatchZip    = Join-Path $outDir "Allclient-$editionSuffix-Patch.zip"
 
     Remove-Item -LiteralPath $versionedPatchZip -Force -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $latestPatchZip -Force -ErrorAction SilentlyContinue
@@ -144,7 +145,7 @@ if (-not $InstallerOnly) {
     Copy-Item -LiteralPath $versionedPatchZip -Destination $latestPatchZip -Force
 
     $patchMb = [math]::Round((Get-Item -LiteralPath $versionedPatchZip).Length / 1MB, 2)
-    Write-OK "Patch ZIP created successfully ($patchMb MB):"
+    Write-OK "Patch ZIP created successfully ($patchMb MB, Edition: $editionSuffix):"
     Write-Host "    -> $versionedPatchZip" -ForegroundColor Yellow
     Write-Host "    -> $latestPatchZip" -ForegroundColor Yellow
 }

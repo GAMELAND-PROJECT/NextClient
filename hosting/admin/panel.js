@@ -124,11 +124,56 @@ installButton?.addEventListener('click', async () => {
 });
 window.addEventListener('appinstalled', () => { if (installButton) installButton.hidden = true; });
 
-// Smart auto-detection of version and tag from uploaded update file
+// Smart auto-detection of edition, version and tag from uploaded update file
 const updateFileInput = document.getElementById('update-file-input');
 const updateVersionInput = document.getElementById('update-version-input');
 const updateTagSelect = document.getElementById('update-tag-select');
 const updateDetectBanner = document.getElementById('update-detect-banner');
+const editionRadioHome = document.getElementById('edition-radio-home');
+const editionRadioGamenet = document.getElementById('edition-radio-gamenet');
+const lblEditionHome = document.getElementById('lbl-edition-home');
+const lblEditionGamenet = document.getElementById('lbl-edition-gamenet');
+const gamenetTagWrapper = document.getElementById('gamenet-tag-wrapper');
+const homeTagNotice = document.getElementById('home-tag-notice');
+
+function applyEditionUI(edition) {
+  if (edition === 'home') {
+    if (editionRadioHome) editionRadioHome.checked = true;
+    if (gamenetTagWrapper) gamenetTagWrapper.style.display = 'none';
+    if (homeTagNotice) homeTagNotice.style.display = 'block';
+    if (lblEditionHome) {
+      lblEditionHome.style.border = '2px solid var(--primary)';
+      lblEditionHome.style.background = 'rgba(0, 210, 160, 0.08)';
+    }
+    if (lblEditionGamenet) {
+      lblEditionGamenet.style.border = '1px solid var(--border)';
+      lblEditionGamenet.style.background = 'var(--input)';
+    }
+  } else {
+    if (editionRadioGamenet) editionRadioGamenet.checked = true;
+    if (gamenetTagWrapper) gamenetTagWrapper.style.display = 'block';
+    if (homeTagNotice) homeTagNotice.style.display = 'none';
+    if (lblEditionHome) {
+      lblEditionHome.style.border = '1px solid var(--border)';
+      lblEditionHome.style.background = 'var(--input)';
+    }
+    if (lblEditionGamenet) {
+      lblEditionGamenet.style.border = '2px solid #45cfff';
+      lblEditionGamenet.style.background = 'rgba(69, 207, 255, 0.08)';
+    }
+  }
+}
+
+if (editionRadioHome) {
+  editionRadioHome.addEventListener('change', () => {
+    if (editionRadioHome.checked) applyEditionUI('home');
+  });
+}
+if (editionRadioGamenet) {
+  editionRadioGamenet.addEventListener('change', () => {
+    if (editionRadioGamenet.checked) applyEditionUI('gamenet');
+  });
+}
 
 if (updateFileInput) {
   updateFileInput.addEventListener('change', () => {
@@ -138,13 +183,29 @@ if (updateFileInput) {
       return;
     }
     const name = file.name;
+    let detectedEdition = null;
     let detectedTag = null;
     let detectedVer = null;
 
-    // Detect tag from name like Allclient-GAMELAND-...
+    // Detect edition from name
+    if (/home/i.test(name)) {
+      detectedEdition = 'home';
+      detectedTag = 'HOME';
+    } else if (/gamenet/i.test(name)) {
+      detectedEdition = 'gamenet';
+    }
+
+    // Detect tag from name like Allclient-GAMELAND-... or Allclient-TAG-
     const tagMatch = name.match(/allclient-([A-Za-z0-9_-]+)-/i);
     if (tagMatch) {
-      detectedTag = tagMatch[1].toUpperCase();
+      const parsedTag = tagMatch[1].toUpperCase();
+      if (parsedTag === 'HOME') {
+        detectedEdition = 'home';
+        detectedTag = 'HOME';
+      } else {
+        if (!detectedEdition) detectedEdition = 'gamenet';
+        detectedTag = parsedTag;
+      }
     }
 
     // Detect version like v0.0.2 or 0.0.2
@@ -154,7 +215,13 @@ if (updateFileInput) {
     }
 
     let msg = `✓ فایل <strong>${name}</strong> انتخاب شد.`;
-    if (detectedTag && updateTagSelect) {
+
+    if (detectedEdition) {
+      applyEditionUI(detectedEdition);
+      msg += `<br>• کانال هدف: <strong>${detectedEdition === 'home' ? '🏠 نسخه خانگی (Home)' : '🎮 نسخه گیم‌نت (GameNet)'}</strong> به صورت هوشمند تشخیص داده شد.`;
+    }
+
+    if (detectedTag && detectedEdition === 'gamenet' && updateTagSelect) {
       let found = false;
       for (const opt of updateTagSelect.options) {
         if (opt.value.toUpperCase() === detectedTag) {
@@ -170,7 +237,7 @@ if (updateFileInput) {
         opt.selected = true;
         updateTagSelect.appendChild(opt);
       }
-      msg += `<br>• تگ کلاینت: <strong>${detectedTag}</strong> شناسایی و تنظیم شد.`;
+      msg += `<br>• تگ گیم‌نت: <strong>${detectedTag}</strong> شناسایی و تنظیم شد.`;
     }
 
     if (detectedVer && updateVersionInput) {
@@ -186,3 +253,4 @@ if (updateFileInput) {
     }
   });
 }
+
