@@ -144,6 +144,7 @@ HWND g_pointerSpeed{};
 HWND g_pointerSpeedValue{};
 HWND g_enhancePointer{};
 HWND g_status{};
+HWND g_launchButton{};
 HWND g_versionLabel{};
 HWND g_subscriptionState{};
 HWND g_subscriptionTag{};
@@ -160,6 +161,10 @@ HWND g_userPassword{};
 HWND g_userLoginBtn{};
 HWND g_userRegisterBtn{};
 HWND g_userStatusLabel{};
+HWND g_launchBtn{};
+static bool g_mandatoryUpdatePending = false;
+static std::string g_mandatoryUpdateUrl;
+static std::string g_mandatoryUpdateVersion;
 std::wstring g_activeUserPhone;
 std::string g_activeUserToken;
 static bool s_restoringSession = false;
@@ -2353,9 +2358,18 @@ void DrawActionButton(const DRAWITEMSTRUCT& item)
 
     if (item.CtlID == IdLaunch)
     {
-        fill = pressed ? RGB(0, 146, 112) : RGB(0, 178, 136);
-        border = focused ? kColorAccentHot : kColorAccent;
-        text = RGB(5, 15, 22);
+        if (g_mandatoryUpdatePending)
+        {
+            fill = pressed ? RGB(180, 45, 45) : RGB(215, 60, 50);
+            border = focused ? RGB(255, 120, 100) : RGB(255, 80, 60);
+            text = RGB(255, 255, 255);
+        }
+        else
+        {
+            fill = pressed ? RGB(0, 146, 112) : RGB(0, 178, 136);
+            border = focused ? kColorAccentHot : kColorAccent;
+            text = RGB(5, 15, 22);
+        }
     }
     else if (item.CtlID == IdDemoManager)
     {
@@ -2531,7 +2545,7 @@ void CreateControls(HWND window)
     SendMessageW(g_userStatusLabel, WM_SETFONT, reinterpret_cast<WPARAM>(g_badgeFont), TRUE);
 
     // ─── Section 4: Action Buttons ───
-    AddActionButton(window, L"اجرای بازی", 400, 452, 220, 48, IdLaunch, true);
+    g_launchButton = AddActionButton(window, L"اجرای بازی", 400, 452, 220, 48, IdLaunch, true);
     AddActionButton(window, L"بازنشانی", 210, 452, 160, 48, IdRestore);
     AddActionButton(window, L"انصراف", 60, 452, 130, 48, IdCancel);
 
@@ -2546,6 +2560,28 @@ void CreateControls(HWND window)
     SetMouseControls(g_mouseAtLastApply);
     RestoreUserSession(window);
     SetTimer(window, 998, 90000, nullptr);
+}
+
+void ExecuteUpdater(HWND window, const std::string& downloadUrl)
+{
+    SetStatus(L"در حال فراخوانی ابزار بروزرسانی...");
+    std::string execParams = "\"" + downloadUrl + "\"";
+    SHELLEXECUTEINFOA sei = { sizeof(sei) };
+    sei.fMask = SEE_MASK_NOCLOSEPROCESS;
+    sei.lpVerb = "open";
+    sei.lpFile = "updater.exe";
+    sei.lpParameters = execParams.c_str();
+    sei.nShow = SW_SHOWNORMAL;
+
+    if (ShellExecuteExA(&sei))
+    {
+        ExitProcess(0);
+    }
+    else
+    {
+        SetStatus(L"خطا در اجرای updater.exe", true);
+        MessageBoxW(window, L"خطا در اجرای updater.exe. لطفاً اتصال اینترنت خود را بررسی کنید.", L"خطای بروزرسانی", MB_ICONERROR);
+    }
 }
 
 void CheckLauncherUpdates(HWND window)
@@ -2634,7 +2670,18 @@ void CheckLauncherUpdates(HWND window)
                             latestVersion = response.substr(verPos, verEnd - verPos);
                     }
 
-                    SetStatus(L"آپدیت جدید آماده دریافت است.");
+                    g_mandatoryUpdatePending = true;
+                    g_mandatoryUpdateUrl = downloadUrl;
+                    g_mandatoryUpdateVersion = latestVersion;
+
+                    if (g_launchButton)
+                    {
+                        std::wstring btnText = L"دریافت آپدیت الزامی (v" + WidenAscii(latestVersion) + L")";
+                        SetWindowTextW(g_launchButton, btnText.c_str());
+                        InvalidateRect(g_launchButton, NULL, TRUE);
+                    }
+
+                    SetStatus(L"آپدیت الزامی جدید آماده دریافت است.", true);
 
                     std::wstring promptMsg = L"آپدیت جدید نسخه " + WidenAscii(latestVersion) +
                         L" برای کلاینت شما منتشر شده است.\n\n"
@@ -2646,24 +2693,7 @@ void CheckLauncherUpdates(HWND window)
 
                     if (userChoice == IDYES || userChoice == IDOK)
                     {
-                        SetStatus(L"در حال فراخوانی ابزار بروزرسانی...");
-                        std::string execParams = "\"" + downloadUrl + "\"";
-                        SHELLEXECUTEINFOA sei = { sizeof(sei) };
-                        sei.fMask = SEE_MASK_NOCLOSEPROCESS;
-                        sei.lpVerb = "open";
-                        sei.lpFile = "updater.exe";
-                        sei.lpParameters = execParams.c_str();
-                        sei.nShow = SW_SHOWNORMAL;
-
-                        if (ShellExecuteExA(&sei))
-                        {
-                            ExitProcess(0);
-                        }
-                        else
-                        {
-                            SetStatus(L"خطا در اجرای updater.exe", true);
-                            MessageBoxW(window, L"خطا در اجرای updater.exe. لطفاً اتصال اینترنت خود را بررسی کنید.", L"خطای بروزرسانی", MB_ICONERROR);
-                        }
+                        ExecuteUpdater(window, downloadUrl);
                     }
                     else
                     {
@@ -2735,6 +2765,11 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
         {
         case IDOK:
         case IdLaunch:
+            if (g_mandatoryUpdatePending)
+            {
+                ExecuteUpdater(window, g_mandatoryUpdateUrl);
+                return 0;
+            }
             if (ApplySettings())
             {
                 if (!IsUserAuthenticated())

@@ -120,6 +120,85 @@ static bool IsZipFile(const std::wstring& filePath) {
     return isZip;
 }
 
+static void BackupProtectedFiles(const std::wstring& gameDir, const std::wstring& backupDir) {
+    CreateDirectoryW(backupDir.c_str(), NULL);
+    CreateDirectoryW((backupDir + L"\\cstrike").c_str(), NULL);
+
+    const wchar_t* protectedRelPaths[] = {
+        L"\\cstrike\\config.cfg",
+        L"\\cstrike\\userconfig.cfg",
+        L"\\allclient-install.ini",
+        L"\\gameland_license.dat"
+    };
+
+    for (const auto* rel : protectedRelPaths) {
+        std::wstring src = gameDir + rel;
+        std::wstring dst = backupDir + rel;
+        if (PathFileExistsW(src.c_str())) {
+            CopyFileW(src.c_str(), dst.c_str(), FALSE);
+        }
+    }
+}
+
+static void RestoreProtectedFiles(const std::wstring& backupDir, const std::wstring& gameDir) {
+    const wchar_t* protectedRelPaths[] = {
+        L"\\cstrike\\config.cfg",
+        L"\\cstrike\\userconfig.cfg",
+        L"\\allclient-install.ini",
+        L"\\gameland_license.dat"
+    };
+
+    for (const auto* rel : protectedRelPaths) {
+        std::wstring src = backupDir + rel;
+        std::wstring dst = gameDir + rel;
+        if (PathFileExistsW(src.c_str())) {
+            CopyFileW(src.c_str(), dst.c_str(), FALSE);
+        }
+    }
+
+    // Clean up backup directory
+    for (const auto* rel : protectedRelPaths) {
+        DeleteFileW((backupDir + rel).c_str());
+    }
+    RemoveDirectoryW((backupDir + L"\\cstrike").c_str());
+    RemoveDirectoryW(backupDir.c_str());
+}
+
+static void ProcessCleanList(const std::wstring& gameDir) {
+    std::wstring actionsFiles[] = {
+        gameDir + L"\\actions.txt",
+        gameDir + L"\\clean_list.txt"
+    };
+
+    for (const auto& aFile : actionsFiles) {
+        if (!PathFileExistsW(aFile.c_str())) continue;
+
+        FILE* fp = nullptr;
+        if (_wfopen_s(&fp, aFile.c_str(), L"r, ccs=UTF-8") == 0 && fp) {
+            wchar_t line[1024];
+            while (fgetws(line, 1024, fp)) {
+                std::wstring s(line);
+                while (!s.empty() && (s.back() == L'\r' || s.back() == L'\n' || s.back() == L' '))
+                    s.pop_back();
+                size_t start = s.find_first_not_of(L" \t");
+                if (start != std::wstring::npos) s = s.substr(start);
+
+                if (s.rfind(L"DELETE ", 0) == 0 || s.rfind(L"DEL ", 0) == 0) {
+                    size_t sp = s.find(L' ');
+                    std::wstring targetRel = s.substr(sp + 1);
+                    while (!targetRel.empty() && targetRel.front() == L' ') targetRel.erase(0, 1);
+                    if (!targetRel.empty() && targetRel.find(L"..") == std::wstring::npos) {
+                        std::wstring targetFull = gameDir + L"\\" + targetRel;
+                        DeleteFileW(targetFull.c_str());
+                    }
+                }
+            }
+            fclose(fp);
+        }
+        DeleteFileW(aFile.c_str());
+    }
+}
+
 // Background Worker Thread
 static void UpdateWorkerThread(HWND hWnd) {
     PostMessage(hWnd, WM_UPDATE_STATUS, 0, (LPARAM)L"در حال بستن فرآیندهای باز بازی...");
@@ -129,6 +208,7 @@ static void UpdateWorkerThread(HWND hWnd) {
     wchar_t tempDir[MAX_PATH] = { 0 };
     GetTempPathW(MAX_PATH, tempDir);
     std::wstring downloadPath = std::wstring(tempDir) + L"NextClient_Update.zip";
+    std::wstring backupDir = std::wstring(tempDir) + L"GamelandUserBackup";
     DeleteFileW(downloadPath.c_str());
 
     PostMessage(hWnd, WM_UPDATE_STATUS, 0, (LPARAM)L"در حال برقراری ارتباط و دانلود پکیج جدید...");
@@ -142,12 +222,15 @@ static void UpdateWorkerThread(HWND hWnd) {
         return;
     }
 
-    PostMessage(hWnd, WM_UPDATE_STATUS, 0, (LPARAM)L"در حال استخراج و نصب فایل‌های جدید کلاینت...");
-    PostMessage(hWnd, WM_UPDATE_PROGRESS, 95, 0);
+    PostMessage(hWnd, WM_UPDATE_STATUS, 0, (LPARAM)L"در حال پشتیبان‌گیری از کانفیگ و نصب پکیج...");
+    PostMessage(hWnd, WM_UPDATE_PROGRESS, 92, 0);
 
     // Double check game processes are closed before overwriting
     KillGameProcesses();
     Sleep(500);
+
+    // 1. Guard user's personal configuration
+    BackupProtectedFiles(g_sGameDir, backupDir);
 
     bool updateSuccess = false;
     if (IsZipFile(downloadPath) || (g_sTargetUrl.length() >= 4 && _wcsicmp(g_sTargetUrl.c_str() + g_sTargetUrl.length() - 4, L".zip") == 0)) {
@@ -185,6 +268,12 @@ static void UpdateWorkerThread(HWND hWnd) {
     }
 
     DeleteFileW(downloadPath.c_str());
+
+    // 2. Restore user's personal configuration (100% preservation)
+    RestoreProtectedFiles(backupDir, g_sGameDir);
+
+    // 3. Process actions / cleanup list if present
+    ProcessCleanList(g_sGameDir);
 
     if (!updateSuccess) {
         PostMessage(hWnd, WM_UPDATE_ERROR, 0, (LPARAM)L"خطا در استخراج و جایگزینی فایل‌های آپدیت!");
