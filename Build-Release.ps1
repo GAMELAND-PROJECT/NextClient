@@ -34,7 +34,7 @@ New-Item -ItemType Directory -Force -Path $installStage | Out-Null
 New-Item -ItemType Directory -Force -Path (Join-Path $installStage "cstrike\cl_dlls") | Out-Null
 
 $homeClientFlag = if ($Edition -eq "Home") { "ON" } else { "OFF" }
-cmake --preset vs2022 -DGAMELAND_HOME_CLIENT=$homeClientFlag
+cmake --preset vs2022 "-DGAMELAND_HOME_CLIENT:BOOL=$homeClientFlag"
 if ($LASTEXITCODE -ne 0) {
     throw "CMake configuration failed!"
 }
