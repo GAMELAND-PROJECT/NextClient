@@ -20,4 +20,7 @@ namespace gameland_guard
 
     // Triggered upon violation discovery
     void OnViolation(const wchar_t* violationType, const wchar_t* details);
+
+    // Flushes queued violation reports to the host (gameland.cam)
+    void FlushPendingSecurityReports();
 }

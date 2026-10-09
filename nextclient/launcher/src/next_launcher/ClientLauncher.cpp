@@ -155,6 +155,9 @@ void ClientLauncher::Run()
 
     LOG(INFO) << "Branch: " << user_info_client_->GetUpdateBranch();
 
+    // GAMELAND Shield: Flush any queued security violation reports from previous sessions immediately
+    gameland_guard::FlushPendingSecurityReports();
+
     // Resolve the package entitlement once per launcher start. GameUI reads
     // only this result and never performs network work during gameplay.
     const GameNetAccessStatus online_access = QueryGameNetOnlineAccess();

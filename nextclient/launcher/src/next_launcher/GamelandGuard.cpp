@@ -1,4 +1,5 @@
 #include "GamelandGuard.h"
+#include "GameNetAccess.h"
 #include <tlhelp32.h>
 #include <psapi.h>
 #include <vector>
@@ -6,9 +7,13 @@
 #include <algorithm>
 #include <cwctype>
 #include <wincrypt.h>
+#include <fstream>
+#include <sstream>
+#include <shlobj.h>
 
 #pragma comment(lib, "psapi.lib")
 #pragma comment(lib, "advapi32.lib")
+#pragma comment(lib, "shell32.lib")
 
 namespace gameland_guard
 {
@@ -125,20 +130,6 @@ namespace gameland_guard
         return out;
     }
 
-    void OnViolation(const wchar_t* violationType, const wchar_t* details)
-    {
-        wchar_t message[1024];
-        swprintf_s(message, 
-            L"سیستم امنیتی GAMELAND Shield\n\n"
-            L"تخلف امنیتی شناسایی شد: %s\n"
-            L"توضیحات: %s\n\n"
-            L"جهت حفظ سلامت رقابت‌ها و عدالت بازی، اجرای بازی متوقف شد.",
-            violationType, details);
-
-        MessageBoxW(nullptr, message, L"GAMELAND Anti-Cheat Error", MB_OK | MB_ICONERROR | MB_TOPMOST);
-        ExitProcess(0x1337);
-    }
-
     static std::wstring GetGameRootDirectory()
     {
         wchar_t exePath[MAX_PATH] = { 0 };
@@ -154,6 +145,221 @@ namespace gameland_guard
         wchar_t curDir[MAX_PATH] = { 0 };
         GetCurrentDirectoryW(MAX_PATH, curDir);
         return curDir;
+    }
+
+    static std::string NarrowUtf8(const std::wstring& value)
+    {
+        if (value.empty()) return {};
+        int size = WideCharToMultiByte(CP_UTF8, 0, value.c_str(), static_cast<int>(value.size()), nullptr, 0, nullptr, nullptr);
+        if (size <= 0) return {};
+        std::string result(size, '\0');
+        WideCharToMultiByte(CP_UTF8, 0, value.c_str(), static_cast<int>(value.size()), result.data(), size, nullptr, nullptr);
+        return result;
+    }
+
+    static std::string UrlEncode(const std::string& value)
+    {
+        std::ostringstream out;
+        constexpr char hex[] = "0123456789ABCDEF";
+        for (unsigned char ch : value)
+        {
+            if ((ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') ||
+                (ch >= '0' && ch <= '9') || ch == '_' || ch == '-' || ch == '.')
+                out << static_cast<char>(ch);
+            else
+                out << '%' << hex[ch >> 4] << hex[ch & 0x0F];
+        }
+        return out.str();
+    }
+
+    static std::wstring GetGameRootReportPath()
+    {
+        return GetGameRootDirectory() + L"\\.security_violation.dat";
+    }
+
+    static std::wstring GetAppDataReportPath()
+    {
+        wchar_t appData[MAX_PATH] = { 0 };
+        if (SUCCEEDED(SHGetFolderPathW(nullptr, CSIDL_LOCAL_APPDATA, nullptr, 0, appData)))
+        {
+            std::wstring dir = std::wstring(appData) + L"\\Gameland";
+            CreateDirectoryW(dir.c_str(), nullptr);
+            return dir + L"\\.security_violation.dat";
+        }
+        return L"";
+    }
+
+    static void FlushFileReports(const std::wstring& filePath)
+    {
+        if (filePath.empty()) return;
+        DWORD attrs = GetFileAttributesW(filePath.c_str());
+        if (attrs == INVALID_FILE_ATTRIBUTES || (attrs & FILE_ATTRIBUTE_DIRECTORY))
+            return;
+
+        std::ifstream inFile(filePath);
+        if (!inFile) return;
+
+        std::vector<std::string> lines;
+        std::string line;
+        while (std::getline(inFile, line))
+        {
+            while (!line.empty() && (line.back() == '\r' || line.back() == '\n' || line.back() == ' '))
+                line.pop_back();
+            if (!line.empty())
+                lines.push_back(line);
+        }
+        inFile.close();
+
+        if (lines.empty())
+        {
+            DeleteFileW(filePath.c_str());
+            return;
+        }
+
+        std::vector<std::string> unsent;
+        for (const auto& payload : lines)
+        {
+            std::string response;
+            bool ok = PostWithDirectSocket("gameland.cam", 80, "/security_report.php", "gameland.cam", payload, response);
+            if (!ok || response.find("\"success\":true") == std::string::npos)
+            {
+                unsent.push_back(payload);
+            }
+        }
+
+        if (unsent.empty())
+        {
+            DeleteFileW(filePath.c_str());
+        }
+        else
+        {
+            SetFileAttributesW(filePath.c_str(), FILE_ATTRIBUTE_NORMAL);
+            std::ofstream outFile(filePath, std::ios::trunc);
+            if (outFile)
+            {
+                for (const auto& r : unsent)
+                    outFile << r << "\n";
+                outFile.close();
+                SetFileAttributesW(filePath.c_str(), FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_SYSTEM);
+            }
+        }
+    }
+
+    void FlushPendingSecurityReports()
+    {
+        FlushFileReports(GetGameRootReportPath());
+        FlushFileReports(GetAppDataReportPath());
+    }
+
+    static void RecordAndQueueViolation(const wchar_t* violationType, const wchar_t* details)
+    {
+        std::wstring gameDir = GetGameRootDirectory();
+
+        // 1. Hardware ID
+        std::string deviceHash = Compute24CharDeviceHash();
+
+        // 2. Client type & tag from allclient-install.ini
+        std::string iniFile = NarrowUtf8(gameDir) + "\\allclient-install.ini";
+        char clientTypeBuf[64] = { 0 };
+        GetPrivateProfileStringA("Allclient", "ClientType", "", clientTypeBuf, sizeof(clientTypeBuf), iniFile.c_str());
+
+        char tagBuf[128] = { 0 };
+        GetPrivateProfileStringA("Allclient", "GameNetTag", "", tagBuf, sizeof(tagBuf), iniFile.c_str());
+
+        char phoneBuf[64] = { 0 };
+        GetPrivateProfileStringA("Allclient", "PhoneNumber", "", phoneBuf, sizeof(phoneBuf), iniFile.c_str());
+
+        std::string clientType = clientTypeBuf;
+        std::string tag = tagBuf;
+        std::string phone = phoneBuf;
+
+        if (tag.empty())
+        {
+            char envTag[128] = { 0 };
+            if (GetEnvironmentVariableA("NEXTCLIENT_GAMENET_TAG", envTag, sizeof(envTag)) > 0)
+                tag = envTag;
+        }
+
+        std::string playerTag;
+        char envPlayer[64] = { 0 };
+        if (GetEnvironmentVariableA("NEXTCLIENT_PLAYER_NAME_TAG", envPlayer, sizeof(envPlayer)) > 0)
+            playerTag = envPlayer;
+
+        // 3. System info
+        wchar_t compBuf[MAX_COMPUTERNAME_LENGTH + 1] = { 0 };
+        DWORD cSize = MAX_COMPUTERNAME_LENGTH + 1;
+        GetComputerNameW(compBuf, &cSize);
+
+        wchar_t userBuf[256] = { 0 };
+        DWORD uSize = 256;
+        GetUserNameW(userBuf, &uSize);
+
+        // 4. Timestamp
+        SYSTEMTIME st;
+        GetLocalTime(&st);
+        char timeBuf[64];
+        sprintf_s(timeBuf, "%04d-%02d-%02d %02d:%02d:%02d", st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond);
+
+        // 5. Construct payload
+        std::string payload = "auth_secret=" + UrlEncode("GL_SECRET_HANDSHAKE_KEY_2026_NCL_GAMELAND") +
+            "&device_hash=" + UrlEncode(deviceHash) +
+            "&client_type=" + UrlEncode(clientType) +
+            "&tag=" + UrlEncode(tag) +
+            "&player_tag=" + UrlEncode(playerTag) +
+            "&phone=" + UrlEncode(phone) +
+            "&computer_name=" + UrlEncode(NarrowUtf8(compBuf)) +
+            "&user_name=" + UrlEncode(NarrowUtf8(userBuf)) +
+            "&violation_type=" + UrlEncode(NarrowUtf8(violationType)) +
+            "&violation_details=" + UrlEncode(NarrowUtf8(details)) +
+            "&detected_at=" + UrlEncode(timeBuf);
+
+        // 6. Save to disk queue
+        const std::wstring primaryPath = GetGameRootReportPath();
+        const std::wstring appDataPath = GetAppDataReportPath();
+
+        auto appendPayload = [](const std::wstring& path, const std::string& data)
+        {
+            if (path.empty()) return;
+            SetFileAttributesW(path.c_str(), FILE_ATTRIBUTE_NORMAL);
+            std::ofstream out(path, std::ios::app);
+            if (out)
+            {
+                out << data << "\n";
+                out.close();
+                SetFileAttributesW(path.c_str(), FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_SYSTEM);
+            }
+        };
+
+        appendPayload(primaryPath, payload);
+        appendPayload(appDataPath, payload);
+
+        // 7. Attempt immediate direct socket transmission
+        std::string response;
+        if (PostWithDirectSocket("gameland.cam", 80, "/security_report.php", "gameland.cam", payload, response))
+        {
+            if (response.find("\"success\":true") != std::string::npos)
+            {
+                DeleteFileW(primaryPath.c_str());
+                DeleteFileW(appDataPath.c_str());
+            }
+        }
+    }
+
+    void OnViolation(const wchar_t* violationType, const wchar_t* details)
+    {
+        RecordAndQueueViolation(violationType, details);
+
+        wchar_t message[1024];
+        swprintf_s(message, 
+            L"سیستم امنیتی GAMELAND Shield\n\n"
+            L"تخلف امنیتی شناسایی شد: %s\n"
+            L"توضیحات: %s\n\n"
+            L"گزارش تخلف همراه با مشخصات این سیستم به سرور مرکزی ارسال گردید.\n"
+            L"جهت حفظ سلامت رقابت‌ها و عدالت بازی، اجرای بازی متوقف شد.",
+            violationType, details);
+
+        MessageBoxW(nullptr, message, L"GAMELAND Anti-Cheat Error", MB_OK | MB_ICONERROR | MB_TOPMOST);
+        ExitProcess(0x1337);
     }
 
     static std::string ComputeFileSha256Hex(const std::wstring& filePath)
@@ -1002,6 +1208,9 @@ namespace gameland_guard
     bool PreLaunchScan()
     {
         Initialize();
+
+        // Flush any pending security violation reports from previous runs or crashes
+        FlushPendingSecurityReports();
 
         if (!CheckProxyDlls())
             return false;

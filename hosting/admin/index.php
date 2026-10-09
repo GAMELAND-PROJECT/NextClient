@@ -4,6 +4,7 @@ declare(strict_types=1);
 const FILE_SERVERS = 'pinned_servers.txt';
 const FILE_MIX_SERVERS = 'mix_servers.txt';
 const FILE_HOME_CLIENTS = 'home_clients.json';
+const FILE_SECURITY_REPORTS = 'security_reports.json';
 const FILE_TAGS = 'client_tags.txt';
 const FILE_PASSWORD = 'server_password.txt';
 const FILE_FTP_CONFIG = 'ftp_config.txt';
@@ -256,13 +257,15 @@ function sendPanelBackup(): never
 {
     $backup = [
         'format' => 'allclient-admin-backup',
-        'version' => 2,
+        'version' => 3,
         'created_at' => gmdate('c'),
         'public_servers' => normalizedLines(readTextFile(FILE_SERVERS)),
         'mix_servers' => normalizedLines(readMixServersText()),
         'client_tags' => normalizedLines(readTextFile(FILE_TAGS)),
         'server_password' => trim(readTextFile(FILE_PASSWORD)),
         'suspended_subscriptions' => readSuspendedSubscriptionRows(),
+        'home_clients' => readHomeClients(),
+        'security_reports' => readSecurityReports(),
     ];
 
     header('Content-Type: application/json; charset=UTF-8');
@@ -315,6 +318,37 @@ function restorePanelBackup(array $upload): void
             'upload_password' => $uploadPassword, 'install_password' => $installPassword, 'suspended' => true];
     }
     writeSubscriptionRows($rows);
+
+    // Restore home clients if present in backup
+    if (isset($payload['home_clients']) && is_array($payload['home_clients'])) {
+        $restoredHome = [];
+        foreach ($payload['home_clients'] as $hashKey => $rec) {
+            if (!is_array($rec)) { continue; }
+            $normHash = normalizeDeviceHash((string)($rec['hash'] ?? $hashKey));
+            if (strlen($normHash) === 24) {
+                $restoredHome[$normHash] = [
+                    'hash' => $normHash,
+                    'phone' => normalizePhoneNumber((string)($rec['phone'] ?? '')),
+                    'expiry' => trim((string)($rec['expiry'] ?? '')),
+                    'notes' => trim((string)($rec['notes'] ?? '')),
+                    'created_at' => (string)($rec['created_at'] ?? ''),
+                    'suspended' => !empty($rec['suspended']),
+                ];
+            }
+        }
+        writeHomeClients($restoredHome);
+    }
+
+    // Restore security reports if present in backup
+    if (isset($payload['security_reports']) && is_array($payload['security_reports'])) {
+        $restoredReports = [];
+        foreach ($payload['security_reports'] as $rep) {
+            if (is_array($rep) && !empty($rep['id'])) {
+                $restoredReports[] = $rep;
+            }
+        }
+        writeSecurityReports($restoredReports);
+    }
 }
 
 function jalaliToGregorian(int $jy, int $jm, int $jd): array
@@ -513,6 +547,25 @@ function readHomeClients(): array
 function writeHomeClients(array $clients): void
 {
     backupAndAtomicWrite(FILE_HOME_CLIENTS, json_encode($clients, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) . "\n");
+}
+
+function readSecurityReports(): array
+{
+    $path = dataPath(FILE_SECURITY_REPORTS);
+    if (!is_file($path)) {
+        return [];
+    }
+    $raw = file_get_contents($path);
+    if (!is_string($raw) || trim($raw) === '') {
+        return [];
+    }
+    $data = json_decode($raw, true);
+    return is_array($data) ? $data : [];
+}
+
+function writeSecurityReports(array $reports): void
+{
+    backupAndAtomicWrite(FILE_SECURITY_REPORTS, json_encode($reports, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) . "\n");
 }
 
 function decorateHomeClientRows(array $clients): array
@@ -859,7 +912,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 writeHomeClients($clients);
                 flash('success', 'کلاینت خانگی با موفقیت حذف شد.');
             }
-} elseif ($action === 'save_tags') {
+        } elseif ($action === 'delete_security_report') {
+            $reportId = trim((string)($_POST['report_id'] ?? ''));
+            $reports = readSecurityReports();
+            $newReports = array_values(array_filter($reports, fn($r) => ($r['id'] ?? '') !== $reportId));
+            writeSecurityReports($newReports);
+            flash('success', 'گزارش امنیتی با موفقیت حذف شد.');
+        } elseif ($action === 'clear_security_reports') {
+            writeSecurityReports([]);
+            flash('success', 'تمام گزارش‌های امنیتی تخلف با موفقیت پاک‌سازی شدند.');
+        } elseif ($action === 'save_tags') {
             $tags = validateTags((array)($_POST['build_tag'] ?? []),
                 (array)($_POST['player_tag'] ?? []), (array)($_POST['expiry'] ?? []),
                 (array)($_POST['upload_password'] ?? []));
@@ -1214,6 +1276,7 @@ foreach ($homeClientRows as $hcr) {
     if ($hcr['state'] === 'active' || $hcr['state'] === 'expiring') $activeHomeClients++;
 }
 $defaultHomeExpiry = addJalaliMonths(dateTimeToJalali(iranToday()), 1);
+$securityReports = readSecurityReports();
     } catch (Throwable $error) {
         $flash = ['type' => 'error', 'message' => $error->getMessage()];
     }
@@ -1276,6 +1339,7 @@ $defaultHomeExpiry = addJalaliMonths(dateTimeToJalali(iranToday()), 1);
       <div class="stat"><strong class="ok"><?= $activeSubscriptions ?></strong><span>اشتراک فعال</span></div>
       <div class="stat"><strong class="<?= $expiringSubscriptions ? 'warn' : 'ok' ?>"><?= $expiringSubscriptions ?></strong><span>نیازمند توجه</span></div>
       <div class="stat"><strong class="<?= $suspendedSubscriptions ? 'bad' : 'ok' ?>"><?= $suspendedSubscriptions ?></strong><span>اشتراک معلق</span></div>
+      <div class="stat"><strong class="<?= count($securityReports) ? 'bad' : 'ok' ?>"><?= count($securityReports) ?></strong><span>گزارش شیلد</span></div>
     </section>
 
     <nav class="panel-tabs" aria-label="بخش‌های پنل">
@@ -1283,6 +1347,7 @@ $defaultHomeExpiry = addJalaliMonths(dateTimeToJalali(iranToday()), 1);
       <button class="panel-tab" type="button" data-panel="subscriptions" aria-selected="false"><span class="tab-icon">◫</span><span>اشتراک‌ها</span><b><?= count($tagRows) ?></b></button>
       <button class="panel-tab" type="button" data-panel="home_clients" aria-selected="false"><span class="tab-icon">🏠</span><span>کلاینت‌های خانگی</span><b><?= count($homeClientRows) ?></b></button>
       <button class="panel-tab" type="button" data-panel="updates" aria-selected="false"><span class="tab-icon">↑</span><span>آپدیت‌ها</span><b><?= (count($updatesData['home'] ?? []) + count($updatesData['gamenet'] ?? [])) ?></b></button>
+      <button class="panel-tab" type="button" data-panel="security_reports" aria-selected="false"><span class="tab-icon">🛡</span><span>گزارش‌های تخلف</span><b><?= count($securityReports) ?></b></button>
       <button class="panel-tab" type="button" data-panel="settings" aria-selected="false"><span class="tab-icon">⚙</span><span>تنظیمات</span></button>
     </nav>
 
@@ -1742,6 +1807,132 @@ $defaultHomeExpiry = addJalaliMonths(dateTimeToJalali(iranToday()), 1);
       </div>
     </section>
 
+    <section class="security-reports panel-view" data-panel-view="security_reports">
+      <div class="section-heading">
+        <div>
+          <span class="eyebrow">GAMELAND SHIELD</span>
+          <h2>گزارش‌های تخلف و ضد تقلب (Anti-Cheat Logs)</h2>
+          <p>ثبت خودکار تلاش برای تقلب یا دستکاری فایل‌ها چه قبل از بازی و چه در حین اجرای بازی، ارسال‌شده توسط کلاینت‌ها</p>
+        </div>
+        <?php if (!empty($securityReports)): ?>
+          <form method="post" class="confirm-form" data-confirm="آیا از پاک‌سازی تمامی گزارش‌های تخلف اطمینان دارید؟">
+            <input type="hidden" name="csrf" value="<?= escape(csrfToken()) ?>">
+            <input type="hidden" name="action" value="clear_security_reports">
+            <button class="button danger" type="submit">پاک‌سازی همه گزارش‌ها</button>
+          </form>
+        <?php endif; ?>
+      </div>
+
+      <div class="card" style="border-top: 3px solid #ff4d6d; margin-bottom: 24px;">
+        <div class="card-title">
+          <div>
+            <h2>🛡 لاگ تخلفات ثبت‌شده کلاینت‌ها</h2>
+            <p>مشخصات سیستم، شناسه سخت‌افزاری و نوع تخلف کشف‌شده همراه زمان دقیق</p>
+          </div>
+          <span class="pill" style="background: rgba(255, 77, 109, 0.15); color: #ff4d6d; border: 1px solid rgba(255, 77, 109, 0.3);"><?= count($securityReports) ?> گزارش</span>
+        </div>
+
+        <?php if (!empty($securityReports)): ?>
+          <div style="overflow-x: auto;">
+            <table style="width: 100%; border-collapse: collapse; text-align: right; font-size: 13px;">
+              <thead>
+                <tr style="border-bottom: 1px solid var(--border); color: var(--muted);">
+                  <th style="padding: 10px;">زمان ثبت</th>
+                  <th style="padding: 10px;">نوع کلاینت</th>
+                  <th style="padding: 10px;">مشخصات / شناسه</th>
+                  <th style="padding: 10px;">سیستم و کاربر</th>
+                  <th style="padding: 10px;">نوع تخلف</th>
+                  <th style="padding: 10px;">جزئیات تخلف</th>
+                  <th style="padding: 10px;">عملیات</th>
+                </tr>
+              </thead>
+              <tbody>
+                <?php foreach ($securityReports as $rep): ?>
+                  <?php 
+                    $repId = (string)($rep['id'] ?? '');
+                    $isHome = ($rep['client_type'] ?? '') === 'home';
+                    $devHash = (string)($rep['device_hash'] ?? '');
+                    $repTag = (string)($rep['tag'] ?? '');
+                  ?>
+                  <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
+                    <td style="padding: 12px 10px; white-space: nowrap;">
+                      <div style="color: var(--text); font-weight: bold;"><?= escape((string)($rep['date_jalali'] ?? '')) ?></div>
+                      <div class="ltr" style="font-size: 11px; color: var(--muted);"><?= escape((string)($rep['ip'] ?? '')) ?></div>
+                    </td>
+                    <td style="padding: 12px 10px; white-space: nowrap;">
+                      <?php if ($isHome): ?>
+                        <span class="status-badge" style="background: rgba(0, 210, 160, 0.15); color: #00d2a0; border: 1px solid rgba(0, 210, 160, 0.3);">🏠 خانگی</span>
+                      <?php else: ?>
+                        <span class="status-badge" style="background: rgba(69, 207, 255, 0.15); color: #45cfff; border: 1px solid rgba(69, 207, 255, 0.3);">🎮 گیم‌نت</span>
+                      <?php endif; ?>
+                    </td>
+                    <td style="padding: 12px 10px;">
+                      <?php if (!empty($repTag)): ?>
+                        <strong class="ltr" style="color: #52d5ff;"><?= escape($repTag) ?></strong><br>
+                      <?php endif; ?>
+                      <?php if (!empty($rep['phone'])): ?>
+                        <span class="ltr" style="color: #ffc05c; font-size: 12px;"><?= escape((string)$rep['phone']) ?></span><br>
+                      <?php endif; ?>
+                      <?php if (!empty($devHash)): ?>
+                        <code class="ltr" style="font-size: 11px; color: var(--muted); letter-spacing: 1px;"><?= escape($devHash) ?></code>
+                      <?php endif; ?>
+                    </td>
+                    <td style="padding: 12px 10px; white-space: nowrap;">
+                      <div><strong>PC:</strong> <span class="ltr"><?= escape((string)($rep['computer_name'] ?? '-')) ?></span></div>
+                      <div style="color: var(--muted); font-size: 11px;"><strong>User:</strong> <span class="ltr"><?= escape((string)($rep['user_name'] ?? '-')) ?></span></div>
+                    </td>
+                    <td style="padding: 12px 10px; white-space: nowrap;">
+                      <span class="status-badge bad" style="font-size: 12px; font-weight: bold; background: rgba(255, 77, 109, 0.18); border: 1px solid rgba(255, 77, 109, 0.35); color: #ff667c;">
+                        <?= escape((string)($rep['violation_type'] ?? 'تخلف')) ?>
+                      </span>
+                    </td>
+                    <td style="padding: 12px 10px; max-width: 320px; word-break: break-word;">
+                      <div style="font-size: 12px; line-height: 1.5; color: #ffb3c1;">
+                        <?= nl2br(escape((string)($rep['violation_details'] ?? ''))) ?>
+                      </div>
+                    </td>
+                    <td style="padding: 12px 10px; white-space: nowrap;">
+                      <div style="display: flex; gap: 6px; align-items: center;">
+                        <?php if ($isHome && strlen($devHash) === 24): ?>
+                          <form method="post" class="confirm-form" data-confirm="آیا می‌خواهید اشتراک این کلاینت خانگی را فوراً تعلیق کنید؟" style="margin: 0;">
+                            <input type="hidden" name="csrf" value="<?= escape(csrfToken()) ?>">
+                            <input type="hidden" name="action" value="adjust_home_client">
+                            <input type="hidden" name="hash" value="<?= escape($devHash) ?>">
+                            <input type="hidden" name="operation" value="suspend">
+                            <button class="button warning" type="submit" style="min-height: 28px; padding: 3px 8px; font-size: 11px;">تعلیق کلاینت</button>
+                          </form>
+                        <?php elseif (!$isHome && !empty($repTag)): ?>
+                          <form method="post" class="confirm-form" data-confirm="آیا می‌خواهید اشتراک این گیم‌نت را فوراً تعلیق کنید؟" style="margin: 0;">
+                            <input type="hidden" name="csrf" value="<?= escape(csrfToken()) ?>">
+                            <input type="hidden" name="action" value="adjust_subscription">
+                            <input type="hidden" name="build" value="<?= escape($repTag) ?>">
+                            <input type="hidden" name="operation" value="suspend">
+                            <button class="button warning" type="submit" style="min-height: 28px; padding: 3px 8px; font-size: 11px;">تعلیق اشتراک</button>
+                          </form>
+                        <?php endif; ?>
+                        <form method="post" class="confirm-form" data-confirm="این گزارش حذف شود؟" style="margin: 0;">
+                          <input type="hidden" name="csrf" value="<?= escape(csrfToken()) ?>">
+                          <input type="hidden" name="action" value="delete_security_report">
+                          <input type="hidden" name="report_id" value="<?= escape($repId) ?>">
+                          <button class="button danger" type="submit" style="min-height: 28px; padding: 3px 8px; font-size: 11px;">حذف</button>
+                        </form>
+                      </div>
+                    </td>
+                  </tr>
+                <?php endforeach; ?>
+              </tbody>
+            </table>
+          </div>
+        <?php else: ?>
+          <div class="empty-state" style="text-align: center; padding: 35px; color: var(--muted);">
+            <div style="font-size: 32px; margin-bottom: 10px;">🛡️</div>
+            <strong style="color: var(--green); font-size: 15px;">هیچ تخلف امنیتی تاکنون گزارش نشده است.</strong>
+            <p style="margin-top: 6px; font-size: 13px;">کلاینت‌های بازی تحت نظارت GAMELAND Shield هستند و هرگونه تلاش برای تقلب یا دستکاری خودکار به این بخش ارسال می‌گردد.</p>
+          </div>
+        <?php endif; ?>
+      </div>
+    </section>
+
     <section class="settings panel-view" data-panel-view="settings">
       <div class="section-heading"><div><span class="eyebrow">SETTINGS</span><h2>تنظیمات پنل</h2><p>تنظیمات امنیتی و مدیریتی حساب شما</p></div></div>
       <article class="card settings-card">
@@ -1757,7 +1948,7 @@ $defaultHomeExpiry = addJalaliMonths(dateTimeToJalali(iranToday()), 1);
       <article class="card settings-card">
         <div class="settings-mark">↧</div>
         <div class="settings-content">
-          <div class="card-title"><div><h2>Backup / Restore</h2><p>Public servers, Mix servers, subscriptions, server password and installer-code state are saved in one JSON backup.</p></div><span class="status-badge active">SAFE</span></div>
+          <div class="card-title"><div><h2>Backup / Restore</h2><p>Public servers, Mix servers, subscriptions, home clients, security logs, server password and installer-code state are saved in one JSON backup.</p></div><span class="status-badge active">SAFE</span></div>
           <div class="settings-fields">
             <form method="post"><input type="hidden" name="csrf" value="<?= escape(csrfToken()) ?>"><input type="hidden" name="action" value="download_backup">
               <button class="button primary" type="submit">Download Panel Backup</button>
