@@ -69,6 +69,8 @@ target_link_libraries(${PROJECT_NAME} ${TARGET_LIBRARIES_SCOPE}
         wbemuuid
         ole32
         oleaut32
+        iphlpapi
+        ws2_32
 )
 
 if (MSVC)

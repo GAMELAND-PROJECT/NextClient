@@ -82,6 +82,11 @@ void InitializePinnedServers();
             ISteamMatchmakingServerListResponse* response_callback,
             std::shared_ptr<taskcoro::CancellationToken> ct
         );
+        concurrencpp::result<void> QueryLanServers(
+            HServerListRequest request_id,
+            ISteamMatchmakingServerListResponse* response_callback,
+            std::shared_ptr<taskcoro::CancellationToken> ct
+        );
         void ServerAnsweredHandler(
             HServerListRequest request_id,
             ISteamMatchmakingServerListResponse* response_callback,

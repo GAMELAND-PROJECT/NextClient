@@ -305,13 +305,14 @@ S_API bool SteamGameServer_Init(uint32 unIP, uint16 usSteamPort, uint16 usGamePo
 {
     (void)unIP;
     (void)usSteamPort;
-    (void)usGamePort;
-    (void)usQueryPort;
     (void)eServerMode;
     (void)pchVersionString;
 
     if (!IsInitialized())
         Initialize();
+
+    if (usGamePort != 0) g_SteamGameServerStub.SetGamePort(usGamePort);
+    if (usQueryPort != 0) g_SteamGameServerStub.SetQueryPort(usQueryPort);
 
     return true;
 }

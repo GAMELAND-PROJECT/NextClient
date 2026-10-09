@@ -29,6 +29,9 @@ public:
     bool SupportsItem(InterfaceItem item) override;
     void StartRefresh() override;
 
+    bool CheckPrimaryFilters(serveritem_t &server) override;
+    bool CheckSecondaryFilters(serveritem_t &server) override;
+
     void ServerFailedToRespond(serveritem_t &server) override;
     void RefreshComplete() override;
 

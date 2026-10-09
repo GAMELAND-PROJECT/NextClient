@@ -19,7 +19,7 @@ using namespace vgui2;
 
 namespace
 {
-constexpr int kFastLanRefreshTimeoutMs = 900;
+constexpr int kFastLanRefreshTimeoutMs = 3500;
 }
 
 CLanGames::CLanGames(vgui2::Panel *parent, bool bAutoRefresh, const char *pCustomResFilename) :
@@ -59,13 +59,18 @@ void CLanGames::OnThink()
     }
 }
 
+bool CLanGames::CheckPrimaryFilters(serveritem_t &server)
+{
+    return true;
+}
+
+bool CLanGames::CheckSecondaryFilters(serveritem_t &server)
+{
+    return true;
+}
+
 bool CLanGames::SupportsItem(InterfaceItem item)
 {
-    switch (item)
-    {
-        case InterfaceItem::Filters: return true;
-    }
-
     return false;
 }
 

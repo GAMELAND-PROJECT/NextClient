@@ -8,6 +8,10 @@
 #include <steam/isteamhttp.h>
 #include "SteamEmu.h"
 #include <ctime>
+#include <string>
+#include <vector>
+#include <queue>
+#include <mutex>
 
 //-----------------------------------------------------------------------------
 // Safe crash-proof stub for ISteamFriends
@@ -115,12 +119,52 @@ public:
 //-----------------------------------------------------------------------------
 class SteamGameServerStub : public ISteamGameServer
 {
+private:
+    struct OutgoingPacket {
+        std::vector<uint8_t> payload;
+        uint32_t ip{};
+        uint16_t port{};
+    };
+
+    std::mutex mutex_;
+    std::queue<OutgoingPacket> outgoing_packets_;
+
+    std::string server_name_{ "Counter-Strike 1.6 Server" };
+    std::string map_name_{ "de_dust2" };
+    std::string mod_dir_{ "cstrike" };
+    std::string game_desc_{ "Counter-Strike" };
+    int max_players_{ 32 };
+    int bot_players_{ 0 };
+    int players_{ 1 };
+    bool password_protected_{ false };
+    bool dedicated_{ false };
+    uint16_t game_port_{ 27015 };
+    uint16_t query_port_{ 27015 };
+
 public:
-    bool InitGameServer(uint32, uint16, uint16, uint32, AppId_t, const char *) override { return true; }
+    void SetGamePort(uint16_t port) { game_port_ = port; }
+    void SetQueryPort(uint16_t port) { query_port_ = port; }
+
+    bool InitGameServer(uint32, uint16 usGamePort, uint16 usQueryPort, uint32, AppId_t, const char *) override
+    {
+        if (usGamePort != 0) game_port_ = usGamePort;
+        if (usQueryPort != 0) query_port_ = usQueryPort;
+        return true;
+    }
+
     void SetProduct(const char *) override {}
-    void SetGameDescription(const char *) override {}
-    void SetModDir(const char *) override {}
-    void SetDedicatedServer(bool) override {}
+    void SetGameDescription(const char *desc) override
+    {
+        if (desc && desc[0]) game_desc_ = desc;
+    }
+    void SetModDir(const char *mod) override
+    {
+        if (mod && mod[0]) mod_dir_ = mod;
+    }
+    void SetDedicatedServer(bool dedicated) override
+    {
+        dedicated_ = dedicated;
+    }
     void LogOn(const char *, const char *) override {}
     void LogOnAnonymous() override {}
     void LogOff() override {}
@@ -128,11 +172,26 @@ public:
     bool BSecure() override { return false; }
     CSteamID GetSteamID() override { return SteamEmu::GetSteamID(); }
     bool WasRestartRequested() override { return false; }
-    void SetMaxPlayerCount(int) override {}
-    void SetBotPlayerCount(int) override {}
-    void SetServerName(const char *) override {}
-    void SetMapName(const char *) override {}
-    void SetPasswordProtected(bool) override {}
+    void SetMaxPlayerCount(int count) override
+    {
+        if (count > 0) max_players_ = count;
+    }
+    void SetBotPlayerCount(int count) override
+    {
+        bot_players_ = count;
+    }
+    void SetServerName(const char *name) override
+    {
+        if (name && name[0]) server_name_ = name;
+    }
+    void SetMapName(const char *map) override
+    {
+        if (map && map[0]) map_name_ = map;
+    }
+    void SetPasswordProtected(bool pwd) override
+    {
+        password_protected_ = pwd;
+    }
     void SetSpectatorPort(uint16) override {}
     void SetSpectatorServerName(const char *) override {}
     void ClearAllKeyValues() override {}
@@ -140,13 +199,22 @@ public:
     void SetGameTags(const char *) override {}
     void SetGameData(const char *) override {}
     void SetRegion(const char *) override {}
+
     bool SendUserConnectAndAuthenticate(uint32, const void *, uint32, CSteamID *pSteamIDUser) override
     {
+        players_++;
+        if (players_ > max_players_) players_ = max_players_;
         if (pSteamIDUser) *pSteamIDUser = SteamEmu::GetSteamID();
         return true;
     }
+
     CSteamID CreateUnauthenticatedUserConnection() override { return SteamEmu::GetSteamID(); }
-    void SendUserDisconnect(CSteamID) override {}
+
+    void SendUserDisconnect(CSteamID) override
+    {
+        if (players_ > 1) players_--;
+    }
+
     bool BUpdateUserData(CSteamID, const char *, uint32) override { return true; }
     HAuthTicket GetAuthSessionTicket(void *, int, uint32 *pcbTicket) override
     {
@@ -161,8 +229,118 @@ public:
     void GetGameplayStats() override {}
     SteamAPICall_t GetServerReputation() override { return k_uAPICallInvalid; }
     uint32 GetPublicIP() override { return 0; }
-    bool HandleIncomingPacket(const void *, int, uint32, uint16) override { return false; }
-    int GetNextOutgoingPacket(void *, int, uint32 *, uint16 *) override { return 0; }
+
+    bool HandleIncomingPacket(const void *pData, int cbData, uint32 srcIP, uint16 srcPort) override
+    {
+        if (!pData || cbData < 5)
+            return false;
+
+        const uint8_t *bytes = reinterpret_cast<const uint8_t*>(pData);
+        if (bytes[0] != 0xFF || bytes[1] != 0xFF || bytes[2] != 0xFF || bytes[3] != 0xFF)
+            return false;
+
+        uint8_t type = bytes[4];
+
+        // 1. A2S_INFO query: '\xFF\xFF\xFF\xFFTSource Engine Query\0'
+        if (type == 'T')
+        {
+            std::vector<uint8_t> out;
+            out.reserve(256);
+            out.push_back(0xFF); out.push_back(0xFF); out.push_back(0xFF); out.push_back(0xFF);
+            out.push_back('I');
+            out.push_back(17); // protocol version
+
+            for (char c : server_name_) out.push_back(static_cast<uint8_t>(c));
+            out.push_back(0);
+
+            for (char c : map_name_) out.push_back(static_cast<uint8_t>(c));
+            out.push_back(0);
+
+            for (char c : mod_dir_) out.push_back(static_cast<uint8_t>(c));
+            out.push_back(0);
+
+            for (char c : game_desc_) out.push_back(static_cast<uint8_t>(c));
+            out.push_back(0);
+
+            int16_t appId = 10;
+            out.push_back(static_cast<uint8_t>(appId & 0xFF));
+            out.push_back(static_cast<uint8_t>((appId >> 8) & 0xFF));
+
+            out.push_back(static_cast<uint8_t>(players_));
+            out.push_back(static_cast<uint8_t>(max_players_));
+            out.push_back(static_cast<uint8_t>(bot_players_));
+            out.push_back(static_cast<uint8_t>(dedicated_ ? 'd' : 'l'));
+            out.push_back(static_cast<uint8_t>('w'));
+            out.push_back(static_cast<uint8_t>(password_protected_ ? 1 : 0));
+            out.push_back(0); // secure
+
+            std::string ver = "1.1.2.6";
+            for (char c : ver) out.push_back(static_cast<uint8_t>(c));
+            out.push_back(0);
+
+            // EDF: 0x80 (includes game port)
+            out.push_back(0x80);
+            out.push_back(static_cast<uint8_t>(game_port_ & 0xFF));
+            out.push_back(static_cast<uint8_t>((game_port_ >> 8) & 0xFF));
+
+            std::lock_guard<std::mutex> lock(mutex_);
+            outgoing_packets_.push({ std::move(out), srcIP, srcPort });
+            return true;
+        }
+
+        // 2. Infostring / details query: '\xFF\xFF\xFF\xFFinfostring\0'
+        if (type == 'i' || type == 'd')
+        {
+            std::string kv = "\\infostring\\";
+            kv += "\\hostname\\" + server_name_;
+            kv += "\\map\\" + map_name_;
+            kv += "\\gamedir\\" + mod_dir_;
+            kv += "\\description\\" + game_desc_;
+            kv += "\\players\\" + std::to_string(players_);
+            kv += "\\max\\" + std::to_string(max_players_);
+            kv += "\\password\\" + std::string(password_protected_ ? "1" : "0");
+
+            std::vector<uint8_t> out;
+            out.push_back(0xFF); out.push_back(0xFF); out.push_back(0xFF); out.push_back(0xFF);
+            for (char c : kv) out.push_back(static_cast<uint8_t>(c));
+            out.push_back(0);
+
+            std::lock_guard<std::mutex> lock(mutex_);
+            outgoing_packets_.push({ std::move(out), srcIP, srcPort });
+            return true;
+        }
+
+        // 3. Ping query: '\xFF\xFF\xFF\xFFping\0'
+        if (type == 'p')
+        {
+            std::vector<uint8_t> out = { 0xFF, 0xFF, 0xFF, 0xFF, 'j' };
+            std::lock_guard<std::mutex> lock(mutex_);
+            outgoing_packets_.push({ std::move(out), srcIP, srcPort });
+            return true;
+        }
+
+        return false;
+    }
+
+    int GetNextOutgoingPacket(void *pOut, int cbMaxOut, uint32 *pNetAdr, uint16 *pPort) override
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (outgoing_packets_.empty())
+            return 0;
+
+        auto pkt = std::move(outgoing_packets_.front());
+        outgoing_packets_.pop();
+
+        if (cbMaxOut < static_cast<int>(pkt.payload.size()))
+            return 0;
+
+        memcpy(pOut, pkt.payload.data(), pkt.payload.size());
+        if (pNetAdr) *pNetAdr = pkt.ip;
+        if (pPort) *pPort = pkt.port;
+
+        return static_cast<int>(pkt.payload.size());
+    }
+
     void EnableHeartbeats(bool) override {}
     void SetHeartbeatInterval(int) override {}
     void ForceHeartbeat() override {}
@@ -260,7 +438,11 @@ class SteamMatchmakingServersStub : public ISteamMatchmakingServers
 {
 public:
     HServerListRequest RequestInternetServerList(AppId_t, MatchMakingKeyValuePair_t **, uint32, ISteamMatchmakingServerListResponse *) override { return 0; }
-    HServerListRequest RequestLANServerList(AppId_t, ISteamMatchmakingServerListResponse *) override { return 0; }
+    HServerListRequest RequestLANServerList(AppId_t, ISteamMatchmakingServerListResponse *pResponse) override {
+        if (pResponse)
+            pResponse->RefreshComplete(0, eServerResponded);
+        return 0;
+    }
     HServerListRequest RequestFriendsServerList(AppId_t, MatchMakingKeyValuePair_t **, uint32, ISteamMatchmakingServerListResponse *) override { return 0; }
     HServerListRequest RequestFavoritesServerList(AppId_t, MatchMakingKeyValuePair_t **, uint32, ISteamMatchmakingServerListResponse *) override { return 0; }
     HServerListRequest RequestHistoryServerList(AppId_t, MatchMakingKeyValuePair_t **, uint32, ISteamMatchmakingServerListResponse *) override { return 0; }

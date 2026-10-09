@@ -23,7 +23,7 @@ public:
     void Resolve(SQErrorCode error_code, netadr_t from_addr) override;
     void ChallengeReceived(netadr_t from_addr, int challenge, uint32_t ping_ms) override;
 
-private:
+public:
     static SQ_INFO ParseInfo(ByteBuffer &buffer);
     static SQ_INFO ParseRulesGs(ByteBuffer &buffer);
 };
