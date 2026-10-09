@@ -1021,7 +1021,7 @@ result<void> MatchmakingSteamComp::QueryLanServers(
             return servers;
 
         // Ports typically used by listen servers
-        const uint16_t targetPorts[] = { 27015, 27016, 27017, 27018, 27019, 27020, 27005 };
+        const uint16_t targetPorts[] = { 27015, 27016, 27017, 27018, 27019, 27020 };
 
         // Query payloads: A2S_INFO, infostring, details, ping
         const char a2sPayload[25] = { '\xFF', '\xFF', '\xFF', '\xFF', 'T', 'S', 'o', 'u', 'r', 'c', 'e', ' ', 'E', 'n', 'g', 'i', 'n', 'e', ' ', 'Q', 'u', 'e', 'r', 'y', '\0' };
@@ -1207,18 +1207,8 @@ result<void> MatchmakingSteamComp::QueryLanServers(
                     }
                 }
 
-                // Fallback for any GoldSrc response (e.g. 'C', 'j' ping, or raw reply)
-                if (!parsed && bytesRecv >= 5)
-                {
-                    sqInfo.hostname = "Counter-Strike LAN Server";
-                    sqInfo.game_directory = "cstrike";
-                    sqInfo.map = "-";
-                    sqInfo.max_players = 32;
-                    sqInfo.num_players = 1;
-                    parsed = true;
-                }
-
-                if (parsed)
+                // Only accept genuine, active servers with a valid map, name, and max players
+                if (parsed && !sqInfo.map.empty() && sqInfo.map != "-" && sqInfo.max_players > 0 && !sqInfo.hostname.empty())
                 {
                     gameserveritem_t item{};
                     item.m_NetAdr.Init(fromIp, fromPort, fromPort);
@@ -1226,15 +1216,11 @@ result<void> MatchmakingSteamComp::QueryLanServers(
                     if (sqInfo.port != 0)
                         item.m_NetAdr.SetConnectionPort(sqInfo.port);
 
-                    if (!sqInfo.hostname.empty())
-                        item.SetName(sqInfo.hostname.c_str());
-                    else
-                        item.SetName("Counter-Strike LAN Server");
-
+                    item.SetName(sqInfo.hostname.c_str());
                     item.m_bPassword = sqInfo.password;
                     item.m_bSecure = sqInfo.secure;
                     item.m_nBotPlayers = sqInfo.num_of_bots;
-                    item.m_nMaxPlayers = (sqInfo.max_players > 0) ? sqInfo.max_players : 32;
+                    item.m_nMaxPlayers = sqInfo.max_players;
                     item.m_nPlayers = sqInfo.num_players;
                     item.m_nPing = static_cast<int>(std::clamp(static_cast<long long>(elapsed), 1LL, 20LL));
                     item.m_bHadSuccessfulResponse = true;
@@ -1245,10 +1231,7 @@ result<void> MatchmakingSteamComp::QueryLanServers(
                     else
                         V_strcpy_safe(item.m_szGameDir, "cstrike");
 
-                    if (!sqInfo.map.empty())
-                        V_strcpy_safe(item.m_szMap, sqInfo.map.c_str());
-                    else
-                        V_strcpy_safe(item.m_szMap, "-");
+                    V_strcpy_safe(item.m_szMap, sqInfo.map.c_str());
 
                     if (!sqInfo.game_description.empty())
                         V_strcpy_safe(item.m_szGameDescription, sqInfo.game_description.c_str());

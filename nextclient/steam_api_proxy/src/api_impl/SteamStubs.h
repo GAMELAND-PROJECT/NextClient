@@ -129,8 +129,9 @@ private:
     std::mutex mutex_;
     std::queue<OutgoingPacket> outgoing_packets_;
 
+    bool is_active_{ false };
     std::string server_name_{ "Counter-Strike 1.6 Server" };
-    std::string map_name_{ "de_dust2" };
+    std::string map_name_{ "" };
     std::string mod_dir_{ "cstrike" };
     std::string game_desc_{ "Counter-Strike" };
     int max_players_{ 32 };
@@ -144,6 +145,15 @@ private:
 public:
     void SetGamePort(uint16_t port) { game_port_ = port; }
     void SetQueryPort(uint16_t port) { query_port_ = port; }
+
+    void Shutdown()
+    {
+        is_active_ = false;
+        map_name_.clear();
+        std::lock_guard<std::mutex> lock(mutex_);
+        while (!outgoing_packets_.empty())
+            outgoing_packets_.pop();
+    }
 
     bool InitGameServer(uint32, uint16 usGamePort, uint16 usQueryPort, uint32, AppId_t, const char *) override
     {
@@ -165,10 +175,14 @@ public:
     {
         dedicated_ = dedicated;
     }
-    void LogOn(const char *, const char *) override {}
-    void LogOnAnonymous() override {}
-    void LogOff() override {}
-    bool BLoggedOn() override { return true; }
+    void LogOn(const char *, const char *) override { is_active_ = true; }
+    void LogOnAnonymous() override { is_active_ = true; }
+    void LogOff() override
+    {
+        is_active_ = false;
+        map_name_.clear();
+    }
+    bool BLoggedOn() override { return is_active_; }
     bool BSecure() override { return false; }
     CSteamID GetSteamID() override { return SteamEmu::GetSteamID(); }
     bool WasRestartRequested() override { return false; }
@@ -186,7 +200,16 @@ public:
     }
     void SetMapName(const char *map) override
     {
-        if (map && map[0]) map_name_ = map;
+        if (map && map[0] && strcmp(map, "-") != 0)
+        {
+            map_name_ = map;
+            is_active_ = true;
+        }
+        else
+        {
+            map_name_.clear();
+            is_active_ = false;
+        }
     }
     void SetPasswordProtected(bool pwd) override
     {
@@ -232,6 +255,9 @@ public:
 
     bool HandleIncomingPacket(const void *pData, int cbData, uint32 srcIP, uint16 srcPort) override
     {
+        if (!is_active_ || map_name_.empty() || map_name_ == "-")
+            return false;
+
         if (!pData || cbData < 5)
             return false;
 
@@ -341,7 +367,12 @@ public:
         return static_cast<int>(pkt.payload.size());
     }
 
-    void EnableHeartbeats(bool) override {}
+    void EnableHeartbeats(bool active) override
+    {
+        is_active_ = active;
+        if (!active)
+            map_name_.clear();
+    }
     void SetHeartbeatInterval(int) override {}
     void ForceHeartbeat() override {}
     SteamAPICall_t AssociateWithClan(CSteamID) override { return k_uAPICallInvalid; }

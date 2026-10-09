@@ -319,6 +319,7 @@ S_API bool SteamGameServer_Init(uint32 unIP, uint16 usSteamPort, uint16 usGamePo
 
 S_API void SteamGameServer_Shutdown()
 {
+    g_SteamGameServerStub.Shutdown();
 }
 
 S_API void SteamGameServer_RunCallbacks()

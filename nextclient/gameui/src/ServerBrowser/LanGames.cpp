@@ -61,6 +61,12 @@ void CLanGames::OnThink()
 
 bool CLanGames::CheckPrimaryFilters(serveritem_t &server)
 {
+    if (server.gs.m_szMap[0] == '\0' || server.gs.m_szMap[0] == '-')
+        return false;
+    if (server.gs.m_nMaxPlayers <= 0)
+        return false;
+    if (server.gs.GetName().empty())
+        return false;
     return true;
 }
 
