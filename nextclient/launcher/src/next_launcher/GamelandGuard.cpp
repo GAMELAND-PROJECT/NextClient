@@ -5,8 +5,10 @@
 #include <chrono>
 #include <algorithm>
 #include <cwctype>
+#include <wincrypt.h>
 
 #pragma comment(lib, "psapi.lib")
+#pragma comment(lib, "advapi32.lib")
 
 namespace gameland_guard
 {
@@ -137,16 +139,196 @@ namespace gameland_guard
         ExitProcess(0x1337);
     }
 
+    static std::wstring GetGameRootDirectory()
+    {
+        wchar_t exePath[MAX_PATH] = { 0 };
+        if (GetModuleFileNameW(nullptr, exePath, MAX_PATH))
+        {
+            wchar_t* lastSlash = wcsrchr(exePath, L'\\');
+            if (lastSlash)
+            {
+                *lastSlash = L'\0';
+                return exePath;
+            }
+        }
+        wchar_t curDir[MAX_PATH] = { 0 };
+        GetCurrentDirectoryW(MAX_PATH, curDir);
+        return curDir;
+    }
+
+    static std::string ComputeFileSha256Hex(const std::wstring& filePath)
+    {
+        HANDLE hFile = CreateFileW(filePath.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_FLAG_SEQUENTIAL_SCAN, nullptr);
+        if (hFile == INVALID_HANDLE_VALUE)
+            return "";
+
+        HCRYPTPROV hProv = 0;
+        HCRYPTHASH hHash = 0;
+        std::string hexResult;
+
+        if (CryptAcquireContextW(&hProv, nullptr, nullptr, PROV_RSA_AES, CRYPT_VERIFYCONTEXT))
+        {
+            if (CryptCreateHash(hProv, CALG_SHA_256, 0, 0, &hHash))
+            {
+                BYTE buffer[65536];
+                DWORD bytesRead = 0;
+                bool success = true;
+
+                while (ReadFile(hFile, buffer, sizeof(buffer), &bytesRead, nullptr) && bytesRead > 0)
+                {
+                    if (!CryptHashData(hHash, buffer, bytesRead, 0))
+                    {
+                        success = false;
+                        break;
+                    }
+                }
+
+                if (success)
+                {
+                    BYTE hashBuf[32]{};
+                    DWORD hashLen = sizeof(hashBuf);
+                    if (CryptGetHashParam(hHash, HP_HASHVAL, hashBuf, &hashLen, 0))
+                    {
+                        char hex[65]{};
+                        for (DWORD i = 0; i < hashLen; ++i)
+                            sprintf_s(hex + (i * 2), 3, "%02x", hashBuf[i]);
+                        hexResult = hex;
+                    }
+                }
+                CryptDestroyHash(hHash);
+            }
+            CryptReleaseContext(hProv, 0);
+        }
+
+        CloseHandle(hFile);
+        return hexResult;
+    }
+
+    struct ProtectedBinary
+    {
+        const wchar_t* relativePath;
+        const char* expectedHash;
+        const wchar_t* displayName;
+    };
+
+    static const ProtectedBinary kProtectedBinaries[] = {
+        { L"cstrike\\cl_dlls\\client.dll", "ef7a0f40989cb79ba95d40f528534da36866892ee871147ca82e133b7a5edc3d", L"کلاینت بازی (client.dll)" },
+        { L"hw.dll", "be45f76049a133392423679d334c69c8e1e7e82dc873eebdd229ea0341ba1b10", L"موتور گرافیکی اصلی (hw.dll)" },
+        { L"cstrike\\dlls\\mp.dll", "5596780734fa40dd709537b26b9a0bf4cf970c150fcc03108ed5432b65e3c331", L"منطق سرور محلی (mp.dll)" },
+        { L"SDL2.dll", "f1be4b46ac46bc9a26ae017c95711e5aedc11ed602908b62eface4e8d2b28aba", L"کتابخانه ورودی/صدا (SDL2.dll)" },
+        { L"Mss32.dll", "3231d251c8aa4003b3b23196fe849b97c5ea3ac2d3549980e83bceb9078b4cf7", L"موتور صدای مایلز (Mss32.dll)" }
+    };
+
+    static bool VerifyFileIntegrity()
+    {
+        std::wstring gameDir = GetGameRootDirectory();
+
+        for (const auto& bin : kProtectedBinaries)
+        {
+            wchar_t fullPath[MAX_PATH];
+            swprintf_s(fullPath, L"%s\\%s", gameDir.c_str(), bin.relativePath);
+
+            DWORD attrs = GetFileAttributesW(fullPath);
+            if (attrs == INVALID_FILE_ATTRIBUTES || (attrs & FILE_ATTRIBUTE_DIRECTORY))
+            {
+                wchar_t desc[256];
+                swprintf_s(desc, L"فایل سیستمی ضروری یافت نشد: %s", bin.displayName);
+                OnViolation(L"فایل ناقص بازی", desc);
+                return false;
+            }
+
+            std::string actualHash = ComputeFileSha256Hex(fullPath);
+            if (actualHash.empty() || _stricmp(actualHash.c_str(), bin.expectedHash) != 0)
+            {
+                wchar_t desc[350];
+                swprintf_s(desc, L"دستکاری غیرمجاز در %s کشف شد.\nامضای دیجیتال این فایل با نسخه رسمی مطابقت ندارد.", bin.displayName);
+                OnViolation(L"دستکاری فایل‌های رسمی بازی (Anti-Tamper)", desc);
+                return false;
+            }
+        }
+        return true;
+    }
+
+    struct AuthorizedAsi
+    {
+        const wchar_t* fileName;
+        const char* expectedHash;
+    };
+
+    static const AuthorizedAsi kWhitelistedAsiFiles[] = {
+        { L"binkawin.asi", "1aba951f3d3de59aec6c3a77133241dac6949dd4b1d158a77b646ad1ec7c5371" },
+        { L"mssmp3.asi", "dd69f9509a50db36ea6f69f5f572c300dead7f0054801a255feb556e00a453ec" },
+        { L"mssvoice.asi", "e99de0f5e95a70b84596a66aa1af8eb7f20cb9816e1fc67dbdd8f0feab1b26ac" }
+    };
+
+    static bool CheckUnauthorizedAsiFiles()
+    {
+        std::wstring gameDir = GetGameRootDirectory();
+        const wchar_t* checkSubDirs[] = { L"", L"\\cstrike", L"\\valve" };
+
+        for (const auto* sub : checkSubDirs)
+        {
+            wchar_t searchPattern[MAX_PATH];
+            swprintf_s(searchPattern, L"%s%s\\*.asi", gameDir.c_str(), sub);
+
+            WIN32_FIND_DATAW fd;
+            HANDLE hFind = FindFirstFileW(searchPattern, &fd);
+            if (hFind != INVALID_HANDLE_VALUE)
+            {
+                do
+                {
+                    if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY))
+                    {
+                        std::wstring lowerName = ToLower(fd.cFileName);
+                        bool isAuthorized = false;
+
+                        for (const auto& auth : kWhitelistedAsiFiles)
+                        {
+                            if (lowerName == ToLower(auth.fileName))
+                            {
+                                wchar_t asiPath[MAX_PATH];
+                                swprintf_s(asiPath, L"%s%s\\%s", gameDir.c_str(), sub, fd.cFileName);
+                                std::string hash = ComputeFileSha256Hex(asiPath);
+                                if (_stricmp(hash.c_str(), auth.expectedHash) == 0)
+                                {
+                                    isAuthorized = true;
+                                    break;
+                                }
+                            }
+                        }
+
+                        if (!isAuthorized)
+                        {
+                            wchar_t asiPath[MAX_PATH];
+                            swprintf_s(asiPath, L"%s%s\\%s", gameDir.c_str(), sub, fd.cFileName);
+
+                            // Attempt to delete it first
+                            if (!DeleteFileW(asiPath))
+                            {
+                                FindClose(hFind);
+                                wchar_t desc[256];
+                                swprintf_s(desc, L"پلاگین مشکوک و غیرمجاز شناسایی شد: %s", fd.cFileName);
+                                OnViolation(L"پلاگین غیرمجاز (.asi)", desc);
+                                return false;
+                            }
+                        }
+                    }
+                } while (FindNextFileW(hFind, &fd));
+                FindClose(hFind);
+            }
+        }
+        return true;
+    }
+
     // Check if proxy DLLs exist in the current game working directory
     static bool CheckProxyDlls()
     {
-        wchar_t gameDir[MAX_PATH] = { 0 };
-        GetCurrentDirectoryW(MAX_PATH, gameDir);
+        std::wstring gameDir = GetGameRootDirectory();
 
         for (const auto* dllName : kBlacklistedProxyDlls)
         {
             wchar_t fullPath[MAX_PATH];
-            swprintf_s(fullPath, L"%s\\%s", gameDir, dllName);
+            swprintf_s(fullPath, L"%s\\%s", gameDir.c_str(), dllName);
 
             DWORD attrs = GetFileAttributesW(fullPath);
             if (attrs != INVALID_FILE_ATTRIBUTES && !(attrs & FILE_ATTRIBUTE_DIRECTORY))
@@ -769,6 +951,7 @@ namespace gameland_guard
     // Background Watchdog worker
     static void WatchdogWorker()
     {
+        int watchdogCycles = 0;
         while (g_watchdogRunning)
         {
             std::this_thread::sleep_for(std::chrono::milliseconds(1300));
@@ -780,6 +963,13 @@ namespace gameland_guard
             ScanOpenGLHooks();
             ScanUnbackedExecutableMemory();
             ClearHardwareBreakpoints();
+
+            watchdogCycles++;
+            if (watchdogCycles % 5 == 0)
+            {
+                VerifyFileIntegrity();
+                CheckUnauthorizedAsiFiles();
+            }
 
             if (g_gameWindow && IsWindow(g_gameWindow))
             {
@@ -814,6 +1004,12 @@ namespace gameland_guard
         Initialize();
 
         if (!CheckProxyDlls())
+            return false;
+
+        if (!CheckUnauthorizedAsiFiles())
+            return false;
+
+        if (!VerifyFileIntegrity())
             return false;
 
         if (!CheckBlacklistedProcesses())

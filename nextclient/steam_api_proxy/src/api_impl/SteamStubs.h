@@ -136,7 +136,7 @@ private:
     std::string game_desc_{ "Counter-Strike" };
     int max_players_{ 32 };
     int bot_players_{ 0 };
-    int players_{ 1 };
+    int players_{ 0 };
     bool password_protected_{ false };
     bool dedicated_{ false };
     uint16_t game_port_{ 27015 };
@@ -150,6 +150,8 @@ public:
     {
         is_active_ = false;
         map_name_.clear();
+        players_ = 0;
+        bot_players_ = 0;
         std::lock_guard<std::mutex> lock(mutex_);
         while (!outgoing_packets_.empty())
             outgoing_packets_.pop();
@@ -181,6 +183,8 @@ public:
     {
         is_active_ = false;
         map_name_.clear();
+        players_ = 0;
+        bot_players_ = 0;
     }
     bool BLoggedOn() override { return is_active_; }
     bool BSecure() override { return false; }
@@ -204,11 +208,15 @@ public:
         {
             map_name_ = map;
             is_active_ = true;
+            players_ = 0;
+            bot_players_ = 0;
         }
         else
         {
             map_name_.clear();
             is_active_ = false;
+            players_ = 0;
+            bot_players_ = 0;
         }
     }
     void SetPasswordProtected(bool pwd) override
@@ -235,7 +243,7 @@ public:
 
     void SendUserDisconnect(CSteamID) override
     {
-        if (players_ > 1) players_--;
+        if (players_ > 0) players_--;
     }
 
     bool BUpdateUserData(CSteamID, const char *, uint32) override { return true; }
