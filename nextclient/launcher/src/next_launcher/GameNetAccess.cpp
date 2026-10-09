@@ -1,13 +1,19 @@
-#include "GameNetAccess.h"
+#include <winsock2.h>
+#include <ws2tcpip.h>
 
+#include "GameNetAccess.h"
 #include "GameNetAccessConfig.h"
 #include "GameNetWinInet.h"
 
 #include <Windows.h>
 #include <winhttp.h>
+#include <wininet.h>
 #include <wincrypt.h>
 #include <cstring>
 
+#pragma comment(lib, "ws2_32.lib")
+#pragma comment(lib, "wininet.lib")
+#pragma comment(lib, "winhttp.lib")
 #pragma comment(lib, "crypt32.lib")
 #pragma comment(lib, "advapi32.lib")
 
@@ -308,12 +314,6 @@ bool EqualsTag(std::string_view value)
         });
 }
 
-struct CalendarDate
-{
-    int year{};
-    int month{};
-    int day{};
-};
 
 bool ParseNumber(std::string_view value, int& number)
 {
@@ -724,6 +724,364 @@ bool PerformHttpGet(
     }
 }
 
+// Flushes the Windows DNS resolver cache to clear corrupted or poisoned negative cache entries
+void FlushWindowsDnsCache()
+{
+    HMODULE hDnsApi = LoadLibraryA("dnsapi.dll");
+    if (hDnsApi)
+    {
+        typedef BOOL (WINAPI *DnsFlushResolverCacheFunc)();
+        auto pDnsFlush = reinterpret_cast<DnsFlushResolverCacheFunc>(
+            GetProcAddress(hDnsApi, "DnsFlushResolverCache"));
+        if (pDnsFlush)
+            pDnsFlush();
+        FreeLibrary(hDnsApi);
+    }
+}
+
+// Queries public DNS servers directly via UDP port 53 (bypassing broken system/local DNS)
+std::string QueryPublicDnsUdp(const std::string& domain, const char* dns_server_ip)
+{
+    SOCKET sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    if (sock == INVALID_SOCKET)
+        return "";
+
+    DWORD timeoutMs = 700;
+    setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char*>(&timeoutMs), sizeof(timeoutMs));
+    setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, reinterpret_cast<const char*>(&timeoutMs), sizeof(timeoutMs));
+
+    sockaddr_in dnsAddr{};
+    dnsAddr.sin_family = AF_INET;
+    dnsAddr.sin_port = htons(53);
+    dnsAddr.sin_addr.s_addr = inet_addr(dns_server_ip);
+
+    uint8_t packet[256] = { 0 };
+    packet[0] = 0x24; packet[1] = 0x68; // Transaction ID
+    packet[2] = 0x01; packet[3] = 0x00; // Flags: Standard Query, Recursion Desired
+    packet[4] = 0x00; packet[5] = 0x01; // QDCOUNT = 1
+    size_t offset = 12;
+
+    size_t start = 0;
+    while (start < domain.size())
+    {
+        size_t dot = domain.find('.', start);
+        if (dot == std::string::npos) dot = domain.size();
+        size_t len = dot - start;
+        if (len == 0 || len > 63 || offset + len + 1 >= sizeof(packet))
+            break;
+        packet[offset++] = static_cast<uint8_t>(len);
+        for (size_t i = 0; i < len; ++i)
+            packet[offset++] = static_cast<uint8_t>(domain[start + i]);
+        start = dot + 1;
+    }
+    packet[offset++] = 0x00; // Zero length label ends QNAME
+
+    packet[offset++] = 0x00; packet[offset++] = 0x01; // QTYPE = A (1)
+    packet[offset++] = 0x00; packet[offset++] = 0x01; // QCLASS = IN (1)
+
+    int sent = sendto(sock, reinterpret_cast<const char*>(packet), static_cast<int>(offset), 0,
+                      reinterpret_cast<const sockaddr*>(&dnsAddr), sizeof(dnsAddr));
+    if (sent > 0)
+    {
+        uint8_t recvBuf[512] = { 0 };
+        sockaddr_in fromAddr{};
+        int fromLen = sizeof(fromAddr);
+        int bytesRecv = recvfrom(sock, reinterpret_cast<char*>(recvBuf), sizeof(recvBuf), 0,
+                                 reinterpret_cast<sockaddr*>(&fromAddr), &fromLen);
+        if (bytesRecv > 12)
+        {
+            uint16_t ancount = (static_cast<uint16_t>(recvBuf[6]) << 8) | recvBuf[7];
+            if (ancount > 0)
+            {
+                // Skip Question section
+                size_t p = 12;
+                while (p < static_cast<size_t>(bytesRecv) && recvBuf[p] != 0)
+                {
+                    if ((recvBuf[p] & 0xC0) == 0xC0) { p += 2; break; }
+                    p += 1 + recvBuf[p];
+                }
+                if (p < static_cast<size_t>(bytesRecv) && recvBuf[p] == 0) p++;
+                p += 4; // Skip QTYPE and QCLASS
+
+                // Scan Answer records
+                for (uint16_t a = 0; a < ancount && p + 10 <= static_cast<size_t>(bytesRecv); ++a)
+                {
+                    if ((recvBuf[p] & 0xC0) == 0xC0) p += 2;
+                    else
+                    {
+                        while (p < static_cast<size_t>(bytesRecv) && recvBuf[p] != 0)
+                            p += 1 + recvBuf[p];
+                        if (p < static_cast<size_t>(bytesRecv) && recvBuf[p] == 0) p++;
+                    }
+                    if (p + 10 > static_cast<size_t>(bytesRecv)) break;
+                    uint16_t type = (static_cast<uint16_t>(recvBuf[p]) << 8) | recvBuf[p + 1];
+                    uint16_t rdlen = (static_cast<uint16_t>(recvBuf[p + 8]) << 8) | recvBuf[p + 9];
+                    p += 10;
+                    if (type == 1 && rdlen == 4 && p + 4 <= static_cast<size_t>(bytesRecv))
+                    {
+                        char resolved[64] = { 0 };
+                        sprintf_s(resolved, "%u.%u.%u.%u", recvBuf[p], recvBuf[p + 1], recvBuf[p + 2], recvBuf[p + 3]);
+                        closesocket(sock);
+                        return std::string(resolved);
+                    }
+                    p += rdlen;
+                }
+            }
+        }
+    }
+    closesocket(sock);
+    return "";
+}
+
+} // namespace
+
+// Multi-tier resilient host resolution (Standard -> Public DNS -> Hardcoded Fallback)
+std::string ResolveHostResilient(const std::string& host)
+{
+    if (inet_addr(host.c_str()) != INADDR_NONE)
+        return host;
+
+    // 1. Standard Windows resolver (quick check)
+    addrinfo hints{};
+    hints.ai_family = AF_INET;
+    hints.ai_socktype = SOCK_STREAM;
+    addrinfo* res = nullptr;
+    if (getaddrinfo(host.c_str(), nullptr, &hints, &res) == 0 && res != nullptr)
+    {
+        sockaddr_in* sin = reinterpret_cast<sockaddr_in*>(res->ai_addr);
+        char ipStr[INET_ADDRSTRLEN] = { 0 };
+        inet_ntop(AF_INET, &(sin->sin_addr), ipStr, sizeof(ipStr));
+        freeaddrinfo(res);
+        if (ipStr[0] != '\0')
+            return std::string(ipStr);
+    }
+
+    // Flush Windows DNS resolver cache if local DNS failed
+    FlushWindowsDnsCache();
+
+    // 2. Query robust public DNS servers directly over UDP port 53
+    const char* const publicDnsServers[] = {
+        "8.8.8.8",        // Google DNS
+        "1.1.1.1",        // Cloudflare DNS
+        "77.88.8.8",      // Yandex DNS
+        "178.22.122.100", // Shecan DNS (Iran anti-sanction/stability)
+        "10.202.10.202"   // Electro DNS (Iran)
+    };
+
+    for (const char* dnsIp : publicDnsServers)
+    {
+        std::string ip = QueryPublicDnsUdp(host, dnsIp);
+        if (!ip.empty())
+            return ip;
+    }
+
+    // 3. Guaranteed Hardcoded Fallback for gameland.cam
+    if (host == "gameland.cam" || host == "dl.gameland.cam" || host.find("gameland.cam") != std::string::npos)
+    {
+        return "130.185.77.84";
+    }
+
+    return "";
+}
+
+// Direct Winsock TCP HTTP transport with virtual host header
+bool DownloadWithDirectSocket(
+    const std::string& host,
+    uint16_t port,
+    const std::string& path,
+    const std::string& virtual_host,
+    size_t maximum_size,
+    std::string& response,
+    CalendarDate* server_date)
+{
+    std::string ip = ResolveHostResilient(host);
+    if (ip.empty())
+        return false;
+
+    SOCKET s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if (s == INVALID_SOCKET)
+        return false;
+
+    DWORD timeout = 4000;
+    setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char*>(&timeout), sizeof(timeout));
+    setsockopt(s, SOL_SOCKET, SO_SNDTIMEO, reinterpret_cast<const char*>(&timeout), sizeof(timeout));
+
+    sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(port);
+    addr.sin_addr.s_addr = inet_addr(ip.c_str());
+
+    if (connect(s, reinterpret_cast<const sockaddr*>(&addr), sizeof(addr)) != 0)
+    {
+        closesocket(s);
+        return false;
+    }
+
+    std::string req = "GET " + path + " HTTP/1.1\r\n";
+    req += "Host: " + (virtual_host.empty() ? host : virtual_host) + "\r\n";
+    req += "User-Agent: Allclient-Access/3.0\r\n";
+    req += "Accept: text/plain, application/json\r\n";
+    req += "Connection: close\r\n\r\n";
+
+    if (send(s, req.data(), static_cast<int>(req.size()), 0) <= 0)
+    {
+        closesocket(s);
+        return false;
+    }
+
+    std::string raw;
+    char buf[4096];
+    int r = 0;
+    while ((r = recv(s, buf, sizeof(buf), 0)) > 0)
+    {
+        raw.append(buf, r);
+        if (raw.size() > maximum_size + 8192)
+            break;
+    }
+    closesocket(s);
+
+    if (raw.empty())
+        return false;
+
+    // Verify HTTP 200
+    size_t lineEnd = raw.find("\r\n");
+    if (lineEnd == std::string::npos)
+        return false;
+    std::string statusLine = raw.substr(0, lineEnd);
+    if (statusLine.find(" 200 ") == std::string::npos && statusLine.find(" 200") == std::string::npos)
+        return false;
+
+    size_t headerEnd = raw.find("\r\n\r\n");
+    if (headerEnd == std::string::npos)
+        return false;
+
+    std::string headers = raw.substr(0, headerEnd);
+    std::string body = raw.substr(headerEnd + 4);
+
+    // Extract Date header if server_date is requested
+    if (server_date)
+    {
+        bool dateSet = false;
+        size_t datePos = headers.find("Date: ");
+        if (datePos == std::string::npos)
+            datePos = headers.find("date: ");
+        if (datePos != std::string::npos)
+        {
+            size_t dateEnd = headers.find("\r\n", datePos);
+            if (dateEnd != std::string::npos)
+            {
+                std::string dateStr = headers.substr(datePos + 6, dateEnd - (datePos + 6));
+                SYSTEMTIME st{};
+                if (InternetTimeToSystemTimeA(dateStr.c_str(), &st, 0))
+                {
+                    if (GetIranDateFromUtcTime(st, *server_date))
+                        dateSet = true;
+                }
+            }
+        }
+        if (!dateSet)
+        {
+            SYSTEMTIME st{};
+            GetSystemTime(&st);
+            GetIranDateFromUtcTime(st, *server_date);
+        }
+    }
+
+    // Dechunk if needed
+    if (headers.find("Transfer-Encoding: chunked") != std::string::npos ||
+        headers.find("transfer-encoding: chunked") != std::string::npos)
+    {
+        std::string dechunked;
+        size_t pos = 0;
+        while (pos < body.size())
+        {
+            size_t crlf = body.find("\r\n", pos);
+            if (crlf == std::string::npos) break;
+            std::string hexLen = body.substr(pos, crlf - pos);
+            size_t chunkLen = 0;
+            try { chunkLen = std::stoul(hexLen, nullptr, 16); } catch (...) { break; }
+            if (chunkLen == 0) break;
+            pos = crlf + 2;
+            if (pos + chunkLen > body.size()) break;
+            dechunked.append(body.substr(pos, chunkLen));
+            pos += chunkLen + 2;
+        }
+        if (!dechunked.empty())
+            body = std::move(dechunked);
+    }
+
+    if (body.size() > maximum_size)
+        body.resize(maximum_size);
+
+    response = std::move(body);
+    return !response.empty();
+}
+
+bool PostWithDirectSocket(
+    const std::string& host,
+    uint16_t port,
+    const std::string& path,
+    const std::string& virtual_host,
+    const std::string& body,
+    std::string& response)
+{
+    std::string ip = ResolveHostResilient(host);
+    if (ip.empty())
+        return false;
+
+    SOCKET s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if (s == INVALID_SOCKET)
+        return false;
+
+    DWORD timeout = 4000;
+    setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char*>(&timeout), sizeof(timeout));
+    setsockopt(s, SOL_SOCKET, SO_SNDTIMEO, reinterpret_cast<const char*>(&timeout), sizeof(timeout));
+
+    sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(port);
+    addr.sin_addr.s_addr = inet_addr(ip.c_str());
+
+    if (connect(s, reinterpret_cast<const sockaddr*>(&addr), sizeof(addr)) != 0)
+    {
+        closesocket(s);
+        return false;
+    }
+
+    std::string req = "POST " + path + " HTTP/1.1\r\n";
+    req += "Host: " + (virtual_host.empty() ? host : virtual_host) + "\r\n";
+    req += "User-Agent: Allclient-Access/3.0\r\n";
+    req += "Content-Type: application/x-www-form-urlencoded\r\n";
+    req += "Content-Length: " + std::to_string(body.size()) + "\r\n";
+    req += "Connection: close\r\n\r\n";
+    req += body;
+
+    if (send(s, req.data(), static_cast<int>(req.size()), 0) <= 0)
+    {
+        closesocket(s);
+        return false;
+    }
+
+    std::string raw;
+    char buf[4096];
+    int r = 0;
+    while ((r = recv(s, buf, sizeof(buf), 0)) > 0)
+    {
+        raw.append(buf, r);
+    }
+    closesocket(s);
+
+    if (raw.empty())
+        return false;
+
+    size_t headerEnd = raw.find("\r\n\r\n");
+    if (headerEnd == std::string::npos)
+        return false;
+
+    response = raw.substr(headerEnd + 4);
+    return true;
+}
+
 bool DownloadText(
     const wchar_t* url,
     size_t maximum_size,
@@ -768,10 +1126,44 @@ bool DownloadText(
             return true;
         }
     }
+
+    // 3. DNS & NETWORK RESILIENCE FALLBACK:
+    // When local DNS fails, times out, or ISP DNS hijacks requests,
+    // fallback to direct socket transport using public DNS / hardcoded IP with Host header!
+    if (url)
+    {
+        URL_COMPONENTSW parts{};
+        parts.dwStructSize = sizeof(parts);
+        parts.dwSchemeLength = static_cast<DWORD>(-1);
+        parts.dwHostNameLength = static_cast<DWORD>(-1);
+        parts.dwUrlPathLength = static_cast<DWORD>(-1);
+        parts.dwExtraInfoLength = static_cast<DWORD>(-1);
+        if (WinHttpCrackUrl(url, 0, 0, &parts) && parts.nScheme == INTERNET_SCHEME_HTTP)
+        {
+            std::string hostNarrow;
+            for (DWORD i = 0; i < parts.dwHostNameLength; ++i)
+                hostNarrow.push_back(static_cast<char>(parts.lpszHostName[i]));
+
+            std::string pathNarrow;
+            for (DWORD i = 0; i < parts.dwUrlPathLength; ++i)
+                pathNarrow.push_back(static_cast<char>(parts.lpszUrlPath[i]));
+            if (parts.dwExtraInfoLength > 0)
+            {
+                for (DWORD i = 0; i < parts.dwExtraInfoLength; ++i)
+                    pathNarrow.push_back(static_cast<char>(parts.lpszExtraInfo[i]));
+            }
+
+            if (DownloadWithDirectSocket(hostNarrow, static_cast<uint16_t>(parts.nPort ? parts.nPort : 80),
+                                         pathNarrow, hostNarrow,
+                                         maximum_size, response, server_date))
+            {
+                return true;
+            }
+        }
+    }
+
     response.clear();
     return false;
-}
-
 }
 
 std::string Compute24CharDeviceHash()

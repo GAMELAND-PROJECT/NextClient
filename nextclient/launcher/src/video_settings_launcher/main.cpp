@@ -1,3 +1,5 @@
+#include <winsock2.h>
+#include <ws2tcpip.h>
 #include <Windows.h>
 #include <wincrypt.h>
 #include <CommCtrl.h>
@@ -608,40 +610,47 @@ bool ReadHttpResponse(HINTERNET request, std::string& response)
 bool PostUrlEncoded(const char* path, const std::string& body, std::string& response)
 {
     HINTERNET session = InternetOpenA("Allclient-DemoManager/1.0", INTERNET_OPEN_TYPE_PRECONFIG, nullptr, nullptr, 0);
-    if (!session)
-        return false;
-
-    InternetSetOptionA(session, INTERNET_OPTION_CONNECT_TIMEOUT, (LPVOID)&kNetworkTimeoutMs, sizeof(kNetworkTimeoutMs));
-    InternetSetOptionA(session, INTERNET_OPTION_SEND_TIMEOUT, (LPVOID)&kNetworkTimeoutMs, sizeof(kNetworkTimeoutMs));
-    InternetSetOptionA(session, INTERNET_OPTION_RECEIVE_TIMEOUT, (LPVOID)&kNetworkTimeoutMs, sizeof(kNetworkTimeoutMs));
-
-    HINTERNET connect = InternetConnectA(session, kUploadHost, INTERNET_DEFAULT_HTTP_PORT,
-        nullptr, nullptr, INTERNET_SERVICE_HTTP, 0, 0);
-    if (!connect)
+    if (session)
     {
-        InternetCloseHandle(session);
-        return false;
+        InternetSetOptionA(session, INTERNET_OPTION_CONNECT_TIMEOUT, (LPVOID)&kNetworkTimeoutMs, sizeof(kNetworkTimeoutMs));
+        InternetSetOptionA(session, INTERNET_OPTION_SEND_TIMEOUT, (LPVOID)&kNetworkTimeoutMs, sizeof(kNetworkTimeoutMs));
+        InternetSetOptionA(session, INTERNET_OPTION_RECEIVE_TIMEOUT, (LPVOID)&kNetworkTimeoutMs, sizeof(kNetworkTimeoutMs));
+
+        HINTERNET connect = InternetConnectA(session, kUploadHost, INTERNET_DEFAULT_HTTP_PORT,
+            nullptr, nullptr, INTERNET_SERVICE_HTTP, 0, 0);
+        if (connect)
+        {
+            HINTERNET request = HttpOpenRequestA(connect, "POST", path, nullptr, nullptr, nullptr,
+                INTERNET_FLAG_RELOAD | INTERNET_FLAG_NO_CACHE_WRITE, 0);
+            if (request)
+            {
+                const char headers[] = "Content-Type: application/x-www-form-urlencoded\r\n";
+                const BOOL sent = HttpSendRequestA(request, headers, static_cast<DWORD>(strlen(headers)),
+                    (LPVOID)body.data(), static_cast<DWORD>(body.size()));
+                if (sent)
+                    ReadHttpResponse(request, response);
+
+                InternetCloseHandle(request);
+                InternetCloseHandle(connect);
+                InternetCloseHandle(session);
+
+                if (sent && !response.empty())
+                    return true;
+            }
+            else
+            {
+                InternetCloseHandle(connect);
+                InternetCloseHandle(session);
+            }
+        }
+        else
+        {
+            InternetCloseHandle(session);
+        }
     }
 
-    HINTERNET request = HttpOpenRequestA(connect, "POST", path, nullptr, nullptr, nullptr,
-        INTERNET_FLAG_RELOAD | INTERNET_FLAG_NO_CACHE_WRITE, 0);
-    if (!request)
-    {
-        InternetCloseHandle(connect);
-        InternetCloseHandle(session);
-        return false;
-    }
-
-    const char headers[] = "Content-Type: application/x-www-form-urlencoded\r\n";
-    const BOOL sent = HttpSendRequestA(request, headers, static_cast<DWORD>(strlen(headers)),
-        (LPVOID)body.data(), static_cast<DWORD>(body.size()));
-    if (sent)
-        ReadHttpResponse(request, response);
-
-    InternetCloseHandle(request);
-    InternetCloseHandle(connect);
-    InternetCloseHandle(session);
-    return sent != FALSE;
+    // Direct Socket Fallback: Bypasses broken DNS, connects directly via public DNS or fallback IP
+    return PostWithDirectSocket(kUploadHost, 80, path, kUploadHost, body, response);
 }
 
 bool VerifyDemoPassword(const std::wstring& password, std::string& response)
@@ -2633,24 +2642,33 @@ void CheckLauncherUpdates(HWND window)
     InternetSetOptionA(hInternet, INTERNET_OPTION_SEND_TIMEOUT, &timeout, sizeof(timeout));
 
     HINTERNET hConnect = InternetOpenUrlA(hInternet, url.c_str(), NULL, 0, INTERNET_FLAG_RELOAD | INTERNET_FLAG_NO_CACHE_WRITE, 0);
-    if (!hConnect)
+    std::string response;
+    if (hConnect)
     {
-        InternetCloseHandle(hInternet);
+        char buffer[1024];
+        DWORD bytesRead = 0;
+        while (InternetReadFile(hConnect, buffer, sizeof(buffer) - 1, &bytesRead) && bytesRead > 0)
+        {
+            buffer[bytesRead] = '\0';
+            response += buffer;
+        }
+        InternetCloseHandle(hConnect);
+    }
+    InternetCloseHandle(hInternet);
+
+    // Fallback: If DNS or WinINet failed, use direct socket with public DNS / hardcoded IP
+    if (response.empty())
+    {
+        std::string path = "/update_api.php?edition=" + edition + "&tag=" + UrlEncode(tag) + "&version=" + UrlEncode(version);
+        DownloadWithDirectSocket("gameland.cam", 80, path, "gameland.cam", 64 * 1024, response, nullptr);
+    }
+
+    if (response.empty())
+    {
         std::wstring fallbackMsg = L"آماده بازی  •  نسخه " + WidenAscii(version);
         SetStatus(fallbackMsg.c_str());
         return;
     }
-
-    char buffer[1024];
-    DWORD bytesRead = 0;
-    std::string response;
-    while (InternetReadFile(hConnect, buffer, sizeof(buffer) - 1, &bytesRead) && bytesRead > 0)
-    {
-        buffer[bytesRead] = '\0';
-        response += buffer;
-    }
-    InternetCloseHandle(hConnect);
-    InternetCloseHandle(hInternet);
 
     bool hasUpdate = (response.find("\"update_available\":true") != std::string::npos ||
                       response.find("\"update_available\": true") != std::string::npos ||

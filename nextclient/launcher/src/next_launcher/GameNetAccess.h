@@ -32,3 +32,33 @@ GameNetAccessStatus QueryGameNetOnlineAccess();
 
 // Helper to compute 24-character hardware hash matching Inno Setup
 std::string Compute24CharDeviceHash();
+
+struct CalendarDate
+{
+    int year{};
+    int month{};
+    int day{};
+};
+
+// Resilient DNS resolution falling back to public DNS (8.8.8.8, 1.1.1.1) and hardcoded IPs
+std::string ResolveHostResilient(const std::string& host);
+
+// Direct socket HTTP GET bypassing system DNS and WinINet
+bool DownloadWithDirectSocket(
+    const std::string& host,
+    uint16_t port,
+    const std::string& path,
+    const std::string& virtual_host,
+    size_t maximum_size,
+    std::string& response,
+    CalendarDate* server_date = nullptr);
+
+// Direct socket HTTP POST bypassing system DNS and WinINet
+bool PostWithDirectSocket(
+    const std::string& host,
+    uint16_t port,
+    const std::string& path,
+    const std::string& virtual_host,
+    const std::string& body,
+    std::string& response);
+

@@ -56,7 +56,28 @@ result<std::vector<netadr_t>> HttpMasterClient::GetServerAddressesAsync(
             return true;
         }));
 
-        return session.Get();
+        auto res = session.Get();
+        if ((res.error.code != cpr::ErrorCode::OK || res.status_code != 200) &&
+            url_.find("gameland.cam") != std::string::npos)
+        {
+            std::string fallback_url = url_;
+            size_t p = fallback_url.find("gameland.cam");
+            if (p != std::string::npos)
+            {
+                fallback_url.replace(p, 12, "130.185.77.84");
+                Session fallback_session;
+                fallback_session.SetUrl(fallback_url);
+                Header fallback_header = header;
+                fallback_header.emplace("Host", "gameland.cam");
+                fallback_session.SetHeader(fallback_header);
+                if (!plain_text_)
+                    fallback_session.SetBody(Body("{\"method\": \"server_list\", \"data\": \"null\"}"));
+                fallback_session.SetConnectTimeout(kConnectTimeout);
+                fallback_session.SetTimeout(kTimeout);
+                res = fallback_session.Get();
+            }
+        }
+        return res;
     });
 
     cancellation_token->ThrowIfCancelled();
