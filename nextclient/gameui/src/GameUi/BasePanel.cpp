@@ -2,6 +2,7 @@
 #include "GameUINext.h"
 #include "BasePanel.h"
 
+#include "vgui/IInput.h"
 #include "vgui/IInputInternal.h"
 #include "vgui/ILocalize.h"
 #include "vgui/IPanel.h"
@@ -32,6 +33,10 @@
 #include "ToolBar.h"
 #include "GameConsole.h"
 #include "PlayerListDialog.h"
+#include "OnlinePlayersDialog.h"
+#include "LobbyChatDialog.h"
+#include "PresenceClient.h"
+#include "PersianShaper.h"
 #include "../ServerBrowser/ServerBrowserDialog.h"
 
 #include <keydefs.h>
@@ -431,8 +436,10 @@ public:
             }
         }
 
+        bool foundLobbyChat = false;
         bool foundDemoStudio = false;
-        int extraGap = (int)(12.0f * scale + 0.5f);
+        int gapChat = (int)(10.0f * scale + 0.5f);
+        int gapDemo = (int)(12.0f * scale + 0.5f);
 
         for (int i = 0; i < GetChildCount(); i++)
         {
@@ -441,28 +448,49 @@ public:
             if (menuItem && menuItem->IsVisible())
             {
                 const char *cmd = menuItem->GetCommand() ? menuItem->GetCommand()->GetString("command", "") : "";
+                if (!Q_stricmp(cmd, "OpenLobbyChat") || !Q_stricmp(cmd, "OpenGlobalChat"))
+                {
+                    foundLobbyChat = true;
+                    continue;
+                }
                 if (!Q_stricmp(cmd, "OpenDemoStudio") || !Q_stricmp(cmd, "OpenDemoUploader"))
                 {
                     foundDemoStudio = true;
+                    if (foundLobbyChat)
+                    {
+                        int x, y;
+                        menuItem->GetPos(x, y);
+                        menuItem->SetPos(x, y + gapChat);
+                    }
                     continue;
                 }
 
-                if (foundDemoStudio)
+                int totalShift = 0;
+                if (foundLobbyChat) totalShift += gapChat;
+                if (foundDemoStudio) totalShift += gapDemo;
+
+                if (totalShift > 0)
                 {
                     int x, y;
                     menuItem->GetPos(x, y);
-                    menuItem->SetPos(x, y + extraGap);
+                    menuItem->SetPos(x, y + totalShift);
                 }
             }
         }
 
         int w, h;
         GetSize(w, h);
-        SetSize(std::max(w, maxItemW), foundDemoStudio ? (h + extraGap) : h);
+        int totalExtraH = (foundLobbyChat ? gapChat : 0) + (foundDemoStudio ? gapDemo : 0);
+        SetSize(std::max(w, maxItemW), h + totalExtraH);
     }
 
     virtual void OnKeyCodePressed(vgui2::KeyCode code)
     {
+        if (code == vgui2::KEY_F3)
+        {
+            BasePanel()->OnOpenLobbyChatDialog();
+            return;
+        }
         if (code == vgui2::KEY_F4)
         {
             BasePanel()->OnOpenDemoUploaderDialog();
@@ -669,6 +697,7 @@ void CBasePanel::PaintBackground(void)
     }
 
     DrawTopWelcomeBanner();
+    DrawRightChatPreview();
 }
 
 void CBasePanel::DrawTopWelcomeBanner(void)
@@ -713,8 +742,26 @@ void CBasePanel::DrawTopWelcomeBanner(void)
     int nameW = 0, nameH = 0;
     vgui2::surface()->GetTextSize(hFont, wName, nameW, nameH);
 
-    int textW = prefixW + nameW;
-    int textH = std::max(prefixH, nameH);
+    int totalOnline = PresenceClient::GetInstance().GetTotalOnline();
+    int inLobby = PresenceClient::GetInstance().GetInLobby();
+    int inGame = PresenceClient::GetInstance().GetInGame();
+    bool hasData = PresenceClient::GetInstance().HasData();
+
+    wchar_t wPresence[128]{};
+    if (hasData)
+    {
+        swprintf_s(wPresence, L"  |  ONLINE: %d  (LOBBY: %d | MATCH: %d)", totalOnline, inLobby, inGame);
+    }
+    else
+    {
+        swprintf_s(wPresence, L"  |  CONNECTING...");
+    }
+
+    int presenceW = 0, presenceH = 0;
+    vgui2::surface()->GetTextSize(hFont, wPresence, presenceW, presenceH);
+
+    int textW = prefixW + nameW + presenceW;
+    int textH = std::max({prefixH, nameH, presenceH});
 
     int paddingX = (int)(24.0f * scale + 0.5f);
     int dotSize = std::max(6, (int)(6.0f * scale + 0.5f));
@@ -724,6 +771,11 @@ void CBasePanel::DrawTopWelcomeBanner(void)
     int bannerW = textW + paddingX * 2 + dotSize + dotGap;
     int bannerX = (swide - bannerW) / 2;
     int bannerY = (int)(20.0f * scale + 0.5f);
+
+    m_presenceBannerX = bannerX;
+    m_presenceBannerY = bannerY;
+    m_presenceBannerW = bannerW;
+    m_presenceBannerH = bannerH;
 
     // 1. Frosted obsidian glass backdrop
     vgui2::surface()->DrawSetColor(Color(14, 18, 26, 215));
@@ -762,6 +814,123 @@ void CBasePanel::DrawTopWelcomeBanner(void)
     vgui2::surface()->DrawSetTextColor(Color(255, 215, 85, 255));
     vgui2::surface()->DrawSetTextPos(textX + prefixW, textY);
     vgui2::surface()->DrawPrintText(wName, wcslen(wName));
+
+    // Draw Online Presence stats in vibrant emerald mint
+    vgui2::surface()->DrawSetTextColor(Color(0, 220, 180, 255));
+    vgui2::surface()->DrawSetTextPos(textX + prefixW + nameW, textY);
+    vgui2::surface()->DrawPrintText(wPresence, wcslen(wPresence));
+}
+
+void CBasePanel::DrawRightChatPreview(void)
+{
+    if (GameUI().IsInLevel() || g_hLoadingDialog.Get())
+        return;
+
+    int swide = 0, stall = 0;
+    vgui2::surface()->GetScreenSize(swide, stall);
+    if (swide <= 0 || stall <= 0)
+        return;
+
+    float scale = (float)stall / 600.0f;
+    if (scale < 1.0f) scale = 1.0f;
+
+    vgui2::IScheme *pScheme = vgui2::scheme()->GetIScheme(vgui2::scheme()->GetDefaultScheme());
+    if (!pScheme)
+        return;
+
+    vgui2::HFont hFont = pScheme->GetFont("Default", IsProportional());
+    vgui2::HFont hFontBold = pScheme->GetFont("DefaultBold", IsProportional());
+    if (!hFont) hFont = hFontBold;
+    if (!hFont) return;
+
+    LobbyChatMessage latestMsg;
+    bool hasMsg = PresenceClient::GetInstance().GetLatestChatMessage(latestMsg);
+
+    int cardW = (int)(280.0f * scale + 0.5f);
+    int cardH = (int)(80.0f * scale + 0.5f);
+    int marginX = (int)(24.0f * scale + 0.5f);
+    int cardX = swide - cardW - marginX;
+    int cardY = (int)(75.0f * scale + 0.5f);
+
+    m_chatPreviewX = cardX;
+    m_chatPreviewY = cardY;
+    m_chatPreviewW = cardW;
+    m_chatPreviewH = cardH;
+
+    // 1. Sleek translucent glass background (نامرئی‌طور و مدرن)
+    vgui2::surface()->DrawSetColor(Color(12, 16, 24, 175));
+    vgui2::surface()->DrawFilledRect(cardX, cardY, cardX + cardW, cardY + cardH);
+
+    // 2. Cyan glowing outer border
+    vgui2::surface()->DrawSetColor(Color(0, 205, 255, 80));
+    vgui2::surface()->DrawOutlinedRect(cardX, cardY, cardX + cardW, cardY + cardH);
+
+    // 3. Top accent highlight
+    vgui2::surface()->DrawSetColor(Color(0, 230, 255, 160));
+    vgui2::surface()->DrawFilledRect(cardX, cardY, cardX + cardW, cardY + 2);
+
+    int padX = (int)(12.0f * scale + 0.5f);
+    int curY = cardY + (int)(8.0f * scale + 0.5f);
+
+    // 4. Header title: "LOBBY CHAT" + time
+    wchar_t wHeader[64]{};
+    if (hasMsg && !latestMsg.time.empty())
+    {
+        std::wstring wTime = Persian::Utf8ToWide(latestMsg.time);
+        swprintf_s(wHeader, L"GLOBAL LOBBY CHAT  [%s]", wTime.c_str());
+    }
+    else
+    {
+        swprintf_s(wHeader, L"GLOBAL LOBBY CHAT");
+    }
+
+    vgui2::surface()->DrawSetTextFont(hFontBold ? hFontBold : hFont);
+    vgui2::surface()->DrawSetTextColor(Color(0, 220, 255, 240));
+    vgui2::surface()->DrawSetTextPos(cardX + padX, curY);
+    vgui2::surface()->DrawPrintText(wHeader, wcslen(wHeader));
+
+    curY += (int)(18.0f * scale + 0.5f);
+
+    // 5. Message body
+    vgui2::surface()->DrawSetTextFont(hFont);
+    if (hasMsg && !latestMsg.text.empty())
+    {
+        std::string senderRaw = latestMsg.tag.empty() ? latestMsg.sender : ("[" + latestMsg.tag + "] " + latestMsg.sender);
+        std::wstring wSender = Persian::ShapeAndBiDi(Persian::Utf8ToWide(senderRaw)) + L": ";
+
+        vgui2::surface()->DrawSetTextColor(Color(255, 215, 85, 255));
+        vgui2::surface()->DrawSetTextPos(cardX + padX, curY);
+        vgui2::surface()->DrawPrintText(wSender.c_str(), wSender.length());
+
+        int senderW = 0, senderH = 0;
+        vgui2::surface()->GetTextSize(hFont, wSender.c_str(), senderW, senderH);
+
+        std::wstring wTextRaw = Persian::Utf8ToWide(latestMsg.text);
+        if (wTextRaw.length() > 28)
+        {
+            wTextRaw = wTextRaw.substr(0, 26) + L"...";
+        }
+        std::wstring wText = Persian::ShapeAndBiDi(wTextRaw);
+
+        vgui2::surface()->DrawSetTextColor(Color(240, 245, 255, 255));
+        vgui2::surface()->DrawSetTextPos(cardX + padX + senderW, curY);
+        vgui2::surface()->DrawPrintText(wText.c_str(), wText.length());
+    }
+    else
+    {
+        wchar_t wNoMsg[] = L"No messages yet. Click to chat!";
+        vgui2::surface()->DrawSetTextColor(Color(150, 165, 180, 210));
+        vgui2::surface()->DrawSetTextPos(cardX + padX, curY);
+        vgui2::surface()->DrawPrintText(wNoMsg, wcslen(wNoMsg));
+    }
+
+    curY += (int)(22.0f * scale + 0.5f);
+
+    // 6. Subtext call to action
+    wchar_t wFooter[] = L"Click or press F3 to join chat";
+    vgui2::surface()->DrawSetTextColor(Color(115, 135, 155, 190));
+    vgui2::surface()->DrawSetTextPos(cardX + padX, curY);
+    vgui2::surface()->DrawPrintText(wFooter, wcslen(wFooter));
 }
 
 bool CBasePanel::IsMenuFading(void)
@@ -926,6 +1095,33 @@ void CBasePanel::OnSizeChanged(int newWide, int newTall)
     // OnScreenSizeChanged in OnSizeChange event of the root panel that matches the actual viewport bounds
 
     BaseClass::OnScreenSizeChanged(newWide, newTall);
+}
+
+void CBasePanel::OnMousePressed(vgui2::MouseCode code)
+{
+    if (code == vgui2::MOUSE_LEFT && !GameUI().IsInLevel())
+    {
+        int cursorX = 0, cursorY = 0;
+        vgui2::input()->GetCursorPos(cursorX, cursorY);
+        ScreenToLocal(cursorX, cursorY);
+
+        if (m_presenceBannerW > 0 &&
+            cursorX >= m_presenceBannerX && cursorX <= (m_presenceBannerX + m_presenceBannerW) &&
+            cursorY >= m_presenceBannerY && cursorY <= (m_presenceBannerY + m_presenceBannerH))
+        {
+            OnOpenLobbyChatDialog();
+            return;
+        }
+
+        if (m_chatPreviewW > 0 &&
+            cursorX >= m_chatPreviewX && cursorX <= (m_chatPreviewX + m_chatPreviewW) &&
+            cursorY >= m_chatPreviewY && cursorY <= (m_chatPreviewY + m_chatPreviewH))
+        {
+            OnOpenLobbyChatDialog();
+            return;
+        }
+    }
+    BaseClass::OnMousePressed(code);
 }
 
 void CBasePanel::OnLevelLoadingStarted(const char *levelName)
@@ -1117,6 +1313,8 @@ CGameMenu *CBasePanel::RecursiveLoadGameMenu(vgui2::Panel *parent, KeyValues *da
 
 void CBasePanel::RunFrame(void)
 {
+    PresenceClient::GetInstance().UpdateMainThreadState();
+
     if (!IsVisible())
         return;
 
@@ -1360,6 +1558,14 @@ void CBasePanel::RunMenuCommand(const char *command)
     {
         OnOpenPlayerListDialog();
     }
+    else if (!Q_stricmp(command, "OpenOnlinePlayers") || !Q_stricmp(command, "OpenPlayersList"))
+    {
+        OnOpenOnlinePlayersDialog();
+    }
+    else if (!Q_stricmp(command, "OpenLobbyChat") || !Q_stricmp(command, "OpenGlobalChat"))
+    {
+        OnOpenLobbyChatDialog();
+    }
     else if (!Q_stricmp(command, "OpenDemoUploader") || !Q_stricmp(command, "OpenDemoStudio"))
     {
         OnOpenDemoUploaderDialog();
@@ -1521,6 +1727,28 @@ void CBasePanel::OnOpenDemoUploaderDialog(void)
     }
 
     m_hDemoUploaderDialog->Activate();
+}
+
+void CBasePanel::OnOpenOnlinePlayersDialog(void)
+{
+    if (!m_hOnlinePlayersDialog.Get())
+    {
+        m_hOnlinePlayersDialog = new COnlinePlayersDialog(this);
+        PositionDialog(m_hOnlinePlayersDialog);
+    }
+
+    m_hOnlinePlayersDialog->Activate();
+}
+
+void CBasePanel::OnOpenLobbyChatDialog(void)
+{
+    if (!m_hLobbyChatDialog.Get())
+    {
+        m_hLobbyChatDialog = new CLobbyChatDialog(this);
+        PositionDialog(m_hLobbyChatDialog);
+    }
+
+    m_hLobbyChatDialog->Activate();
 }
 
 void CBasePanel::PositionDialog(vgui2::PHandle dlg)

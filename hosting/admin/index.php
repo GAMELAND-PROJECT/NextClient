@@ -1225,6 +1225,40 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             } else {
                 throw new RuntimeException('آپدیت مورد نظر یافت نشد.');
             }
+        } elseif ($action === 'admin_kick_presence_player') {
+            $hash = strtoupper(trim((string)($_POST['device_hash'] ?? '')));
+            if (!empty($hash)) {
+                $dbFile = dirname(__DIR__) . DIRECTORY_SEPARATOR . 'storage' . DIRECTORY_SEPARATOR . 'presence' . DIRECTORY_SEPARATOR . 'presence.sqlite';
+                if (is_file($dbFile)) {
+                    $db = new PDO("sqlite:" . $dbFile);
+                    $db->prepare("DELETE FROM active_players WHERE device_hash = :hash")->execute([':hash' => $hash]);
+                    @unlink(dirname(__DIR__) . DIRECTORY_SEPARATOR . 'storage' . DIRECTORY_SEPARATOR . 'presence' . DIRECTORY_SEPARATOR . 'summary_cache.json');
+                }
+                flash('success', 'نشست بازیکن با موفقیت قطع شد.');
+            }
+        } elseif ($action === 'admin_delete_chat_message') {
+            $msgId = (int)($_POST['message_id'] ?? 0);
+            if ($msgId > 0) {
+                $file = dirname(__DIR__) . DIRECTORY_SEPARATOR . 'storage' . DIRECTORY_SEPARATOR . 'chat' . DIRECTORY_SEPARATOR . 'chat_buffer.json';
+                if (is_file($file)) {
+                    $data = json_decode((string)file_get_contents($file), true);
+                    if (is_array($data) && isset($data['messages'])) {
+                        $data['messages'] = array_values(array_filter($data['messages'], static fn($m) => (int)$m['id'] !== $msgId));
+                        @file_put_contents($file, json_encode($data, JSON_UNESCAPED_UNICODE), LOCK_EX);
+                    }
+                }
+                flash('success', 'پیام چت با موفقیت حذف شد.');
+            }
+        } elseif ($action === 'admin_mute_chat_user') {
+            $hash = strtoupper(trim((string)($_POST['device_hash'] ?? '')));
+            $duration = max(60, (int)($_POST['duration_sec'] ?? 300));
+            if (!empty($hash)) {
+                $file = dirname(__DIR__) . DIRECTORY_SEPARATOR . 'storage' . DIRECTORY_SEPARATOR . 'chat' . DIRECTORY_SEPARATOR . 'chat_muted.json';
+                $muted = is_file($file) ? (json_decode((string)file_get_contents($file), true) ?: []) : [];
+                $muted[$hash] = time() + $duration;
+                @file_put_contents($file, json_encode($muted), LOCK_EX);
+                flash('success', "کاربر برای {$duration} ثانیه در چت مسدود شد.");
+            }
         } else {
             throw new RuntimeException('عملیات ناشناخته است.');
         }
@@ -1277,6 +1311,41 @@ foreach ($homeClientRows as $hcr) {
 }
 $defaultHomeExpiry = addJalaliMonths(dateTimeToJalali(iranToday()), 1);
 $securityReports = readSecurityReports();
+
+function readPresenceSummaryAdmin(): array {
+    $file = dirname(__DIR__) . DIRECTORY_SEPARATOR . 'storage' . DIRECTORY_SEPARATOR . 'presence' . DIRECTORY_SEPARATOR . 'summary_cache.json';
+    if (is_file($file)) {
+        $data = json_decode((string)file_get_contents($file), true);
+        if (is_array($data)) return $data;
+    }
+    return ['total_online' => 0, 'in_lobby' => 0, 'in_game' => 0];
+}
+
+function readActivePresencePlayersAdmin(): array {
+    $dbFile = dirname(__DIR__) . DIRECTORY_SEPARATOR . 'storage' . DIRECTORY_SEPARATOR . 'presence' . DIRECTORY_SEPARATOR . 'presence.sqlite';
+    if (!is_file($dbFile)) return [];
+    try {
+        $db = new PDO("sqlite:" . $dbFile);
+        $db->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+        $cutoff = time() - 45;
+        $stmt = $db->prepare("SELECT * FROM active_players WHERE last_heartbeat > :cutoff ORDER BY CASE WHEN state = 'ingame' THEN 0 ELSE 1 END, last_heartbeat DESC LIMIT 100");
+        $stmt->execute([':cutoff' => $cutoff]);
+        return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    } catch (Throwable $e) {
+        return [];
+    }
+}
+
+function readAdminChatMessages(): array {
+    $file = dirname(__DIR__) . DIRECTORY_SEPARATOR . 'storage' . DIRECTORY_SEPARATOR . 'chat' . DIRECTORY_SEPARATOR . 'chat_buffer.json';
+    if (!is_file($file)) return [];
+    $data = json_decode((string)file_get_contents($file), true);
+    return is_array($data) ? ($data['messages'] ?? []) : [];
+}
+
+$adminPresenceSummary = readPresenceSummaryAdmin();
+$adminActivePlayers = readActivePresencePlayersAdmin();
+$adminChatMessages = readAdminChatMessages();
     } catch (Throwable $error) {
         $flash = ['type' => 'error', 'message' => $error->getMessage()];
     }
@@ -1337,6 +1406,7 @@ $securityReports = readSecurityReports();
       <div class="stat"><strong><?= count(normalizedLines($serverText)) ?></strong><span>سرور پین‌شده</span></div>
       <div class="stat"><strong><?= count($tagRows) ?></strong><span>کل اشتراک‌ها</span></div>
       <div class="stat"><strong class="ok"><?= $activeSubscriptions ?></strong><span>اشتراک فعال</span></div>
+      <div class="stat"><strong class="ok"><?= (int)($adminPresenceSummary['total_online'] ?? 0) ?></strong><span>بازیکن آنلاین</span></div>
       <div class="stat"><strong class="<?= $expiringSubscriptions ? 'warn' : 'ok' ?>"><?= $expiringSubscriptions ?></strong><span>نیازمند توجه</span></div>
       <div class="stat"><strong class="<?= $suspendedSubscriptions ? 'bad' : 'ok' ?>"><?= $suspendedSubscriptions ?></strong><span>اشتراک معلق</span></div>
       <div class="stat"><strong class="<?= count($securityReports) ? 'bad' : 'ok' ?>"><?= count($securityReports) ?></strong><span>گزارش شیلد</span></div>
@@ -1344,6 +1414,7 @@ $securityReports = readSecurityReports();
 
     <nav class="panel-tabs" aria-label="بخش‌های پنل">
       <button class="panel-tab active" type="button" data-panel="dashboard" aria-selected="true"><span class="tab-icon">⌂</span><span>داشبورد</span></button>
+      <button class="panel-tab" type="button" data-panel="online_presence" aria-selected="false"><span class="tab-icon">👥</span><span>حضور آنلاین و چت</span><b><?= (int)($adminPresenceSummary['total_online'] ?? 0) ?></b></button>
       <button class="panel-tab" type="button" data-panel="subscriptions" aria-selected="false"><span class="tab-icon">◫</span><span>اشتراک‌ها</span><b><?= count($tagRows) ?></b></button>
       <button class="panel-tab" type="button" data-panel="home_clients" aria-selected="false"><span class="tab-icon">🏠</span><span>کلاینت‌های خانگی</span><b><?= count($homeClientRows) ?></b></button>
       <button class="panel-tab" type="button" data-panel="updates" aria-selected="false"><span class="tab-icon">↑</span><span>آپدیت‌ها</span><b><?= (count($updatesData['home'] ?? []) + count($updatesData['gamenet'] ?? [])) ?></b></button>
@@ -1931,6 +2002,174 @@ $securityReports = readSecurityReports();
           </div>
         <?php endif; ?>
       </div>
+    </section>
+
+    <section class="panel-view" data-panel-view="online_presence">
+      <div class="section-heading">
+        <div>
+          <span class="eyebrow">LIVE PRESENCE &amp; LOBBY CHAT</span>
+          <h2>حضور آنلاین بازیکنان و چت لابی</h2>
+          <p>وضعیت لحظه‌ای کلاینت‌ها (درون بازی / لابی) همراه با نظارت و مدیریت پیام‌های چت عمومی</p>
+        </div>
+      </div>
+
+      <div class="stats" style="margin-bottom: 24px;">
+        <div class="stat"><strong class="ok"><?= (int)($adminPresenceSummary['total_online'] ?? 0) ?></strong><span>کل بازیکنان آنلاین</span></div>
+        <div class="stat"><strong style="color: #64b5f6;"><?= (int)($adminPresenceSummary['in_lobby'] ?? 0) ?></strong><span>حاضر در لابی / منوی بازی</span></div>
+        <div class="stat"><strong style="color: #81c784;"><?= (int)($adminPresenceSummary['in_game'] ?? 0) ?></strong><span>در حال مسابقه درون سرور</span></div>
+        <div class="stat"><strong><?= count($adminChatMessages) ?></strong><span>پیام‌های فعال چت</span></div>
+      </div>
+
+      <article class="card" style="margin-bottom: 24px;">
+        <div class="card-title">
+          <div>
+            <h2>بازیکنان آنلاین فعلی (Active Players)</h2>
+            <p>لیست کلاینت‌هایی که طی ۴۵ ثانیه اخیر فعال بوده‌اند (بروزرسانی خودکار)</p>
+          </div>
+          <span class="pill ok"><?= count($adminActivePlayers) ?> بازیکن</span>
+        </div>
+
+        <?php if (!empty($adminActivePlayers)): ?>
+          <div style="overflow-x: auto;">
+            <table class="table" style="width: 100%; border-collapse: collapse;">
+              <thead>
+                <tr style="text-align: right; border-bottom: 1px solid var(--border);">
+                  <th style="padding: 10px;">بازیکن</th>
+                  <th style="padding: 10px;">وضعیت</th>
+                  <th style="padding: 10px;">مپ / سرور</th>
+                  <th style="padding: 10px;">کلاینت</th>
+                  <th style="padding: 10px;">IP / سخت‌افزار</th>
+                  <th style="padding: 10px;">آخرین ارتباط</th>
+                  <th style="padding: 10px;">عملیات</th>
+                </tr>
+              </thead>
+              <tbody>
+                <?php foreach ($adminActivePlayers as $p): ?>
+                  <?php
+                    $isGame = ($p['state'] ?? '') === 'ingame';
+                    $secAgo = max(0, time() - (int)($p['last_heartbeat'] ?? time()));
+                  ?>
+                  <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
+                    <td style="padding: 10px; font-weight: bold;">
+                      <?= escape((string)($p['name'] ?? 'بی‌نام')) ?>
+                    </td>
+                    <td style="padding: 10px; white-space: nowrap;">
+                      <?php if ($isGame): ?>
+                        <span class="status-badge ok" style="font-size: 11px;">🟢 در حال بازی</span>
+                      <?php else: ?>
+                        <span class="status-badge warn" style="font-size: 11px; background: rgba(100, 181, 246, 0.15); color: #64b5f6; border-color: rgba(100, 181, 246, 0.3);">🟡 در لابی / منو</span>
+                      <?php endif; ?>
+                    </td>
+                    <td style="padding: 10px;">
+                      <?php if ($isGame): ?>
+                        <div><strong class="ltr"><?= escape((string)($p['map'] ?? 'نامشخص')) ?></strong></div>
+                        <div style="font-size: 11px; color: var(--muted);" class="ltr"><?= escape((string)($p['server_addr'] ?? '')) ?></div>
+                      <?php else: ?>
+                        <span style="color: var(--muted); font-size: 12px;">منوی اصلی بازی</span>
+                      <?php endif; ?>
+                    </td>
+                    <td style="padding: 10px; white-space: nowrap;">
+                      <?php if (($p['branch'] ?? '') === 'home'): ?>
+                        <span class="pill" style="font-size: 11px;">خانگی</span>
+                      <?php else: ?>
+                        <span class="pill" style="font-size: 11px; background: rgba(255, 183, 77, 0.2); color: #ffb74d;">گیم‌نت (<?= escape((string)($p['tag'] ?? '')) ?>)</span>
+                      <?php endif; ?>
+                    </td>
+                    <td style="padding: 10px; font-size: 11px; color: var(--muted);">
+                      <div class="ltr"><?= escape((string)($p['ip_address'] ?? '')) ?></div>
+                      <div class="ltr" style="font-family: monospace; font-size: 10px;"><?= escape(substr((string)($p['device_hash'] ?? ''), 0, 10)) ?>...</div>
+                    </td>
+                    <td style="padding: 10px; font-size: 12px; white-space: nowrap;">
+                      <?= $secAgo ?> ثانیه پیش
+                    </td>
+                    <td style="padding: 10px; white-space: nowrap;">
+                      <form method="post" class="confirm-form" data-confirm="نشست این کاربر حذف و از لیست خارج شود؟" style="margin: 0; display: inline-block;">
+                        <input type="hidden" name="csrf" value="<?= escape(csrfToken()) ?>">
+                        <input type="hidden" name="action" value="admin_kick_presence_player">
+                        <input type="hidden" name="device_hash" value="<?= escape((string)($p['device_hash'] ?? '')) ?>">
+                        <button class="button danger" type="submit" style="min-height: 26px; padding: 2px 7px; font-size: 11px;">قطع نشست</button>
+                      </form>
+                      <form method="post" class="confirm-form" data-confirm="این کاربر به مدت ۳۰ دقیقه در چت لابی مسدود شود؟" style="margin: 0; display: inline-block;">
+                        <input type="hidden" name="csrf" value="<?= escape(csrfToken()) ?>">
+                        <input type="hidden" name="action" value="admin_mute_chat_user">
+                        <input type="hidden" name="device_hash" value="<?= escape((string)($p['device_hash'] ?? '')) ?>">
+                        <input type="hidden" name="duration_sec" value="1800">
+                        <button class="button warning" type="submit" style="min-height: 26px; padding: 2px 7px; font-size: 11px;">ساکت در چت</button>
+                      </form>
+                    </td>
+                  </tr>
+                <?php endforeach; ?>
+              </tbody>
+            </table>
+          </div>
+        <?php else: ?>
+          <div class="empty-state" style="text-align: center; padding: 30px; color: var(--muted);">
+            <div style="font-size: 32px; margin-bottom: 8px;">🎮</div>
+            <strong style="font-size: 14px;">در حال حاضر هیچ بازیکنی متصل نیست.</strong>
+          </div>
+        <?php endif; ?>
+      </article>
+
+      <article class="card">
+        <div class="card-title">
+          <div>
+            <h2>پیام‌های اخیر چت لابی (Global Lobby Chat)</h2>
+            <p>آخرین پیام‌های ارسالی توسط کاربران در صفحه اصلی بازی</p>
+          </div>
+          <span class="pill"><?= count($adminChatMessages) ?> پیام</span>
+        </div>
+
+        <?php if (!empty($adminChatMessages)): ?>
+          <div style="overflow-x: auto;">
+            <table class="table" style="width: 100%; border-collapse: collapse;">
+              <thead>
+                <tr style="text-align: right; border-bottom: 1px solid var(--border);">
+                  <th style="padding: 10px;">زمان</th>
+                  <th style="padding: 10px;">ارسال‌کننده</th>
+                  <th style="padding: 10px;">متن پیام</th>
+                  <th style="padding: 10px;">عملیات</th>
+                </tr>
+              </thead>
+              <tbody>
+                <?php foreach (array_reverse($adminChatMessages) as $msg): ?>
+                  <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
+                    <td style="padding: 10px; font-size: 11px; color: var(--muted); white-space: nowrap;">
+                      <?= date('H:i:s', (int)($msg['time'] ?? time())) ?>
+                    </td>
+                    <td style="padding: 10px; white-space: nowrap;">
+                      <strong><?= escape((string)($msg['name'] ?? 'بی‌نام')) ?></strong>
+                      <div style="font-size: 10px; color: var(--muted);" class="ltr"><?= escape(substr((string)($msg['device_hash'] ?? ''), 0, 8)) ?></div>
+                    </td>
+                    <td style="padding: 10px; max-width: 450px; word-break: break-word;">
+                      <?= escape((string)($msg['text'] ?? '')) ?>
+                    </td>
+                    <td style="padding: 10px; white-space: nowrap;">
+                      <form method="post" class="confirm-form" data-confirm="این پیام چت حذف شود؟" style="margin: 0; display: inline-block;">
+                        <input type="hidden" name="csrf" value="<?= escape(csrfToken()) ?>">
+                        <input type="hidden" name="action" value="admin_delete_chat_message">
+                        <input type="hidden" name="message_id" value="<?= (int)($msg['id'] ?? 0) ?>">
+                        <button class="button danger" type="submit" style="min-height: 26px; padding: 2px 7px; font-size: 11px;">حذف پیام</button>
+                      </form>
+                      <form method="post" class="confirm-form" data-confirm="ارسال‌کننده به مدت ۱ ساعت در چت ساکت شود؟" style="margin: 0; display: inline-block;">
+                        <input type="hidden" name="csrf" value="<?= escape(csrfToken()) ?>">
+                        <input type="hidden" name="action" value="admin_mute_chat_user">
+                        <input type="hidden" name="device_hash" value="<?= escape((string)($msg['device_hash'] ?? '')) ?>">
+                        <input type="hidden" name="duration_sec" value="3600">
+                        <button class="button warning" type="submit" style="min-height: 26px; padding: 2px 7px; font-size: 11px;">ساکت ۱ ساعته</button>
+                      </form>
+                    </td>
+                  </tr>
+                <?php endforeach; ?>
+              </tbody>
+            </table>
+          </div>
+        <?php else: ?>
+          <div class="empty-state" style="text-align: center; padding: 25px; color: var(--muted);">
+            <div style="font-size: 28px; margin-bottom: 6px;">💬</div>
+            <strong style="font-size: 14px;">هنوز پیامی در چت لابی ارسال نشده است.</strong>
+          </div>
+        <?php endif; ?>
+      </article>
     </section>
 
     <section class="settings panel-view" data-panel-view="settings">

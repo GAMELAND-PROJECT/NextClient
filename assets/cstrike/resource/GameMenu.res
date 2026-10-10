@@ -20,6 +20,11 @@
 		"OnlyInGame" "1"
 		"notsingle" "1"
 	}
+	"8"
+	{
+		"label" "Global Lobby Chat (F3)"
+		"command" "OpenLobbyChat"
+	}
 	"10"
 	{
 		"label" "Match Demo Studio (F4)"
@@ -35,12 +40,12 @@
 		"label" "#GameUI_GameMenu_FindServers"
 		"command" "OpenServerBrowser"
 	}
-	"13"
+	"15"
 	{
 		"label" "#GameUI_GameMenu_Options"
 		"command" "OpenOptionsDialog"
 	}
-	"14"
+	"16"
 	{
 		"label" "#GameUI_GameMenu_Quit"
 		"command" "Quit"

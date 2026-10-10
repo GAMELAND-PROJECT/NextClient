@@ -1,5 +1,6 @@
 #include "GameUi.h"
 #include <utils/DemoUploader.h>
+#include "PresenceClient.h"
 #include <sys/types.h>
 #include <direct.h>
 #include <filesystem>
@@ -223,6 +224,8 @@ void CGameUI::Start(cl_enginefuncs_s *engineFuncs, int interfaceVersion, void *s
         g_pServerBrowser->Reactivate();
     }
 
+    // Initialize presence and lobby chat client once engine is safely available
+    PresenceClient::GetInstance().Initialize();
 }
 
 void CGameUI::Shutdown(void)
@@ -247,6 +250,7 @@ void CGameUI::Shutdown(void)
     DisconnectTier2Libraries();
     
     DemoUploader::GetInstance().Shutdown();
+    PresenceClient::GetInstance().Shutdown();
 }
 
 int CGameUI::ActivateGameUI(void)
@@ -527,12 +531,14 @@ void CGameUI::ActivateServerBrowser(void)
 
 bool CGameUI::IsInLevel(void)
 {
+    if (!engine)
+        return false;
+
     const char *levelName = engine->pfnGetLevelName();
+    if (!levelName || levelName[0] == '\0')
+        return false;
 
-    if (levelName[0] != '\0')
-        return true;
-
-    return false;
+    return true;
 }
 
 bool CGameUI::IsInMultiplayer(void)

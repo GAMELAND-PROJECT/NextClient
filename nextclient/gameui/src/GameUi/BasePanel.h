@@ -12,6 +12,8 @@
 #include "CreateMultiplayerGameDialog.h"
 #include "OptionsDialog.h"
 #include "DemoUploaderDialog.h"
+#include "OnlinePlayersDialog.h"
+#include "LobbyChatDialog.h"
 #include "KeyValues.h"
 #include "utlvector.h"
 
@@ -148,6 +150,9 @@ public:
     void OnOpenDemoUploaderDialog(void);
     void OnOpenDemoStudioDialog(void) { OnOpenDemoUploaderDialog(); }
     void OnOpenPlayerListDialog();
+    void OnOpenOnlinePlayersDialog(void);
+    void OnOpenLobbyChatDialog(void);
+    void OnMousePressed(vgui2::MouseCode code) override;
     void OnSizeChanged(int newWide, int newTall) override;
     void OnGameUIHidden(void);
 
@@ -165,6 +170,7 @@ protected:
     virtual void PaintBackground(void);
     virtual void ApplySchemeSettings(vgui2::IScheme *pScheme);
     void DrawTopWelcomeBanner(void);
+    void DrawRightChatPreview(void);
 
 private:
     enum EBackgroundState
@@ -231,6 +237,16 @@ private:
     vgui2::DHANDLE<vgui2::Frame> m_hPlayerListDialog;;
     vgui2::DHANDLE<vgui2::QueryBox> m_hQuitQueryBox;
     vgui2::DHANDLE<CDemoUploaderDialog> m_hDemoUploaderDialog;
+    vgui2::DHANDLE<COnlinePlayersDialog> m_hOnlinePlayersDialog;
+    vgui2::DHANDLE<CLobbyChatDialog> m_hLobbyChatDialog;
+    int m_presenceBannerX = 0;
+    int m_presenceBannerY = 0;
+    int m_presenceBannerW = 0;
+    int m_presenceBannerH = 0;
+    int m_chatPreviewX = 0;
+    int m_chatPreviewY = 0;
+    int m_chatPreviewW = 0;
+    int m_chatPreviewH = 0;
 
     vgui2::AnimationController *m_pConsoleAnimationController;
     KeyValues *m_pConsoleControlSettings;

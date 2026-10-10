@@ -19,6 +19,7 @@
 #include <set>
 #include <sstream>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "../next_launcher/GameNetAccess.h"
@@ -152,6 +153,8 @@ HWND g_subscriptionState{};
 HWND g_subscriptionTag{};
 HWND g_subscriptionDetails{};
 HWND g_subscriptionRemaining{};
+HWND g_onlineTitleLabel{};
+HWND g_onlineCountLabel{};
 std::vector<Resolution> g_resolutions;
 bool g_launchRequested{};
 GameNetAccessStatus g_accessStatus;
@@ -2479,6 +2482,29 @@ void DrawActionButton(const DRAWITEMSTRUCT& item)
     }
 }
 
+void FetchLauncherOnlineSummaryAsync(HWND window)
+{
+    std::thread([window]() {
+        std::string response;
+        if (DownloadWithDirectSocket("gameland.cam", 80, "/presence.php?action=summary", "gameland.cam", 4096, response, nullptr))
+        {
+            int total = 0, lobby = 0, game = 0;
+            std::string totalStr = ExtractJsonString(response, "total_online");
+            std::string lobbyStr = ExtractJsonString(response, "in_lobby");
+            std::string gameStr = ExtractJsonString(response, "in_game");
+            if (!totalStr.empty()) { try { total = std::stoi(totalStr); } catch (...) {} }
+            if (!lobbyStr.empty()) { try { lobby = std::stoi(lobbyStr); } catch (...) {} }
+            if (!gameStr.empty()) { try { game = std::stoi(gameStr); } catch (...) {} }
+
+            std::wstring txt = std::to_wstring(total) + L" نفر آنلاین کل";
+            if (g_onlineCountLabel && IsWindow(g_onlineCountLabel))
+            {
+                SetWindowTextW(g_onlineCountLabel, txt.c_str());
+            }
+        }
+    }).detach();
+}
+
 void CreateControls(HWND window)
 {
     InitializeNativeResolutionIfNeeded();
@@ -2508,6 +2534,15 @@ void CreateControls(HWND window)
 
     g_subscriptionRemaining = AddControl(window, L"STATIC", remainingText.c_str(), SS_CENTER | SS_CENTERIMAGE, 172, 40, 234, 22);
     SendMessageW(g_subscriptionRemaining, WM_SETFONT, reinterpret_cast<WPARAM>(g_badgeFont), TRUE);
+
+    g_onlineTitleLabel = AddControl(window, L"STATIC", L"🟢 کل افراد آنلاین", SS_CENTER | SS_CENTERIMAGE, 28, 17, 134, 22);
+    SendMessageW(g_onlineTitleLabel, WM_SETFONT, reinterpret_cast<WPARAM>(g_emphasisFont), TRUE);
+
+    g_onlineCountLabel = AddControl(window, L"STATIC", L"در حال دریافت...", SS_CENTER | SS_CENTERIMAGE, 28, 40, 134, 22);
+    SendMessageW(g_onlineCountLabel, WM_SETFONT, reinterpret_cast<WPARAM>(g_badgeFont), TRUE);
+
+    FetchLauncherOnlineSummaryAsync(window);
+    SetTimer(window, 997, 25000, nullptr);
 
     HWND heading = label(L"ALLCLIENT", 420, 16, 212, 34);
     SendMessageW(heading, WM_SETFONT, reinterpret_cast<WPARAM>(g_brandFont), TRUE);
@@ -2907,6 +2942,14 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
         {
             SetTextColor(reinterpret_cast<HDC>(wParam), RGB(0, 220, 165));
         }
+        else if (ctl == g_onlineTitleLabel)
+        {
+            SetTextColor(reinterpret_cast<HDC>(wParam), RGB(0, 220, 255));
+        }
+        else if (ctl == g_onlineCountLabel)
+        {
+            SetTextColor(reinterpret_cast<HDC>(wParam), RGB(255, 215, 85));
+        }
         else if (ctl == g_pointerSpeedValue)
         {
             SetTextColor(reinterpret_cast<HDC>(wParam), RGB(0, 210, 160));
@@ -2962,6 +3005,18 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
         SelectObject(dc, oldPen);
         DeleteObject(accentPen);
 
+        // Online players badge container in header - Left box: x=26..164, y=14..68
+        RECT onlineRect{26, 14, 164, 68};
+        HBRUSH onlineBrush = CreateSolidBrush(RGB(18, 28, 36));
+        HPEN onlinePen = CreatePen(PS_SOLID, 1, RGB(0, 180, 220));
+        HGDIOBJ pBrush2 = SelectObject(dc, onlineBrush);
+        HGDIOBJ pPen2 = SelectObject(dc, onlinePen);
+        RoundRect(dc, onlineRect.left, onlineRect.top, onlineRect.right, onlineRect.bottom, 10, 10);
+        SelectObject(dc, pBrush2);
+        SelectObject(dc, pPen2);
+        DeleteObject(onlineBrush);
+        DeleteObject(onlinePen);
+
         // Subscription badge container pill in header - 238px wide, 54px high
         RECT badgeRect{170, 14, 408, 68};
         HBRUSH badgeBrush = CreateSolidBrush(RGB(22, 34, 32));
@@ -2988,10 +3043,16 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
             SendUserHeartbeat();
             return 0;
         }
+        else if (wParam == 997)
+        {
+            FetchLauncherOnlineSummaryAsync(window);
+            return 0;
+        }
         break;
 
     case WM_DESTROY:
         KillTimer(window, 998);
+        KillTimer(window, 997);
         if (!g_launchRequested)
         {
             RevertMousePreview();
