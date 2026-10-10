@@ -152,18 +152,20 @@ inline const CharMapping* GetCharMappingTable(size_t& count)
         { 0x0644, { 0xFEDD, 0xFEDE, 0xFEDF, 0xFEE0, true  } }, // ل
         { 0x0645, { 0xFEE1, 0xFEE2, 0xFEE3, 0xFEE4, true  } }, // م
         { 0x0646, { 0xFEE5, 0xFEE6, 0xFEE7, 0xFEE8, true  } }, // ن
-        { 0x0647, { 0xFEEB, 0xFEEC, 0xFEED, 0xFEEE, true  } }, // ه
-        { 0x0648, { 0xFEE9, 0xFEEA, 0xFEE9, 0xFEEA, false } }, // و
+        { 0x0647, { 0xFEE9, 0xFEEA, 0xFEEB, 0xFEEC, true  } }, // ه
+        { 0x0648, { 0xFEED, 0xFEEE, 0xFEED, 0xFEEE, false } }, // و
         { 0x0649, { 0xFEEF, 0xFEF0, 0xFEEF, 0xFEF0, false } }, // ى
         { 0x064A, { 0xFEF1, 0xFEF2, 0xFEF3, 0xFEF4, true  } }, // ي (عربی)
 
-        // Persian Specific Letters (گ، چ، پ، ژ، ک، ی)
+        // Persian Specific Letters (گ، چ، پ، ژ، ک، ی، ۀ، ھ)
         { 0x067E, { 0xFB56, 0xFB57, 0xFB58, 0xFB59, true  } }, // پ
         { 0x0686, { 0xFB7A, 0xFB7B, 0xFB7C, 0xFB7D, true  } }, // چ
         { 0x0698, { 0xFB8A, 0xFB8B, 0xFB8A, 0xFB8B, false } }, // ژ
         { 0x06A9, { 0xFB8E, 0xFB8F, 0xFEDB, 0xFEDC, true  } }, // ک (فارسی)
         { 0x06AF, { 0xFB92, 0xFB93, 0xFB94, 0xFB95, true  } }, // گ
         { 0x06CC, { 0xFEEF, 0xFEF0, 0xFEF3, 0xFEF4, true  } }, // ی (فارسی - Presentation Forms-B universal)
+        { 0x06C0, { 0xFBA4, 0xFBA5, 0xFBA4, 0xFBA5, false } }, // ۀ
+        { 0x06BE, { 0xFBAA, 0xFBAB, 0xFBAC, 0xFBAD, true  } }, // ھ
     };
     count = sizeof(kTable) / sizeof(kTable[0]);
     return kTable;
@@ -188,6 +190,10 @@ inline std::wstring PresentationFormToBase(wchar_t c)
     if (c == 0xFEF5 || c == 0xFEF6) return L"\x0644\x0622";
     if (c == 0xFEF7 || c == 0xFEF8) return L"\x0644\x0623";
     if (c == 0xFEF9 || c == 0xFEFA) return L"\x0644\x0625";
+
+    // Direct priority mappings for Persian letters sharing forms with Arabic
+    if (c == 0xFEEF || c == 0xFEF0) return L"\x06CC"; // ی (فارسی)
+    if (c == 0xFEDB || c == 0xFEDC) return L"\x06A9"; // ک (فارسی)
 
     size_t count = 0;
     const CharMapping* table = GetCharMappingTable(count);
