@@ -705,6 +705,8 @@ static void OnGameInitializing(void* mainwindow, HDC* pmaindc, HGLRC* pbaseRC, c
         // immediately restore and remove it before the handshake begins.
         if (target_kind == ConnectTargetKind::Online)
         {
+            gEngfuncs.pfnClientCmd("setinfo _allclient 1\n");
+            gEngfuncs.pfnClientCmd("setinfo _gltoken GAMELAND_ALLCLIENT_PRO_2026\n");
 #if defined(GAMELAND_HOME_CLIENT) && GAMELAND_HOME_CLIENT
             // Home Client: 100% full freedom for player names (custom tags like [S]H1RON, brackets, symbols, etc.)
             // Only clean up leftover cafe tags if specifically present from an old installation:
@@ -1026,6 +1028,12 @@ static void OnGameInitialized()
     // GAMELAND Permanent AllClient Engine Signature (FCVAR_PROTECTED: Immutable, cannot be forged via console)
     gEngfuncs.pfnRegisterVariable("gl_allclient_signature", "GL_PERMANENT_VERIFIED_ALLCLIENT_2026", 0);
     gEngfuncs.pfnClientCmd("setinfo _gltoken GAMELAND_ALLCLIENT_PRO_2026\n");
+    gEngfuncs.pfnClientCmd("setinfo _allclient 1\n");
+    if (gEngfuncs.PlayerInfo_SetValueForKey)
+    {
+        gEngfuncs.PlayerInfo_SetValueForKey("_allclient", "1");
+        gEngfuncs.PlayerInfo_SetValueForKey("_gltoken", "GAMELAND_ALLCLIENT_PRO_2026");
+    }
 
     const char* vgui_menus = gEngfuncs.PlayerInfo_ValueForKey ? gEngfuncs.PlayerInfo_ValueForKey(1, "_vgui_menus") : nullptr;
     if (!vgui_menus || !vgui_menus[0])
@@ -1174,3 +1182,75 @@ public:
 };
 
 EXPOSE_SINGLE_INTERFACE(EngineMini, EngineMiniInterface, ENGINE_MINI_INTERFACE_VERSION);
+
+extern "C" __declspec(dllexport) bool NCL_IsAllclientPlayer(const char* name, int playerIndex)
+{
+    if (gEngfuncs.PlayerInfo_ValueForKey == nullptr)
+        return false;
+
+    auto checkIndex = [](int idx) -> bool {
+        if (idx < 1 || idx > 32)
+            return false;
+
+        const char* val = gEngfuncs.PlayerInfo_ValueForKey(idx, "_allclient");
+        if (val && (val[0] == '1' || _stricmp(val, "true") == 0))
+            return true;
+
+        const char* tok = gEngfuncs.PlayerInfo_ValueForKey(idx, "_gltoken");
+        if (tok && strstr(tok, "ALLCLIENT"))
+            return true;
+
+        return false;
+    };
+
+    // If explicit player index is provided:
+    if (playerIndex >= 1 && playerIndex <= 32)
+    {
+        if (checkIndex(playerIndex))
+            return true;
+    }
+
+    // Local player guarantee:
+    if (cl_playerindex != nullptr && *cl_playerindex >= 1 && *cl_playerindex <= 32)
+    {
+        if (playerIndex == *cl_playerindex)
+            return true;
+    }
+
+    if (name && name[0] != '\0' && gEngfuncs.pfnGetPlayerInfo != nullptr)
+    {
+        const char* cleanName = name;
+        if (strncmp(cleanName, "\xE2\x98\x85 ", 4) == 0)
+            cleanName += 4;
+        else if (cleanName[0] == '[' && cleanName[1] == '*' && cleanName[2] == ']' && cleanName[3] == ' ')
+            cleanName += 4;
+
+        // Check if name matches local player
+        if (cl_playerindex != nullptr && *cl_playerindex >= 1 && *cl_playerindex <= 32)
+        {
+            hud_player_info_t localInfo{};
+            gEngfuncs.pfnGetPlayerInfo(*cl_playerindex, &localInfo);
+            if (localInfo.name != nullptr && localInfo.name[0] != '\0')
+            {
+                if (strcmp(localInfo.name, cleanName) == 0)
+                    return true;
+            }
+        }
+
+        for (int i = 1; i <= 32; ++i)
+        {
+            hud_player_info_t info{};
+            gEngfuncs.pfnGetPlayerInfo(i, &info);
+            if (info.name != nullptr && info.name[0] != '\0')
+            {
+                if (strcmp(info.name, cleanName) == 0)
+                {
+                    if (checkIndex(i))
+                        return true;
+                }
+            }
+        }
+    }
+
+    return false;
+}

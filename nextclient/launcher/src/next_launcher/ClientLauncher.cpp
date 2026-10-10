@@ -559,6 +559,7 @@ void ClientLauncher::PrepareEngineCommandLine()
 
     // GAMELAND AllClient Exclusive Identity Injection
     cmd_line_->AppendParm("+setinfo", "_gltoken GAMELAND_ALLCLIENT_PRO_2026");
+    cmd_line_->AppendParm("+setinfo", "_allclient 1");
     cmd_line_->AppendParm("+_allclient_build", "GAMELAND_PRO_2026");
 
     // Ensure _vgui_menus is initialized to Old Style Menus (0) unless overridden

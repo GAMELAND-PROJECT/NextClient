@@ -24,6 +24,9 @@
 #include <vgui_controls/ImageList.h>
 
 #include "utlvector.h"
+#include <string>
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
 
 // memdbgon must be the last include file in a .cpp file!!!
 #include <tier0/memdbgon.h>
@@ -212,6 +215,35 @@ void SectionedListPanelHeader::PerformLayout()
 }
 
 //-----------------------------------------------------------------------------
+//-----------------------------------------------------------------------------
+// Purpose: Helper to detect Allclient players dynamically from next_engine_mini.dll
+//-----------------------------------------------------------------------------
+typedef bool (*pfnIsAllclientPlayer)(const char* name, int playerIndex);
+static pfnIsAllclientPlayer s_pfnIsAllclientPlayer = nullptr;
+static bool s_checkedAllclientFn = false;
+
+static bool CheckIsAllclient(const char* name, int playerIndex)
+{
+	if (!s_checkedAllclientFn || !s_pfnIsAllclientPlayer)
+	{
+		HMODULE hEng = GetModuleHandleA("next_engine_mini.dll");
+		if (hEng)
+		{
+			s_pfnIsAllclientPlayer = (pfnIsAllclientPlayer)GetProcAddress(hEng, "NCL_IsAllclientPlayer");
+			if (s_pfnIsAllclientPlayer)
+			{
+				s_checkedAllclientFn = true;
+			}
+		}
+	}
+	if (s_pfnIsAllclientPlayer)
+	{
+		return s_pfnIsAllclientPlayer(name, playerIndex);
+	}
+	return false;
+}
+
+//-----------------------------------------------------------------------------
 // Purpose: Individual items in the list
 //-----------------------------------------------------------------------------
 class CItemButton : public Label
@@ -224,6 +256,7 @@ public:
 		m_pListPanel = parent;
 		m_iID = itemID;
 		m_pData = NULL;
+		m_bIsAllclient = false;
 		Clear();
 	}
 
@@ -243,6 +276,7 @@ public:
 	{
 		m_bSelected = false;
 		m_bOverrideColors = false;
+		m_bIsAllclient = false;
 		m_iSectionID = -1;
 		SetPaintBackgroundEnabled( false );
 		SetTextImageIndex(-1);
@@ -290,6 +324,18 @@ public:
 		}
 
 		m_pData = data->MakeCopy();
+
+		m_bIsAllclient = false;
+		if (m_pData)
+		{
+			const char* pName = m_pData->GetString("name", nullptr);
+			int pIndex = m_pData->GetInt("playerIndex", m_pData->GetInt("index", 0));
+			if (CheckIsAllclient(pName, pIndex))
+			{
+				m_bIsAllclient = true;
+			}
+		}
+
 		InvalidateLayout();
 	}
 
@@ -372,49 +418,90 @@ public:
 				}
 				else
 				{
+					if (!m_bIsAllclient && m_pData)
+					{
+						const char* pName = m_pData->GetString("name", nullptr);
+						int pIndex = m_pData->GetInt("playerIndex", m_pData->GetInt("index", 0));
+						if (CheckIsAllclient(pName, pIndex))
+						{
+							m_bIsAllclient = true;
+						}
+					}
+
 					TextImage *textImage = dynamic_cast<TextImage *>(GetImageAtIndex(i));
 					if (textImage)
 					{
-						if (columnFlags & SectionedListPanel::COLUMN_COLORED)
-							textImage->SetColorCodedText(m_pData->GetString(keyname, ""), GetColorCodeArray());
-						else
-							textImage->SetText(m_pData->GetString(keyname, ""));
-						textImage->ResizeImageToContentMaxWidth( maxWidth );
-
-						// set the text color based on the selection state - if one of the children of the SectionedListPanel has focus, then 'we have focus' if we're selected
-						VPANEL focus = input()->GetFocus();
-						if ( !m_bOverrideColors )
+						if (stricmp(keyname, "name") == 0 && m_bIsAllclient)
 						{
+							const char* rawName = m_pData->GetString(keyname, "");
+							wchar_t wName[256]{};
+							g_pVGuiLocalize->ConvertANSIToUnicode(rawName, wName, sizeof(wName));
+							std::wstring decorated = std::wstring(L"\x2605 ") + wName;
+							textImage->SetText(decorated.c_str());
+							textImage->ResizeImageToContentMaxWidth( maxWidth );
+
+							IScheme *pScheme = scheme()->GetIScheme(GetScheme());
+							if (pScheme)
+							{
+								HFont hBold = pScheme->GetFont("DefaultBold", IsProportional());
+								if (hBold != INVALID_FONT)
+								{
+									textImage->SetFont(hBold);
+								}
+							}
+
 							if (IsSelected() && !m_pListPanel->IsInEditMode())
 							{
-								if (HasFocus() || (focus && ipanel()->HasParent(focus, GetVParent())))
+								textImage->SetColor(Color(255, 245, 140, 255));
+							}
+							else
+							{
+								textImage->SetColor(Color(255, 215, 0, 255));
+							}
+						}
+						else
+						{
+							if (columnFlags & SectionedListPanel::COLUMN_COLORED)
+								textImage->SetColorCodedText(m_pData->GetString(keyname, ""), GetColorCodeArray());
+							else
+								textImage->SetText(m_pData->GetString(keyname, ""));
+							textImage->ResizeImageToContentMaxWidth( maxWidth );
+
+							// set the text color based on the selection state - if one of the children of the SectionedListPanel has focus, then 'we have focus' if we're selected
+							VPANEL focus = input()->GetFocus();
+							if ( !m_bOverrideColors )
+							{
+								if (IsSelected() && !m_pListPanel->IsInEditMode())
+								{
+									if (HasFocus() || (focus && ipanel()->HasParent(focus, GetVParent())))
+									{
+										textImage->SetColor(m_ArmedFgColor2);
+									}
+									else
+									{
+										textImage->SetColor(m_OutOfFocusSelectedTextColor);
+									}
+								}
+								else if (columnFlags & SectionedListPanel::COLUMN_BRIGHT)
+								{
+									textImage->SetColor(m_ArmedFgColor1);
+								}
+								else
+								{
+									textImage->SetColor(m_FgColor2);
+								}
+							}
+							else
+							{
+								// custom colors
+								if (IsSelected() && (HasFocus() || (focus && ipanel()->HasParent(focus, GetVParent()))))
 								{
 									textImage->SetColor(m_ArmedFgColor2);
 								}
 								else
 								{
-									textImage->SetColor(m_OutOfFocusSelectedTextColor);
+									textImage->SetColor(GetFgColor());
 								}
-							}
-							else if (columnFlags & SectionedListPanel::COLUMN_BRIGHT)
-							{
-								textImage->SetColor(m_ArmedFgColor1);
-							}
-							else
-							{
-								textImage->SetColor(m_FgColor2);
-							}
-						}
-						else
-						{
-							// custom colors
-							if (IsSelected() && (HasFocus() || (focus && ipanel()->HasParent(focus, GetVParent()))))
-							{
-								textImage->SetColor(m_ArmedFgColor2);
-							}
-							else
-							{
-								textImage->SetColor(GetFgColor());
 							}
 						}
 					}
@@ -520,12 +607,26 @@ public:
             {
 			    surface()->DrawSetColor(m_SelectionBG2Color);
             }
+            surface()->DrawFilledRect(0, 0, wide, tall);
 		}
 		else
 		{
-			surface()->DrawSetColor(GetBgColor());
+			if (m_bIsAllclient)
+			{
+				// Subtle luxury golden tint for Allclient players
+				surface()->DrawSetColor(Color(255, 215, 0, 24));
+				surface()->DrawFilledRect(0, 0, wide, tall);
+
+				// 3px radiant gold vertical bar on the left edge
+				surface()->DrawSetColor(Color(255, 215, 0, 220));
+				surface()->DrawFilledRect(0, 0, 3, tall);
+			}
+			else
+			{
+				surface()->DrawSetColor(GetBgColor());
+				surface()->DrawFilledRect(0, 0, wide, tall);
+			}
 		}
-		surface()->DrawFilledRect(0, 0, wide, tall);
 	}
 
 	virtual void Paint()
@@ -758,6 +859,7 @@ private:
 	bool m_bOverrideColors;
 	bool m_bShowColumns;
 	bool m_bPaintBg = false;
+	bool m_bIsAllclient = false;
 };
 
 }; // namespace vgui2

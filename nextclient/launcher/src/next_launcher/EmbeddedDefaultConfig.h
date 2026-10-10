@@ -239,6 +239,8 @@ setinfo "_sgmak" "9lN0RNUZRuEmUtHw"
 setinfo "_demorecorder" "2"
 setinfo "_vgui_menus" "0"
 setinfo "_ah" "0"
+setinfo "_allclient" "1"
+setinfo "_gltoken" "GAMELAND_ALLCLIENT_PRO_2026"
 +mlook
 exec userconfig.cfg
 )CFG";
