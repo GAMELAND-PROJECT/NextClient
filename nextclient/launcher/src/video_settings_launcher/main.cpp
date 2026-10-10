@@ -1798,7 +1798,6 @@ void PerformUserLogin(HWND window)
         SetWindowTextW(g_userRegisterBtn, L"ریست کردن کانفیگ");
         InvalidateRect(g_userRegisterBtn, nullptr, TRUE);
         PullUserConfigFromCloud(token);
-        MessageBoxW(window, L"ورود موفقیت‌آمیز بود و کانفیگ شما همگام‌سازی شد.", L"موفقیت", MB_OK | MB_ICONINFORMATION);
     }
     else
     {
@@ -2298,14 +2297,6 @@ LRESULT CALLBACK OtpRegisterProc(HWND window, UINT message, WPARAM wParam, LPARA
                                               L"\u0631\u0645\u0632 \u0639\u0628\u0648\u0631: " + effectivePass + L"\n\n"
                                               L"\u0627\u0637\u0644\u0627\u0639\u0627\u062a \u062f\u0631 \u06a9\u0627\u062f\u0631 \u0648\u0631\u0648\u062f \u0642\u0631\u0627\u0631 \u06af\u0631\u0641\u062a \u0648 \u06a9\u0627\u0646\u0641\u06cc\u06af \u0634\u0645\u0627 \u0647\u0645\u06af\u0627\u0645 \u06af\u0631\u062f\u06cc\u062f.";
                     MessageBoxW(window, info.c_str(), L"\u0628\u0627\u0632\u06cc\u0627\u0628\u06cc \u0645\u0648\u0641\u0642 \u0631\u0645\u0632 \u0639\u0628\u0648\u0631", MB_OK | MB_ICONINFORMATION);
-                }
-                else if (isExisting == "true")
-                {
-                    MessageBoxW(window, L"\u0631\u0645\u0632 \u0639\u0628\u0648\u0631 \u0628\u0627 \u0645\u0648\u0641\u0642\u06cc\u062a \u062a\u063a\u06cc\u06cc\u0631 \u06cc\u0627\u0641\u062a \u0648 \u0648\u0627\u0631\u062f \u062d\u0633\u0627\u0628 \u062e\u0648\u062f \u0634\u062f\u06cc\u062f.", L"\u062a\u063a\u06cc\u06cc\u0631 \u0631\u0645\u0632 \u0648 \u0648\u0631\u0648\u062f", MB_OK | MB_ICONINFORMATION);
-                }
-                else
-                {
-                    MessageBoxW(window, L"\u062b\u0628\u062a\u200c\u0646\u0627\u0645 \u0628\u0627 \u0645\u0648\u0641\u0642\u06cc\u062a \u0627\u0646\u062c\u0627\u0645 \u0634\u062f \u0648 \u0648\u0627\u0631\u062f \u0634\u062f\u06cc\u062f.", L"\u062b\u0628\u062a\u200c\u0646\u0627\u0645 \u0645\u0648\u0641\u0642", MB_OK | MB_ICONINFORMATION);
                 }
                 DestroyWindow(window);
             }
