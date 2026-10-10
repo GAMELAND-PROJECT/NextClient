@@ -865,7 +865,6 @@ const char* CLocalizedStringTable::GetLocalizationFileName(int index)
 //-----------------------------------------------------------------------------
 int CLocalizedStringTable::ConvertANSIToUnicode(const char* ansi, wchar_t* unicode, int unicodeBufferSizeInBytes)
 {
-<<<<<<< HEAD
     if (!ansi || !unicode || unicodeBufferSizeInBytes < (int)sizeof(wchar_t))
     {
         if (unicode && unicodeBufferSizeInBytes >= (int)sizeof(wchar_t))
@@ -891,14 +890,6 @@ int CLocalizedStringTable::ConvertANSIToUnicode(const char* ansi, wchar_t* unico
         return copyLen + 1;
     }
 
-=======
-#ifdef _WIN32
-    int chars = ::MultiByteToWideChar(CP_UTF8, 0, ansi, -1, unicode, unicodeBufferSizeInBytes / sizeof(wchar_t));
-#else
-    int chars = V_UTF8ToUnicode(ansi, unicode, unicodeBufferSizeInBytes) / sizeof(wchar_t);
-#endif
-    unicode[(unicodeBufferSizeInBytes / sizeof(wchar_t)) - 1] = 0;
->>>>>>> c9f95e6f91f67d79002a79df13244a7538ab799f
     return chars;
 }
 
@@ -907,7 +898,6 @@ int CLocalizedStringTable::ConvertANSIToUnicode(const char* ansi, wchar_t* unico
 //-----------------------------------------------------------------------------
 int CLocalizedStringTable::ConvertUnicodeToANSI(const wchar_t* unicode, char* ansi, int ansiBufferSize)
 {
-<<<<<<< HEAD
     if (!unicode || !ansi || ansiBufferSize <= 0)
     {
         if (ansi && ansiBufferSize > 0)
@@ -923,9 +913,7 @@ int CLocalizedStringTable::ConvertUnicodeToANSI(const wchar_t* unicode, char* an
         return result;
     }
 
-=======
 #ifdef _WIN32
->>>>>>> c9f95e6f91f67d79002a79df13244a7538ab799f
     int result = ::WideCharToMultiByte(CP_UTF8, 0, unicode, -1, ansi, ansiBufferSize, NULL, NULL);
 #else
     int result = V_UnicodeToUTF8(unicode, ansi, ansiBufferSize);
