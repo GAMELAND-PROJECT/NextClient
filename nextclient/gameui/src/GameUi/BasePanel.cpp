@@ -37,6 +37,7 @@
 #include "LobbyChatDialog.h"
 #include "PresenceClient.h"
 #include "PersianShaper.h"
+#include "ProfanityFilter.h"
 #include "../ServerBrowser/ServerBrowserDialog.h"
 
 #include <keydefs.h>
@@ -911,7 +912,8 @@ void CBasePanel::DrawRightChatPreview(void)
         int senderW = 0, senderH = 0;
         vgui2::surface()->GetTextSize(hFont, wSender.c_str(), senderW, senderH);
 
-        std::wstring wTextRaw = Persian::Utf8ToWide(latestMsg.text);
+        std::string cleanMsg = ProfanityFilter::CensorProfanity(latestMsg.text);
+        std::wstring wTextRaw = Persian::Utf8ToWide(cleanMsg);
         if (wTextRaw.length() > 28)
         {
             wTextRaw = wTextRaw.substr(0, 26) + L"...";

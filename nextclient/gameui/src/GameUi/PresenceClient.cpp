@@ -1,5 +1,6 @@
 #include "PresenceClient.h"
 #include "GameUi.h"
+#include "ProfanityFilter.h"
 #include <windows.h>
 #include <cpr/cpr.h>
 #include <sstream>
@@ -559,6 +560,12 @@ void PresenceClient::FetchChatMessagesAsync(int sinceId, std::function<void(bool
 
 void PresenceClient::SendChatMessageAsync(const std::string& message, std::function<void(bool success, const std::string& errorOrNotice, const LobbyChatMessage& sentMsg)> callback)
 {
+    if (ProfanityFilter::ContainsProfanity(message))
+    {
+        if (callback) callback(false, "Message contains prohibited words and was not sent.", {});
+        return;
+    }
+
     std::string devHash = m_cachedDeviceHash;
     std::string name = GetCurrentPlayerName();
     std::string edition = m_cachedEdition;

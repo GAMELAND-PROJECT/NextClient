@@ -2,6 +2,7 @@
 #include "GameUi.h"
 #include "BasePanel.h"
 #include "PersianShaper.h"
+#include "ProfanityFilter.h"
 #include <vgui/IVGui.h>
 #include <vgui/ISurface.h>
 #include <vgui/ISurfaceNext.h>
@@ -220,9 +221,10 @@ void CLobbyChatDialog::AppendMessageToHistory(const LobbyChatMessage& msg)
     std::wstring senderStr = shapedSender + L": ";
     m_pChatHistory->InsertString(senderStr.c_str());
 
-    // Message text
+    // Message text (censored for profanity)
     m_pChatHistory->InsertColorChange(Color(245, 245, 245, 255));
-    std::wstring shapedText = Persian::ShapeAndBiDi(Persian::Utf8ToWide(msg.text));
+    std::string cleanText = ProfanityFilter::CensorProfanity(msg.text);
+    std::wstring shapedText = Persian::ShapeAndBiDi(Persian::Utf8ToWide(cleanText));
     std::wstring textStr = shapedText + L"\n";
     m_pChatHistory->InsertString(textStr.c_str());
 
@@ -240,6 +242,13 @@ void CLobbyChatDialog::SendChatMessage()
 
     if (wtext.empty())
         return;
+
+    // Reject message if it contains vulgar/profane words
+    if (ProfanityFilter::ContainsProfanity(wtext))
+    {
+        m_pStatusLabel->SetText("Message contains prohibited words and was not sent.");
+        return;
+    }
 
     std::string text = Persian::WideToUtf8(wtext);
 
