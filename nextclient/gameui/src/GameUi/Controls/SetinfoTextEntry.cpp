@@ -13,6 +13,7 @@
 CSetinfoTextEntry::CSetinfoTextEntry(Panel *parent, const char *panelName, char const *setinfoName)
     : TextEntry(parent, panelName)
 {
+    SetAllowNonAsciiCharacters(true);
     m_pszSetinfoName = setinfoName ? V_strdup(setinfoName) : nullptr;
     m_pszStartValue[0] = 0;
 

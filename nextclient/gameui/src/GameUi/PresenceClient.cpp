@@ -538,6 +538,7 @@ void PresenceClient::FetchChatMessagesAsync(int sinceId, std::function<void(bool
                 msg.tag = ExtractJsonField(itemJson, "tag");
                 msg.text = ExtractJsonField(itemJson, "text");
                 msg.time = ExtractJsonField(itemJson, "time");
+                msg.timestamp = ExtractJsonInt(itemJson, "timestamp", 0);
 
                 if (!msg.text.empty() && msg.id > 0)
                     messages.push_back(msg);
@@ -599,6 +600,7 @@ void PresenceClient::SendChatMessageAsync(const std::string& message, std::funct
                     sentMsg.tag = ExtractJsonField(itemJson, "tag");
                     sentMsg.text = ExtractJsonField(itemJson, "text");
                     sentMsg.time = ExtractJsonField(itemJson, "time");
+                    sentMsg.timestamp = ExtractJsonInt(itemJson, "timestamp", (int)time(nullptr));
                 }
             }
             if (sentMsg.id > 0)

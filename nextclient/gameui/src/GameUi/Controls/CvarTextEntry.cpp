@@ -20,6 +20,7 @@
 CCvarTextEntry::CCvarTextEntry(Panel *parent, const char *panelName, char const *cvarname)
     : TextEntry(parent, panelName)
 {
+    SetAllowNonAsciiCharacters(true);
     m_pszCvarName = cvarname ? V_strdup(cvarname) : nullptr;
     m_pszStartValue[0] = 0;
 

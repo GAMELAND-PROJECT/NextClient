@@ -28,6 +28,7 @@ struct LobbyChatMessage
     std::string tag;
     std::string text;
     std::string time;
+    long long timestamp = 0;
 };
 
 class PresenceClient

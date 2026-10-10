@@ -171,6 +171,7 @@ protected:
     virtual void ApplySchemeSettings(vgui2::IScheme *pScheme);
     void DrawTopWelcomeBanner(void);
     void DrawRightChatPreview(void);
+    void DrawLeftClockWidget(void);
 
 private:
     enum EBackgroundState

@@ -12,6 +12,8 @@
 
 declare(strict_types=1);
 
+date_default_timezone_set('Asia/Tehran');
+
 header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
 header('Access-Control-Allow-Headers: Content-Type, Authorization');
@@ -26,6 +28,7 @@ $BUFFER_FILE = $DATA_DIR . DIRECTORY_SEPARATOR . 'chat_buffer.json';
 $MUTED_FILE = $DATA_DIR . DIRECTORY_SEPARATOR . 'chat_muted.json';
 $RATE_FILE = $DATA_DIR . DIRECTORY_SEPARATOR . 'chat_rate.json';
 $MAX_MESSAGES = 50; // Keep only latest 50 messages in circular buffer
+$MESSAGE_LIFETIME = 600; // 10 minutes lifespan (600 seconds)
 
 if (!is_dir($DATA_DIR)) {
     @mkdir($DATA_DIR, 0755, true);
@@ -50,6 +53,23 @@ function readChatBuffer(string $file): array {
     $data = json_decode((string)file_get_contents($file), true);
     if (!is_array($data) || !isset($data['messages'])) {
         return ['last_id' => 0, 'messages' => []];
+    }
+
+    // Strictly enforce 10-minute maximum lifespan (600 seconds)
+    $now = time();
+    $active = [];
+    $hadExpired = false;
+    foreach ($data['messages'] as $msg) {
+        $ts = (int)($msg['timestamp'] ?? 0);
+        if ($ts > 0 && ($now - $ts) <= 600) {
+            $active[] = $msg;
+        } else {
+            $hadExpired = true;
+        }
+    }
+    $data['messages'] = $active;
+    if ($hadExpired) {
+        @file_put_contents($file, json_encode($data, JSON_UNESCAPED_UNICODE), LOCK_EX);
     }
     return $data;
 }

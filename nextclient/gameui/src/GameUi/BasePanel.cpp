@@ -697,6 +697,7 @@ void CBasePanel::PaintBackground(void)
     }
 
     DrawTopWelcomeBanner();
+    DrawLeftClockWidget();
     DrawRightChatPreview();
 }
 
@@ -845,6 +846,11 @@ void CBasePanel::DrawRightChatPreview(void)
 
     LobbyChatMessage latestMsg;
     bool hasMsg = PresenceClient::GetInstance().GetLatestChatMessage(latestMsg);
+    time_t curUnix = time(nullptr);
+    if (hasMsg && latestMsg.timestamp > 0 && (curUnix - latestMsg.timestamp) > 600)
+    {
+        hasMsg = false; // Expired after 10 minutes
+    }
 
     int cardW = (int)(280.0f * scale + 0.5f);
     int cardH = (int)(80.0f * scale + 0.5f);
@@ -918,7 +924,7 @@ void CBasePanel::DrawRightChatPreview(void)
     }
     else
     {
-        wchar_t wNoMsg[] = L"No messages yet. Click to chat!";
+        wchar_t wNoMsg[] = L"No recent messages. Click to chat!";
         vgui2::surface()->DrawSetTextColor(Color(150, 165, 180, 210));
         vgui2::surface()->DrawSetTextPos(cardX + padX, curY);
         vgui2::surface()->DrawPrintText(wNoMsg, wcslen(wNoMsg));
@@ -931,6 +937,133 @@ void CBasePanel::DrawRightChatPreview(void)
     vgui2::surface()->DrawSetTextColor(Color(115, 135, 155, 190));
     vgui2::surface()->DrawSetTextPos(cardX + padX, curY);
     vgui2::surface()->DrawPrintText(wFooter, wcslen(wFooter));
+}
+
+static void ConvertGregorianToJalali(int g_y, int g_m, int g_d, int& j_y, int& j_m, int& j_d)
+{
+    static const int g_days_in_month[] = { 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 };
+    static const int j_days_in_month[] = { 31, 31, 31, 31, 31, 31, 30, 30, 30, 30, 30, 29 };
+
+    int gy = g_y - 1600;
+    int gm = g_m - 1;
+    int gd = g_d - 1;
+
+    int g_day_no = 365 * gy + (gy + 3) / 4 - (gy + 99) / 100 + (gy + 399) / 400;
+    for (int i = 0; i < gm; ++i)
+        g_day_no += g_days_in_month[i];
+    if (gm > 1 && ((gy % 4 == 0 && gy % 100 != 0) || (gy % 400 == 0)))
+        g_day_no++;
+    g_day_no += gd;
+
+    int j_day_no = g_day_no - 79;
+    int j_np = j_day_no / 12053;
+    j_day_no %= 12053;
+
+    int jy = 979 + 33 * j_np + 4 * (j_day_no / 1461);
+    j_day_no %= 1461;
+
+    if (j_day_no >= 366) {
+        jy += (j_day_no - 1) / 365;
+        j_day_no = (j_day_no - 1) % 365;
+    }
+
+    int jm = 0;
+    for (jm = 0; jm < 11 && j_day_no >= j_days_in_month[jm]; ++jm) {
+        j_day_no -= j_days_in_month[jm];
+    }
+    j_y = jy;
+    j_m = jm + 1;
+    j_d = j_day_no + 1;
+}
+
+void CBasePanel::DrawLeftClockWidget(void)
+{
+    if (GameUI().IsInLevel() || g_hLoadingDialog.Get())
+        return;
+
+    int swide = 0, stall = 0;
+    vgui2::surface()->GetScreenSize(swide, stall);
+    if (swide <= 0 || stall <= 0)
+        return;
+
+    float scale = (float)stall / 600.0f;
+    if (scale < 1.0f) scale = 1.0f;
+
+    vgui2::IScheme *pScheme = vgui2::scheme()->GetIScheme(vgui2::scheme()->GetDefaultScheme());
+    if (!pScheme)
+        return;
+
+    vgui2::HFont hFont = pScheme->GetFont("Default", IsProportional());
+    vgui2::HFont hFontBold = pScheme->GetFont("DefaultBold", IsProportional());
+    vgui2::HFont hFontLarge = pScheme->GetFont("DefaultLarge", IsProportional());
+    if (!hFont) hFont = hFontBold;
+    if (!hFontLarge) hFontLarge = hFontBold ? hFontBold : hFont;
+    if (!hFont) return;
+
+    // Symmetrical positioning matching the right chat preview:
+    int cardW = (int)(280.0f * scale + 0.5f);
+    int cardH = (int)(80.0f * scale + 0.5f);
+    int cardX = (int)(24.0f * scale + 0.5f);
+    int cardY = (int)(75.0f * scale + 0.5f);
+
+    // 1. Sleek frosted obsidian glass background (نامرئی‌طور و مدرن)
+    vgui2::surface()->DrawSetColor(Color(12, 16, 24, 175));
+    vgui2::surface()->DrawFilledRect(cardX, cardY, cardX + cardW, cardY + cardH);
+
+    // 2. Cyan glowing outer border
+    vgui2::surface()->DrawSetColor(Color(0, 205, 255, 80));
+    vgui2::surface()->DrawOutlinedRect(cardX, cardY, cardX + cardW, cardY + cardH);
+
+    // 3. Top accent highlight in emerald cyan
+    vgui2::surface()->DrawSetColor(Color(0, 230, 210, 180));
+    vgui2::surface()->DrawFilledRect(cardX, cardY, cardX + cardW, cardY + 2);
+
+    int padX = (int)(14.0f * scale + 0.5f);
+    int curY = cardY + (int)(8.0f * scale + 0.5f);
+
+    // 4. Header: Live emerald indicator dot + "IRAN STANDARD TIME"
+    int dotSize = std::max(5, (int)(5.0f * scale + 0.5f));
+    vgui2::surface()->DrawSetColor(Color(0, 255, 180, 255));
+    vgui2::surface()->DrawFilledRect(cardX + padX, curY + 3, cardX + padX + dotSize, curY + 3 + dotSize);
+
+    wchar_t wHeader[] = L"IRAN STANDARD TIME";
+    vgui2::surface()->DrawSetTextFont(hFontBold ? hFontBold : hFont);
+    vgui2::surface()->DrawSetTextColor(Color(0, 220, 255, 240));
+    vgui2::surface()->DrawSetTextPos(cardX + padX + dotSize + 6, curY);
+    vgui2::surface()->DrawPrintText(wHeader, wcslen(wHeader));
+
+    curY += (int)(18.0f * scale + 0.5f);
+
+    // 5. Big Digital Clock (HH : MM - Clean Hour & Minute, No Seconds)
+    time_t now = time(nullptr);
+    // Iran Standard Time (UTC+03:30 = +12600 seconds)
+    time_t iranTime = now + 12600;
+    struct tm tmIran;
+    gmtime_s(&tmIran, &iranTime);
+
+    wchar_t wClock[32]{};
+    swprintf_s(wClock, L"%02d : %02d", tmIran.tm_hour, tmIran.tm_min);
+
+    vgui2::surface()->DrawSetTextFont(hFontLarge);
+    vgui2::surface()->DrawSetTextColor(Color(255, 220, 85, 255)); // Radiant Esports Gold
+    vgui2::surface()->DrawSetTextPos(cardX + padX, curY);
+    vgui2::surface()->DrawPrintText(wClock, wcslen(wClock));
+
+    curY += (int)(22.0f * scale + 0.5f);
+
+    // 6. Subtext: Accurate Jalali (Solar Hijri) Date + Gregorian Date
+    int gy = tmIran.tm_year + 1900;
+    int gm = tmIran.tm_mon + 1;
+    int gd = tmIran.tm_mday;
+    int jy = 0, jm = 0, jd = 0;
+    ConvertGregorianToJalali(gy, gm, gd, jy, jm, jd);
+
+    wchar_t wSub[64]{};
+    swprintf_s(wSub, L"%04d/%02d/%02d  •  %04d/%02d/%02d", jy, jm, jd, gy, gm, gd);
+    vgui2::surface()->DrawSetTextFont(hFont);
+    vgui2::surface()->DrawSetTextColor(Color(130, 175, 205, 230));
+    vgui2::surface()->DrawSetTextPos(cardX + padX, curY);
+    vgui2::surface()->DrawPrintText(wSub, wcslen(wSub));
 }
 
 bool CBasePanel::IsMenuFading(void)
