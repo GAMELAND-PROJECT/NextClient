@@ -4,18 +4,59 @@
 #include <vector>
 #include <algorithm>
 #include <cstdint>
-#include <Windows.h>
+
+#ifndef CP_UTF8
+#define CP_UTF8 65001
+#endif
+
+#if defined(_WIN32)
+extern "C" __declspec(dllimport) int __stdcall MultiByteToWideChar(
+    unsigned int CodePage,
+    unsigned long dwFlags,
+    const char* lpMultiByteStr,
+    int cbMultiByte,
+    wchar_t* lpWideCharStr,
+    int cchWideChar
+);
+
+extern "C" __declspec(dllimport) int __stdcall WideCharToMultiByte(
+    unsigned int CodePage,
+    unsigned long dwFlags,
+    const wchar_t* lpWideCharStr,
+    int cchWideChar,
+    char* lpMultiByteStr,
+    int cbMultiByte,
+    const char* lpDefaultChar,
+    int* lpUsedDefaultChar
+);
+#endif
 
 namespace Persian
 {
 
+inline bool IsRawPersianOrArabic(wchar_t c)
+{
+    return (c >= 0x0600 && c <= 0x06FF) || (c == 0x200C);
+}
+
+inline bool HasPresentationForms(wchar_t c)
+{
+    return (c >= 0xFB50 && c <= 0xFDFF) || (c >= 0xFE70 && c <= 0xFEFF);
+}
+
+inline bool HasPresentationForms(const std::wstring& text)
+{
+    for (wchar_t c : text)
+    {
+        if (HasPresentationForms(c))
+            return true;
+    }
+    return false;
+}
+
 inline bool IsPersianOrArabic(wchar_t c)
 {
-    // Standard Arabic/Persian block + Presentation Forms A & B + ZWNJ
-    return (c >= 0x0600 && c <= 0x06FF) ||
-           (c >= 0xFB50 && c <= 0xFDFF) ||
-           (c >= 0xFE70 && c <= 0xFEFF) ||
-           (c == 0x200C); // ZWNJ (نیم‌فاصله)
+    return IsRawPersianOrArabic(c) || HasPresentationForms(c);
 }
 
 inline bool ContainsPersian(const std::wstring& text)
@@ -23,6 +64,16 @@ inline bool ContainsPersian(const std::wstring& text)
     for (wchar_t c : text)
     {
         if (IsPersianOrArabic(c))
+            return true;
+    }
+    return false;
+}
+
+inline bool NeedsPersianShaping(const std::wstring& text)
+{
+    for (wchar_t c : text)
+    {
+        if (IsRawPersianOrArabic(c))
             return true;
     }
     return false;
@@ -57,12 +108,15 @@ struct CharForms
     bool connectsNext;
 };
 
-inline const CharForms* GetCharForms(wchar_t c)
+struct CharMapping
 {
-    static const struct Mapping {
-        wchar_t base;
-        CharForms forms;
-    } kTable[] = {
+    wchar_t base;
+    CharForms forms;
+};
+
+inline const CharMapping* GetCharMappingTable(size_t& count)
+{
+    static const CharMapping kTable[] = {
         // Hamza & Alef variants
         { 0x0621, { 0xFE80, 0xFE80, 0xFE80, 0xFE80, false } },
         { 0x0622, { 0xFE81, 0xFE82, 0xFE81, 0xFE82, false } },
@@ -107,17 +161,45 @@ inline const CharForms* GetCharForms(wchar_t c)
         { 0x067E, { 0xFB56, 0xFB57, 0xFB58, 0xFB59, true  } }, // پ
         { 0x0686, { 0xFB7A, 0xFB7B, 0xFB7C, 0xFB7D, true  } }, // چ
         { 0x0698, { 0xFB8A, 0xFB8B, 0xFB8A, 0xFB8B, false } }, // ژ
-        { 0x06A9, { 0xFB8E, 0xFB8F, 0xFB90, 0xFB91, true  } }, // ک (فارسی)
+        { 0x06A9, { 0xFB8E, 0xFB8F, 0xFEDB, 0xFEDC, true  } }, // ک (فارسی)
         { 0x06AF, { 0xFB92, 0xFB93, 0xFB94, 0xFB95, true  } }, // گ
-        { 0x06CC, { 0xFBFC, 0xFBFD, 0xFBFE, 0xFBFF, true  } }, // ی (فارسی)
+        { 0x06CC, { 0xFEEF, 0xFEF0, 0xFEF3, 0xFEF4, true  } }, // ی (فارسی - Presentation Forms-B universal)
     };
+    count = sizeof(kTable) / sizeof(kTable[0]);
+    return kTable;
+}
 
-    for (const auto& entry : kTable)
+inline const CharForms* GetCharForms(wchar_t c)
+{
+    size_t count = 0;
+    const CharMapping* table = GetCharMappingTable(count);
+    for (size_t i = 0; i < count; ++i)
     {
-        if (entry.base == c)
-            return &entry.forms;
+        if (table[i].base == c)
+            return &table[i].forms;
     }
     return nullptr;
+}
+
+inline std::wstring PresentationFormToBase(wchar_t c)
+{
+    // Ligatures Lam-Alef
+    if (c == 0xFEFB || c == 0xFEFC) return L"\x0644\x0627";
+    if (c == 0xFEF5 || c == 0xFEF6) return L"\x0644\x0622";
+    if (c == 0xFEF7 || c == 0xFEF8) return L"\x0644\x0623";
+    if (c == 0xFEF9 || c == 0xFEFA) return L"\x0644\x0625";
+
+    size_t count = 0;
+    const CharMapping* table = GetCharMappingTable(count);
+    for (size_t i = 0; i < count; ++i)
+    {
+        const auto& f = table[i].forms;
+        if (c == f.isolated || c == f.finalForm || c == f.initial || c == f.medial)
+        {
+            return std::wstring(1, table[i].base);
+        }
+    }
+    return std::wstring(1, c);
 }
 
 inline bool CanConnectToPrevious(wchar_t c)
@@ -204,10 +286,10 @@ inline std::wstring ShapeWord(const std::wstring& word)
     return shaped;
 }
 
-// Full bidirectional layout & shaping for GoldSrc LTR text renderers
-inline std::wstring ShapeAndBiDi(const std::wstring& text)
+// Un-shapes Presentation Forms and restores logical RTL Persian Unicode
+inline std::wstring UnshapeAndBiDi(const std::wstring& text)
 {
-    if (!ContainsPersian(text))
+    if (!HasPresentationForms(text))
         return text;
 
     struct Token
@@ -221,10 +303,77 @@ inline std::wstring ShapeAndBiDi(const std::wstring& text)
     while (i < text.size())
     {
         wchar_t c = text[i];
-        if (IsPersianOrArabic(c))
+        if (HasPresentationForms(c) || IsRawPersianOrArabic(c))
         {
             std::wstring word;
-            while (i < text.size() && IsPersianOrArabic(text[i]))
+            while (i < text.size() && (HasPresentationForms(text[i]) || IsRawPersianOrArabic(text[i])))
+            {
+                word.push_back(text[i]);
+                i++;
+            }
+            // Reverse visual glyphs back to logical order
+            std::reverse(word.begin(), word.end());
+            std::wstring unshaped;
+            for (wchar_t ch : word)
+            {
+                unshaped += PresentationFormToBase(ch);
+            }
+            tokens.push_back({ unshaped, true });
+        }
+        else if (c == L' ' || c == L'\t')
+        {
+            std::wstring sp;
+            while (i < text.size() && (text[i] == L' ' || text[i] == L'\t'))
+            {
+                sp.push_back(text[i]);
+                i++;
+            }
+            tokens.push_back({ sp, false });
+        }
+        else
+        {
+            std::wstring other;
+            while (i < text.size() && !HasPresentationForms(text[i]) && !IsRawPersianOrArabic(text[i]) && text[i] != L' ' && text[i] != L'\t')
+            {
+                other.push_back(text[i]);
+                i++;
+            }
+            tokens.push_back({ other, false });
+        }
+    }
+
+    // Reverse tokens back to logical reading order
+    std::reverse(tokens.begin(), tokens.end());
+
+    std::wstring result;
+    for (const auto& t : tokens)
+    {
+        result += t.content;
+    }
+    return result;
+}
+
+// Full bidirectional layout & shaping for GoldSrc LTR text renderers
+inline std::wstring ShapeAndBiDi(const std::wstring& text)
+{
+    if (!NeedsPersianShaping(text))
+        return text;
+
+    struct Token
+    {
+        std::wstring content;
+        bool isPersian;
+    };
+
+    std::vector<Token> tokens;
+    size_t i = 0;
+    while (i < text.size())
+    {
+        wchar_t c = text[i];
+        if (IsRawPersianOrArabic(c))
+        {
+            std::wstring word;
+            while (i < text.size() && IsRawPersianOrArabic(text[i]))
             {
                 word.push_back(text[i]);
                 i++;
@@ -248,7 +397,7 @@ inline std::wstring ShapeAndBiDi(const std::wstring& text)
         {
             // Non-Persian token (numbers, english words, punctuation)
             std::wstring nonRtl;
-            while (i < text.size() && !IsPersianOrArabic(text[i]) && text[i] != L' ' && text[i] != L'\t')
+            while (i < text.size() && !IsRawPersianOrArabic(text[i]) && text[i] != L' ' && text[i] != L'\t')
             {
                 nonRtl.push_back(text[i]);
                 i++;

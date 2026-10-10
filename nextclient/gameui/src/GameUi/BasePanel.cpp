@@ -1001,8 +1001,8 @@ void CBasePanel::DrawLeftClockWidget(void)
     if (!hFont) return;
 
     // Symmetrical positioning matching the right chat preview:
-    int cardW = (int)(280.0f * scale + 0.5f);
-    int cardH = (int)(80.0f * scale + 0.5f);
+    int cardW = (int)(290.0f * scale + 0.5f);
+    int cardH = (int)(84.0f * scale + 0.5f);
     int cardX = (int)(24.0f * scale + 0.5f);
     int cardY = (int)(75.0f * scale + 0.5f);
 
@@ -1034,7 +1034,7 @@ void CBasePanel::DrawLeftClockWidget(void)
 
     curY += (int)(18.0f * scale + 0.5f);
 
-    // 5. Big Digital Clock (HH : MM - Clean Hour & Minute, No Seconds)
+    // 5. Big Digital Clock & Persian Day of Week
     time_t now = time(nullptr);
     // Iran Standard Time (UTC+03:30 = +12600 seconds)
     time_t iranTime = now + 12600;
@@ -1044,12 +1044,53 @@ void CBasePanel::DrawLeftClockWidget(void)
     wchar_t wClock[32]{};
     swprintf_s(wClock, L"%02d : %02d", tmIran.tm_hour, tmIran.tm_min);
 
+    // Weekday in Persian
+    // tm_wday: 0 = Sunday, 1 = Monday, 2 = Tuesday, 3 = Wednesday, 4 = Thursday, 5 = Friday, 6 = Saturday
+    const wchar_t* kWeekDays[7] = {
+        L"یک‌شنبه",   // 0: Sunday
+        L"دوشنبه",     // 1: Monday
+        L"سه‌شنبه",    // 2: Tuesday
+        L"چهارشنبه",   // 3: Wednesday
+        L"پنج‌شنبه",   // 4: Thursday
+        L"جمعه",       // 5: Friday
+        L"شنبه"        // 6: Saturday
+    };
+
+    int wdayIdx = tmIran.tm_wday;
+    if (wdayIdx < 0 || wdayIdx > 6)
+        wdayIdx = 0;
+
+    std::wstring rawDay = kWeekDays[wdayIdx];
+    std::wstring shapedDay = Persian::ShapeAndBiDi(rawDay);
+
+    int clockW = 0, clockH = 0;
+    vgui2::surface()->GetTextSize(hFontLarge, wClock, clockW, clockH);
+
     vgui2::surface()->DrawSetTextFont(hFontLarge);
     vgui2::surface()->DrawSetTextColor(Color(255, 220, 85, 255)); // Radiant Esports Gold
     vgui2::surface()->DrawSetTextPos(cardX + padX, curY);
     vgui2::surface()->DrawPrintText(wClock, wcslen(wClock));
 
-    curY += (int)(22.0f * scale + 0.5f);
+    // Draw Day of Week Badge next to the digital clock
+    int dayW = 0, dayH = 0;
+    vgui2::surface()->GetTextSize(hFontBold ? hFontBold : hFont, shapedDay.c_str(), dayW, dayH);
+
+    int dayBadgeX = cardX + padX + clockW + (int)(14.0f * scale + 0.5f);
+    int badgePadX = (int)(7.0f * scale + 0.5f);
+    int badgePadY = (int)(2.0f * scale + 0.5f);
+    int badgeY = curY + (int)(3.0f * scale + 0.5f);
+
+    vgui2::surface()->DrawSetColor(Color(0, 180, 255, 35));
+    vgui2::surface()->DrawFilledRect(dayBadgeX - badgePadX, badgeY - badgePadY, dayBadgeX + dayW + badgePadX, badgeY + dayH + badgePadY);
+    vgui2::surface()->DrawSetColor(Color(0, 205, 255, 110));
+    vgui2::surface()->DrawOutlinedRect(dayBadgeX - badgePadX, badgeY - badgePadY, dayBadgeX + dayW + badgePadX, badgeY + dayH + badgePadY);
+
+    vgui2::surface()->DrawSetTextFont(hFontBold ? hFontBold : hFont);
+    vgui2::surface()->DrawSetTextColor(Color(0, 240, 255, 255)); // Vibrant Neon Cyan
+    vgui2::surface()->DrawSetTextPos(dayBadgeX, badgeY);
+    vgui2::surface()->DrawPrintText(shapedDay.c_str(), shapedDay.size());
+
+    curY += (int)(23.0f * scale + 0.5f);
 
     // 6. Subtext: Accurate Jalali (Solar Hijri) Date + Gregorian Date
     int gy = tmIran.tm_year + 1900;
