@@ -193,6 +193,14 @@ if (-not $PatchOnly) {
                 $sliceMb = [math]::Round((Get-Item -LiteralPath $binSlice).Length / 1MB, 2)
                 Write-Host "    -> $binSlice ($sliceMb MB)" -ForegroundColor Green
             }
+
+            $editionFolder = if ($Edition -eq "Home") { "نسخه خونگی" } else { "نسخه گیمنتی" }
+            $editionTargetDir = Join-Path $rootDir "installer\output\$editionFolder"
+            if (-not (Test-Path -LiteralPath $editionTargetDir)) {
+                New-Item -ItemType Directory -Force -Path $editionTargetDir | Out-Null
+            }
+            Copy-Item -LiteralPath $compiledExe -Destination (Join-Path $editionTargetDir "Allclient-Setup.exe") -Force
+            Write-OK "Copied to edition folder: $editionTargetDir\Allclient-Setup.exe"
         } else {
             throw "Inno Setup compilation failed."
         }
